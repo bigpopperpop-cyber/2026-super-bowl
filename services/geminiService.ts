@@ -1,22 +1,20 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
 
-// Safe access to environment variables
-const getApiKey = () => {
-  try {
-    return (typeof process !== 'undefined' && process.env.API_KEY) || '';
-  } catch {
-    return '';
-  }
-};
-
-const ai = new GoogleGenAI({ apiKey: getApiKey() });
+// process.env.API_KEY is replaced at build time by Vite or shimmed in index.html
+const apiKey = process.env.API_KEY || '';
+const ai = new GoogleGenAI({ apiKey });
 
 export const getAICommentary = async (
   messages: any[],
   gameState: any,
   leaderboard: any[]
 ) => {
+  if (!apiKey) {
+    console.warn("Gemini API Key missing. Commentary disabled.");
+    return "The betting floor is heating up! Who's taking the over?";
+  }
+
   try {
     const standings = leaderboard
       .slice(0, 5)
@@ -46,6 +44,8 @@ export const getAICommentary = async (
 };
 
 export const generatePropBets = async () => {
+  if (!apiKey) return [];
+  
   try {
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
@@ -58,7 +58,7 @@ export const generatePropBets = async () => {
             type: Type.OBJECT,
             properties: {
               question: { type: Type.STRING, description: "A clear betting question" },
-              odds: { type: Type.NUMBER, description: "The payout multiplier (kept for UI consistency, usually 2.0)" },
+              odds: { type: Type.NUMBER, description: "The payout multiplier" },
               category: { type: Type.STRING, description: "One of: Game, Player, Entertainment, Stats" },
               options: { 
                 type: Type.ARRAY, 
