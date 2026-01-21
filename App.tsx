@@ -18,6 +18,7 @@ const App: React.FC = () => {
   const [copied, setCopied] = useState(false);
   const [partyCode, setPartyCode] = useState<string>('');
   const [isSyncing, setIsSyncing] = useState(false);
+  const [lastSyncedAt, setLastSyncedAt] = useState<number>(0);
   const [gameState, setGameState] = useState<GameState>({
     quarter: 1,
     timeRemaining: "15:00",
@@ -25,111 +26,33 @@ const App: React.FC = () => {
     possession: 'home'
   });
   
-  // Login form states
   const [loginUsername, setLoginUsername] = useState('');
   const [loginRealName, setLoginRealName] = useState('');
   const [loginPartyCode, setLoginPartyCode] = useState('');
   const [selectedAvatar, setSelectedAvatar] = useState(AVATARS[0]);
 
-  const lastSyncRef = useRef<number>(0);
+  // Use a Ref to hold the absolute latest state to avoid stale closures in sync loops
+  const stateRef = useRef({
+    users,
+    userBets,
+    messages,
+    propBets,
+    gameState,
+    updatedAt: Date.now()
+  });
 
-  // Load local cache
+  // Keep Ref updated on every state change
   useEffect(() => {
-    const savedUsers = localStorage.getItem('sb_users');
-    const savedBets = localStorage.getItem('sb_bets');
-    const savedMessages = localStorage.getItem('sb_messages');
-    const savedProps = localStorage.getItem('sb_props');
-    const savedState = localStorage.getItem('sb_gamestate');
-    const savedCode = localStorage.getItem('sb_party_code');
-    const savedUser = localStorage.getItem('sb_current_user');
+    stateRef.current = {
+      users,
+      userBets,
+      messages,
+      propBets,
+      gameState,
+      updatedAt: Date.now()
+    };
     
-    if (savedUsers) setUsers(JSON.parse(savedUsers));
-    if (savedBets) setUserBets(JSON.parse(savedBets));
-    if (savedMessages) setMessages(JSON.parse(savedMessages));
-    if (savedProps) setPropBets(JSON.parse(savedProps));
-    if (savedState) setGameState(JSON.parse(savedState));
-    if (savedCode) setPartyCode(savedCode);
-    if (savedUser) setCurrentUser(JSON.parse(savedUser));
-  }, []);
-
-  // Sync to Cloud Logic
-  const syncWithCloud = useCallback(async (push: boolean = false) => {
-    if (!partyCode) return;
-    
-    const url = `https://api.keyvalue.xyz/sbparty_${partyCode}/state`;
-    
-    try {
-      setIsSyncing(true);
-      if (push) {
-        await fetch(url, {
-          method: 'POST',
-          body: JSON.stringify({
-            users,
-            userBets,
-            messages,
-            propBets,
-            gameState,
-            updatedAt: Date.now()
-          }),
-        });
-      } else {
-        const response = await fetch(url);
-        if (response.ok) {
-          const cloudData = await response.json();
-          if (cloudData && cloudData.updatedAt > lastSyncRef.current) {
-            // Merging logic: Keep local user if exists, but merge others
-            setUsers(prev => {
-              const userMap = new Map(prev.map(u => [u.id, u]));
-              (cloudData.users || []).forEach((u: User) => userMap.set(u.id, u));
-              return Array.from(userMap.values());
-            });
-            
-            setUserBets(prev => {
-              const betMap = new Map(prev.map(b => [b.id, b]));
-              (cloudData.userBets || []).forEach((b: UserBet) => betMap.set(b.id, b));
-              return Array.from(betMap.values());
-            });
-
-            setMessages(prev => {
-              const msgMap = new Map(prev.map(m => [m.id, m]));
-              (cloudData.messages || []).forEach((m: ChatMessage) => msgMap.set(m.id, m));
-              return Array.from(msgMap.values()).sort((a, b) => a.timestamp - b.timestamp);
-            });
-
-            setPropBets(prev => {
-              const propMap = new Map(prev.map(p => [p.id, p]));
-              (cloudData.propBets || []).forEach((p: PropBet) => {
-                // Only take cloud updates if they are resolved (to avoid partial state conflicts)
-                const existing = propMap.get(p.id);
-                if (p.resolved || !existing) propMap.set(p.id, p);
-              });
-              return Array.from(propMap.values());
-            });
-
-            // Authority over GameState: the user who joined first (alphabetically)
-            // or just simple last-write-wins for this simple implementation
-            if (cloudData.gameState) setGameState(cloudData.gameState);
-            
-            lastSyncRef.current = cloudData.updatedAt;
-          }
-        }
-      }
-    } catch (e) {
-      console.warn("Cloud Sync failed. Operating in local mode.", e);
-    } finally {
-      setIsSyncing(false);
-    }
-  }, [partyCode, users, userBets, messages, propBets, gameState]);
-
-  // Periodic polling
-  useEffect(() => {
-    if (!partyCode) return;
-    const interval = setInterval(() => syncWithCloud(false), 5000);
-    return () => clearInterval(interval);
-  }, [partyCode, syncWithCloud]);
-
-  // Persist to local storage as backup
-  useEffect(() => {
+    // Persist to local storage
     localStorage.setItem('sb_users', JSON.stringify(users));
     localStorage.setItem('sb_bets', JSON.stringify(userBets));
     localStorage.setItem('sb_messages', JSON.stringify(messages));
@@ -138,6 +61,98 @@ const App: React.FC = () => {
     localStorage.setItem('sb_party_code', partyCode);
     if (currentUser) localStorage.setItem('sb_current_user', JSON.stringify(currentUser));
   }, [users, userBets, messages, propBets, gameState, partyCode, currentUser]);
+
+  const syncWithCloud = useCallback(async (push: boolean = false) => {
+    if (!partyCode || partyCode === 'LOCAL') return;
+    
+    // We use a specific, reliable path for the party code
+    const url = `https://api.keyvalue.xyz/sbp_${partyCode.toLowerCase()}/state`;
+    
+    try {
+      setIsSyncing(true);
+      if (push) {
+        // Push the latest data from the Ref (ensures no stale data)
+        const payload = {
+          ...stateRef.current,
+          // Cap messages to 50 for performance and to stay within free KV limits
+          messages: stateRef.current.messages.slice(-50),
+          updatedAt: Date.now()
+        };
+        await fetch(url, {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        });
+        setLastSyncedAt(Date.now());
+      } else {
+        const response = await fetch(url);
+        if (response.ok) {
+          const cloudData = await response.json();
+          // Only merge if the cloud has a newer timestamp OR we haven't synced yet
+          if (cloudData && (cloudData.updatedAt > lastSyncedAt || lastSyncedAt === 0)) {
+            
+            // Merging logic: Use IDs to prevent duplicates
+            if (cloudData.users) {
+              setUsers(prev => {
+                const userMap = new Map(prev.map(u => [u.id, u]));
+                cloudData.users.forEach((u: User) => {
+                  const existing = userMap.get(u.id);
+                  if (!existing || (u.credits !== existing.credits)) userMap.set(u.id, u);
+                });
+                return Array.from(userMap.values());
+              });
+            }
+            
+            if (cloudData.userBets) {
+              setUserBets(prev => {
+                const betMap = new Map(prev.map(b => [b.id, b]));
+                cloudData.userBets.forEach((b: UserBet) => betMap.set(b.id, b));
+                return Array.from(betMap.values());
+              });
+            }
+
+            if (cloudData.messages) {
+              setMessages(prev => {
+                const msgMap = new Map(prev.map(m => [m.id, m]));
+                cloudData.messages.forEach((m: ChatMessage) => msgMap.set(m.id, m));
+                return Array.from(msgMap.values())
+                  .sort((a, b) => a.timestamp - b.timestamp)
+                  .slice(-100); // Keep local buffer healthy
+              });
+            }
+
+            if (cloudData.propBets) {
+              setPropBets(prev => {
+                const propMap = new Map(prev.map(p => [p.id, p]));
+                cloudData.propBets.forEach((p: PropBet) => {
+                  if (p.resolved) propMap.set(p.id, p);
+                });
+                return Array.from(propMap.values());
+              });
+            }
+
+            if (cloudData.gameState) setGameState(cloudData.gameState);
+            setLastSyncedAt(cloudData.updatedAt || Date.now());
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("Cloud Sync issue:", e);
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [partyCode, lastSyncedAt]);
+
+  // Initial Poll and Load
+  useEffect(() => {
+    const savedCode = localStorage.getItem('sb_party_code');
+    const savedUser = localStorage.getItem('sb_current_user');
+    
+    if (savedCode) setPartyCode(savedCode);
+    if (savedUser) setCurrentUser(JSON.parse(savedUser));
+
+    const interval = setInterval(() => syncWithCloud(false), 3500); // Slightly faster polling
+    return () => clearInterval(interval);
+  }, [syncWithCloud]);
 
   const handleCopyLink = () => {
     const shareUrl = partyCode 
@@ -170,8 +185,8 @@ const App: React.FC = () => {
       setCurrentUser(newUser);
     }
     
-    // Immediate sync push after joining
-    setTimeout(() => syncWithCloud(true), 500);
+    // Instant sync trigger
+    setTimeout(() => syncWithCloud(true), 200);
   };
 
   const clearSession = () => {
@@ -179,6 +194,18 @@ const App: React.FC = () => {
       localStorage.clear();
       window.location.reload();
     }
+  };
+
+  const exportData = () => {
+    const data = JSON.stringify(stateRef.current, null, 2);
+    const blob = new Blob([data], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `sblix-backup-${partyCode || 'local'}-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   const autoResolveAllPendingBets = () => {
@@ -205,7 +232,7 @@ const App: React.FC = () => {
             if (uIdx !== -1) {
               updatedUsers[uIdx] = { 
                 ...updatedUsers[uIdx], 
-                credits: updatedUsers[uIdx].credits + points 
+                credits: (updatedUsers[uIdx].credits || 0) + points 
               };
             }
             return { ...ub, status: isWin ? BetStatus.WON : BetStatus.LOST };
@@ -239,7 +266,7 @@ const App: React.FC = () => {
     };
     setUserBets(prev => [...prev, newBet]);
     triggerAICommentary(`I just picked ${selection}! Let's go!`);
-    setTimeout(() => syncWithCloud(true), 100);
+    setTimeout(() => syncWithCloud(true), 200);
   };
 
   const resolveBet = (betId: string, winningOption: string) => {
@@ -264,7 +291,7 @@ const App: React.FC = () => {
        if (freshUser) setCurrentUser(freshUser);
     }
     triggerAICommentary(`Bet result: ${winningOption}!`);
-    setTimeout(() => syncWithCloud(true), 100);
+    setTimeout(() => syncWithCloud(true), 200);
   };
 
   const sendMessage = (text: string) => {
@@ -277,10 +304,12 @@ const App: React.FC = () => {
       timestamp: Date.now()
     };
     setMessages(prev => [...prev, newMsg]);
+    // Immediate push
+    setTimeout(() => syncWithCloud(true), 100);
+    
     if (Math.random() > 0.4) {
       setTimeout(() => triggerAICommentary(text), 1500);
     }
-    setTimeout(() => syncWithCloud(true), 100);
   };
 
   const triggerAICommentary = async (context: string) => {
@@ -295,7 +324,7 @@ const App: React.FC = () => {
       isAI: true
     };
     setMessages(prev => [...prev, aiMsg]);
-    setTimeout(() => syncWithCloud(true), 100);
+    setTimeout(() => syncWithCloud(true), 200);
   };
 
   if (!currentUser) {
@@ -378,7 +407,13 @@ const App: React.FC = () => {
             </div>
           </form>
 
-          <div className="mt-6 text-center">
+          <div className="mt-8 pt-6 border-t border-white/5 flex flex-col gap-3 text-center">
+            <button 
+              onClick={exportData}
+              className="text-[10px] text-blue-400 uppercase font-black hover:text-blue-300 flex items-center justify-center gap-2"
+            >
+              <i className="fas fa-download"></i> Export Party Data Backup
+            </button>
             <button onClick={clearSession} className="text-[9px] text-slate-600 uppercase font-black hover:text-slate-400">
               Reset Session Data
             </button>
@@ -397,18 +432,15 @@ const App: React.FC = () => {
             <div className="flex bg-slate-950 rounded-lg px-2 py-1 items-center gap-1.5 border border-slate-800 text-[10px]">
               <span className="font-orbitron font-bold text-slate-200">Q{gameState.quarter}</span>
               <span className="text-slate-500 font-bold">{gameState.score.home}-{gameState.score.away}</span>
-              {gameState.quarter < 4 && (
-                <button 
-                  onClick={autoResolveAllPendingBets}
-                  className="ml-1 bg-red-600/20 text-red-500 px-1.5 py-0.5 rounded-md font-black uppercase text-[8px] border border-red-500/20"
-                >
-                  End Q3
-                </button>
-              )}
             </div>
             {partyCode && partyCode !== 'LOCAL' && (
-              <div className="flex items-center gap-1.5 bg-blue-600/10 border border-blue-500/20 rounded-md px-2 py-0.5 text-[8px] font-black uppercase tracking-tighter text-blue-400">
-                <i className={`fas fa-cloud ${isSyncing ? 'animate-pulse' : ''}`}></i>
+              <div 
+                className={`flex items-center gap-1.5 rounded-md px-2 py-0.5 text-[8px] font-black uppercase tracking-tighter border transition-all ${
+                  isSyncing ? 'bg-blue-600/20 border-blue-500/50 text-blue-400 animate-pulse' : 'bg-green-600/10 border-green-500/20 text-green-500'
+                }`}
+                title={`Last synced: ${new Date(lastSyncedAt).toLocaleTimeString()}`}
+              >
+                <i className={`fas ${isSyncing ? 'fa-sync-alt fa-spin' : 'fa-check'}`}></i>
                 {partyCode}
               </div>
             )}
@@ -470,6 +502,15 @@ const App: React.FC = () => {
           ))}
         </div>
       </nav>
+      {/* Hidden button for host resolution testing or actual use */}
+      {currentUser.username.toLowerCase() === 'host' && activeTab === 'bets' && (
+        <button 
+          onClick={autoResolveAllPendingBets}
+          className="fixed bottom-24 right-4 w-12 h-12 bg-red-600 rounded-full shadow-2xl z-50 flex items-center justify-center text-white border-2 border-white/20"
+        >
+          <i className="fas fa-gavel"></i>
+        </button>
+      )}
     </div>
   );
 };
