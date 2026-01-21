@@ -23,6 +23,7 @@ const App: React.FC = () => {
     possession: 'home'
   });
   const [loginUsername, setLoginUsername] = useState('');
+  const [loginRealName, setLoginRealName] = useState('');
   const [selectedAvatar, setSelectedAvatar] = useState(AVATARS[0]);
 
   useEffect(() => {
@@ -55,7 +56,7 @@ const App: React.FC = () => {
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!loginUsername.trim()) return;
+    if (!loginUsername.trim() || !loginRealName.trim()) return;
 
     const existingUser = users.find(u => u.username.toLowerCase() === loginUsername.toLowerCase());
     if (existingUser) {
@@ -64,6 +65,7 @@ const App: React.FC = () => {
       const newUser: User = {
         id: crypto.randomUUID(),
         username: loginUsername.trim(),
+        realName: loginRealName.trim(),
         avatar: selectedAvatar,
         credits: 0 
       };
@@ -145,9 +147,10 @@ const App: React.FC = () => {
       if (ub.betId === betId && ub.status === BetStatus.PENDING) {
         const isWin = ub.selection === winningOption;
         const points = isWin ? 10 : -3;
-        const uIdx = updatedUsers.findIndex(u => u.id === ub.userId);
-        if (uIdx !== -1) {
-          updatedUsers[uIdx] = { ...updatedUsers[uIdx], credits: updatedUsers[uIdx].credits + points };
+        const uIdx = updatedUsers.findIndex(u => u.id === updatedUsers[uIdx]?.id); // safer find
+        const foundIdx = updatedUsers.findIndex(u => u.id === ub.userId);
+        if (foundIdx !== -1) {
+          updatedUsers[foundIdx] = { ...updatedUsers[foundIdx], credits: updatedUsers[foundIdx].credits + points };
         }
         return { ...ub, status: isWin ? BetStatus.WON : BetStatus.LOST };
       }
@@ -193,45 +196,57 @@ const App: React.FC = () => {
 
   if (!currentUser) {
     return (
-      <div className="fixed inset-0 flex items-center justify-center p-4 nfl-gradient">
-        <div className="max-w-md w-full glass-card p-6 rounded-[2rem] shadow-2xl border-white/20">
+      <div className="fixed inset-0 flex items-center justify-center p-4 nfl-gradient overflow-y-auto">
+        <div className="max-w-md w-full glass-card p-6 rounded-[2rem] shadow-2xl border-white/20 my-auto">
           <div className="text-center mb-6">
             <div className="w-16 h-16 bg-white rounded-2xl mx-auto flex items-center justify-center mb-3 shadow-xl rotate-3">
               <i className="fas fa-football-ball text-red-600 text-3xl"></i>
             </div>
             <h1 className="text-2xl font-black font-orbitron tracking-tighter">SBLIX <span className="text-red-500">MASCOTS</span></h1>
-            <p className="text-slate-400 font-bold uppercase tracking-widest text-[9px] mt-1">Pick Mascot & Start Betting</p>
+            <p className="text-slate-400 font-bold uppercase tracking-widest text-[9px] mt-1">Pick Mascot & Join The Board</p>
           </div>
 
-          <form onSubmit={handleLogin} className="space-y-5">
-            <div>
-              <div className="flex flex-wrap gap-2 justify-center max-h-40 overflow-y-auto p-3 rounded-2xl bg-black/40 custom-scrollbar border border-white/5">
-                {AVATARS.map(a => (
-                  <button
-                    key={a}
-                    type="button"
-                    onClick={() => setSelectedAvatar(a)}
-                    className={`w-11 h-11 text-xl flex items-center justify-center rounded-xl transition-all active:scale-90 ${selectedAvatar === a ? 'bg-red-600 scale-110 shadow-lg border-2 border-white' : 'bg-slate-800'}`}
-                  >
-                    {a}
-                  </button>
-                ))}
-              </div>
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div className="flex flex-wrap gap-2 justify-center max-h-32 overflow-y-auto p-3 rounded-2xl bg-black/40 custom-scrollbar border border-white/5">
+              {AVATARS.map(a => (
+                <button
+                  key={a}
+                  type="button"
+                  onClick={() => setSelectedAvatar(a)}
+                  className={`w-10 h-10 text-xl flex items-center justify-center rounded-xl transition-all active:scale-90 ${selectedAvatar === a ? 'bg-red-600 scale-110 shadow-lg border-2 border-white' : 'bg-slate-800'}`}
+                >
+                  {a}
+                </button>
+              ))}
             </div>
 
-            <div className="space-y-4">
-              <input
-                autoFocus
-                type="text"
-                placeholder="Enter Your Name"
-                value={loginUsername}
-                onChange={(e) => setLoginUsername(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-700 rounded-xl px-5 py-4 text-white outline-none focus:border-red-500 font-bold text-center placeholder:text-slate-600 shadow-inner"
-              />
+            <div className="space-y-3">
+              <div>
+                <label className="text-[10px] font-black uppercase text-slate-500 ml-1 mb-1 block">Chat Handle</label>
+                <input
+                  type="text"
+                  placeholder="e.g. TouchdownKing"
+                  value={loginUsername}
+                  onChange={(e) => setLoginUsername(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white outline-none focus:border-blue-500 font-bold text-center placeholder:text-slate-700 shadow-inner"
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] font-black uppercase text-slate-500 ml-1 mb-1 block">Real Name (1st + Last Initial)</label>
+                <input
+                  type="text"
+                  placeholder="e.g. John D."
+                  value={loginRealName}
+                  onChange={(e) => setLoginRealName(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white outline-none focus:border-red-500 font-bold text-center placeholder:text-slate-700 shadow-inner"
+                />
+              </div>
 
               <button
                 type="submit"
-                className="w-full py-5 bg-white text-slate-950 rounded-xl font-black font-orbitron hover:bg-slate-200 transition-all shadow-xl active:scale-95 uppercase tracking-widest text-sm"
+                disabled={!loginUsername.trim() || !loginRealName.trim()}
+                className="w-full py-4 bg-white text-slate-950 rounded-xl font-black font-orbitron hover:bg-slate-200 transition-all shadow-xl active:scale-95 uppercase tracking-widest text-sm disabled:opacity-50"
               >
                 JOIN THE PARTY
               </button>
@@ -239,7 +254,7 @@ const App: React.FC = () => {
               <button
                 type="button"
                 onClick={handleCopyLink}
-                className="w-full py-3 bg-slate-800/50 text-slate-400 border border-slate-700 rounded-xl font-black text-[10px] uppercase tracking-widest active:scale-95 transition-all flex items-center justify-center gap-2"
+                className="w-full py-2.5 bg-slate-800/50 text-slate-400 border border-slate-700 rounded-xl font-black text-[9px] uppercase tracking-widest active:scale-95 transition-all flex items-center justify-center gap-2"
               >
                 {copied ? <><i className="fas fa-check text-green-400"></i> Copied!</> : <><i className="fas fa-link"></i> Copy Invite Link</>}
               </button>
@@ -248,7 +263,7 @@ const App: React.FC = () => {
 
           <div className="mt-6 text-center">
             <button onClick={clearSession} className="text-[9px] text-slate-600 uppercase font-black hover:text-slate-400">
-              Reset Game Data
+              Reset Session Data
             </button>
           </div>
         </div>
@@ -308,7 +323,7 @@ const App: React.FC = () => {
            )}
 
            {activeTab === 'leaderboard' && (
-             <Leaderboard users={users} currentUser={currentUser} />
+             <Leaderboard users={users} currentUser={currentUser} propBets={propBets} userBets={userBets} />
            )}
         </div>
       </main>

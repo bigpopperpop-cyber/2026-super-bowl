@@ -1,7 +1,8 @@
 
 export interface User {
   id: string;
-  username: string;
+  username: string; // This is the chat name/handle
+  realName: string; // This is the real name (e.g., John D.)
   avatar: string;
   credits: number;
 }
