@@ -11,71 +11,73 @@ export const INITIAL_PROP_BETS: PropBet[] = [
   },
   {
     id: '2',
-    question: "National Anthem Length: Over or Under 121.5 seconds?",
-    odds: 1.85,
-    category: 'Entertainment',
-    resolved: false,
-    options: ['Over (Longer)', 'Under (Shorter)']
-  },
-  {
-    id: '3',
-    question: "Which team will score the first Touchdown?",
-    odds: 1.9,
-    category: 'Game',
-    resolved: false,
-    options: ['Home Team', 'Away Team', 'No TD Scored']
-  },
-  {
-    id: '4',
-    question: "Color of the Gatorade Shower on the winning coach?",
-    odds: 4.0,
-    category: 'Entertainment',
-    resolved: false,
-    options: ['Orange', 'Blue', 'Clear/Water', 'Yellow/Green', 'Purple', 'Red']
-  },
-  {
-    id: '5',
-    question: "Halftime Show: Will the headliner wear a hat at any point?",
+    question: "National Anthem: Will the singer wear a hat?",
     odds: 2.1,
     category: 'Entertainment',
     resolved: false,
     options: ['Yes', 'No']
   },
   {
-    id: '6',
-    question: "Total Game Points: Over or Under 47.5?",
+    id: '3',
+    question: "First Team to record a 1st Down?",
     odds: 1.9,
-    category: 'Stats',
+    category: 'Game',
     resolved: false,
-    options: ['Over 47.5', 'Under 47.5']
+    options: ['Home Team', 'Away Team']
   },
   {
-    id: '7',
-    question: "Will there be a missed Field Goal or Extra Point?",
-    odds: 2.4,
-    category: 'Game',
+    id: '4',
+    question: "Will there be a Touchdown scored in the 1st Quarter?",
+    odds: 2.2,
+    category: 'Stats',
     resolved: false,
     options: ['Yes', 'No']
   },
   {
-    id: '8',
-    question: "MVP Award: Which position wins it?",
-    odds: 2.8,
-    category: 'Player',
+    id: '5',
+    question: "Leading team at Halftime?",
+    odds: 1.9,
+    category: 'Game',
     resolved: false,
-    options: ['Quarterback', 'Wide Receiver', 'Running Back', 'Defense/Other']
+    options: ['Home Team', 'Away Team', 'Tie']
+  },
+  {
+    id: '6',
+    question: "Halftime Show: Will there be a Guest Performer?",
+    odds: 1.5,
+    category: 'Entertainment',
+    resolved: false,
+    options: ['Yes', 'No']
+  },
+  {
+    id: '7',
+    question: "Total Points at end of 3rd Quarter: Over or Under 34.5?",
+    odds: 1.9,
+    category: 'Stats',
+    resolved: false,
+    options: ['Over 34.5', 'Under 34.5']
+  },
+  {
+    id: '8',
+    question: "Which team will be leading at the end of the 3rd Quarter?",
+    odds: 1.8,
+    category: 'Game',
+    resolved: false,
+    options: ['Home Team', 'Away Team', 'Tie']
   }
 ];
 
 export const AVATARS = [
-  '👯‍♀️', // Cheerleaders
-  '🤸‍♀️', // Cartwheel
-  '💃', // Dancing
-  '📣', // Megaphone
-  '🎀', // Hair Ribbon
-  '🙌', // Spirit Fingers
-  '✨', // Sparkle
-  '👟', // Cheer Shoes
-  '🙋‍♀️', // Hand Raise
-  '🙆‍♀️'  // Performance Pose
+  '🦅', // Eagles/Seahawks/Falcons/Cardinals/Ravens
+  '🦁', // Lions
+  '🐯', // Bengals
+  '🐆', // Jaguars
+  '🐎', // Colts/Broncos
+  '🐃', // Bills/Texans
+  '🐻', // Bears
+  '🐏', // Rams
+  '🐬', // Dolphins
+  '⚔️', // Raiders/Vikings/Buccaneers/Titans
+  '🧀', // Packers (Cheesehead)
+  '⚜️'  // Saints
 ];

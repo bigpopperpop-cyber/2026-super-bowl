@@ -26,7 +26,7 @@ const BettingPanel: React.FC<BettingPanelProps> = ({
   const categories: CategoryFilter[] = ['All', 'Game', 'Player', 'Entertainment', 'Stats'];
 
   const filteredBets = useMemo(() => {
-    let bets = [...propBets]; // No longer reversing as it's a fixed list
+    let bets = [...propBets];
     if (categoryFilter !== 'All') {
       bets = bets.filter(b => b.category === categoryFilter);
     }
@@ -63,10 +63,10 @@ const BettingPanel: React.FC<BettingPanelProps> = ({
           <div>
             <h2 className="text-xl font-orbitron flex items-center gap-2 text-white">
               <i className="fas fa-ticket-alt text-yellow-400"></i>
-              Party Prop Pool
+              3rd Quarter Prop Pool
             </h2>
             <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold mt-1">
-              Correct: +10 Points | Wrong: -3 Points
+              Contest Ends after Q3 | Correct: +10 | Wrong: -3
             </p>
           </div>
         </div>

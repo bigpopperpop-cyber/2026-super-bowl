@@ -156,7 +156,7 @@ const App: React.FC = () => {
 
           <form onSubmit={handleLogin} className="space-y-6">
             <div>
-              <label className="block text-xs font-bold text-slate-400 uppercase mb-2 text-center">Select Your Cheerleader Avatar</label>
+              <label className="block text-xs font-bold text-slate-400 uppercase mb-2 text-center">Select Your NFL Mascot</label>
               <div className="flex flex-wrap gap-2 justify-center">
                 {AVATARS.map(a => (
                   <button
@@ -176,7 +176,7 @@ const App: React.FC = () => {
               <input
                 autoFocus
                 type="text"
-                placeholder="Ex: SpiritSara"
+                placeholder="Ex: MascotMike"
                 value={loginUsername}
                 onChange={(e) => setLoginUsername(e.target.value)}
                 className="w-full bg-slate-900/50 border border-slate-700 rounded-xl px-4 py-3 text-white outline-none focus:border-red-500 font-semibold text-center"
