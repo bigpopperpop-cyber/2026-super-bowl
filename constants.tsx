@@ -1,10 +1,9 @@
-
 import { PropBet } from './types';
 
 export const INITIAL_PROP_BETS: PropBet[] = [
   {
     id: '1',
-    question: "Who will win the coin toss?",
+    question: "Coin Toss: Which side will land up?",
     odds: 1.9,
     category: 'Game',
     resolved: false,
@@ -12,55 +11,71 @@ export const INITIAL_PROP_BETS: PropBet[] = [
   },
   {
     id: '2',
-    question: "National Anthem length (Over/Under 122.5 seconds)?",
+    question: "National Anthem Length: Over or Under 121.5 seconds?",
     odds: 1.85,
     category: 'Entertainment',
     resolved: false,
-    options: ['Over', 'Under']
+    options: ['Over (Longer)', 'Under (Shorter)']
   },
   {
     id: '3',
-    question: "Total passing yards for the winning QB?",
-    odds: 2.5,
-    category: 'Stats',
+    question: "Which team will score the first Touchdown?",
+    odds: 1.9,
+    category: 'Game',
     resolved: false,
-    options: ['Under 250', '250-300', 'Over 300']
+    options: ['Home Team', 'Away Team', 'No TD Scored']
   },
   {
     id: '4',
-    question: "Which color Gatorade will be poured on the winning coach?",
+    question: "Color of the Gatorade Shower on the winning coach?",
     odds: 4.0,
     category: 'Entertainment',
     resolved: false,
-    options: ['Orange', 'Blue', 'Clear', 'Yellow', 'Purple', 'Red']
+    options: ['Orange', 'Blue', 'Clear/Water', 'Yellow/Green', 'Purple', 'Red']
   },
   {
     id: '5',
-    question: "Will there be a defensive or special teams touchdown?",
-    odds: 3.5,
-    category: 'Game',
+    question: "Halftime Show: Will the headliner wear a hat at any point?",
+    odds: 2.1,
+    category: 'Entertainment',
     resolved: false,
     options: ['Yes', 'No']
   },
   {
     id: '6',
-    question: "Total points scored in the first half?",
+    question: "Total Game Points: Over or Under 47.5?",
     odds: 1.9,
     category: 'Stats',
     resolved: false,
-    options: ['Over 24.5', 'Under 24.5']
+    options: ['Over 47.5', 'Under 47.5']
+  },
+  {
+    id: '7',
+    question: "Will there be a missed Field Goal or Extra Point?",
+    odds: 2.4,
+    category: 'Game',
+    resolved: false,
+    options: ['Yes', 'No']
+  },
+  {
+    id: '8',
+    question: "MVP Award: Which position wins it?",
+    odds: 2.8,
+    category: 'Player',
+    resolved: false,
+    options: ['Quarterback', 'Wide Receiver', 'Running Back', 'Defense/Other']
   }
 ];
 
 export const AVATARS = [
-  '🏈', // Football
-  '🏟️', // Stadium
-  '🏆', // Trophy
-  '👕', // Jersey
-  '🧤', // Receiver Gloves
-  '👟', // Cleats
-  '🚩', // Penalty Flag
-  '🧢', // Coach Cap
-  '🧊', // Ice Bucket (Gatorade Shower)
-  '📣'  // Megaphone
+  '👯‍♀️', // Cheerleaders
+  '🤸‍♀️', // Cartwheel
+  '💃', // Dancing
+  '📣', // Megaphone
+  '🎀', // Hair Ribbon
+  '🙌', // Spirit Fingers
+  '✨', // Sparkle
+  '👟', // Cheer Shoes
+  '🙋‍♀️', // Hand Raise
+  '🙆‍♀️'  // Performance Pose
 ];

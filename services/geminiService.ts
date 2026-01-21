@@ -1,4 +1,4 @@
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI } from "@google/genai";
 
 // Ensure we have a valid key string or fallback
 const apiKey = (typeof process !== 'undefined' && process.env.API_KEY) ? process.env.API_KEY : '';
@@ -17,7 +17,7 @@ export const getAICommentary = async (
   const ai = getAI();
   if (!ai) {
     console.warn("Gemini API Key missing or invalid. AI Commentary disabled.");
-    return "The betting floor is heating up! Who's taking the over?";
+    return "The spirit in here is electric! Who's leading the pack?";
   }
 
   try {
@@ -29,7 +29,7 @@ export const getAICommentary = async (
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
       contents: `You are 'Gerry the Gambler', a legendary, high-energy Super Bowl AI commentator and smack-talk expert. 
-      You are watching a group of guests bet on the game. 
+      You are watching a group of guests bet on the game props. 
       
       STANDINGS: ${standings}
       Current Game State: Quarter ${gameState.quarter}, Score: Home ${gameState.score.home} - Away ${gameState.score.away}.
@@ -37,50 +37,13 @@ export const getAICommentary = async (
       Recent Chat Context:
       ${messages.slice(-5).map(m => `${m.username}: ${m.text}`).join('\n')}
       
-      Your goal: Provide a short, 1-2 sentence reaction. You MUST mention someone from the standings. 
-      If someone has negative points, give them some grief! If someone is winning, call them a 'sharp' or ask if they're fixing the game. 
-      Use heavy sports betting lingo (parlays, spreads, locks, bad beats). Be punchy and hilarious.`,
+      Your goal: Provide a short, 1-2 sentence reaction. Mention someone from the standings. 
+      If someone is winning, celebrate their "spirit". If they're losing, encourage them to "bring it on" for the next quarter. 
+      Use sports betting lingo (parlays, locks, longshots). Be punchy and energetic.`,
     });
-    return response.text || "Standings are looking wild! Someone's about to go bust!";
+    return response.text || "Leaderboard is moving! Someone's about to jump the standings!";
   } catch (error) {
     console.error("Gemini Error:", error);
-    return "Standings are looking wild! Someone's about to go bust!";
-  }
-};
-
-export const generatePropBets = async () => {
-  const ai = getAI();
-  if (!ai) return [];
-  
-  try {
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: "Generate 4 creative and unique Super Bowl prop bets. Include at least one about the halftime show, one about a specific player stat, and one completely random 'weird' bet. These should be questions with 2-4 possible outcomes.",
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.ARRAY,
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              question: { type: Type.STRING, description: "A clear betting question" },
-              odds: { type: Type.NUMBER, description: "The payout multiplier" },
-              category: { type: Type.STRING, description: "One of: Game, Player, Entertainment, Stats" },
-              options: { 
-                type: Type.ARRAY, 
-                items: { type: Type.STRING },
-                description: "2-4 possible outcomes to bet on"
-              }
-            },
-            required: ["question", "odds", "category", "options"]
-          }
-        }
-      }
-    });
-    
-    return JSON.parse(response.text || "[]");
-  } catch (error) {
-    console.error("Error generating bets:", error);
-    return [];
+    return "Leaderboard is moving! Someone's about to jump the standings!";
   }
 };

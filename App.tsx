@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { User, PropBet, UserBet, ChatMessage, GameState, BetStatus } from './types';
 import { INITIAL_PROP_BETS, AVATARS } from './constants';
-import { getAICommentary, generatePropBets } from './services/geminiService';
+import { getAICommentary } from './services/geminiService';
 import BettingPanel from './components/BettingPanel';
 import ChatRoom from './components/ChatRoom';
 import Leaderboard from './components/Leaderboard';
@@ -15,7 +15,6 @@ const App: React.FC = () => {
   const [userBets, setUserBets] = useState<UserBet[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [activeTab, setActiveTab] = useState<TabType>('bets');
-  const [isGeneratingBets, setIsGeneratingBets] = useState(false);
   const [copied, setCopied] = useState(false);
   const [gameState, setGameState] = useState<GameState>({
     quarter: 1,
@@ -70,30 +69,6 @@ const App: React.FC = () => {
     }
   };
 
-  const handleGenerateBets = async () => {
-    setIsGeneratingBets(true);
-    const newBetsData = await generatePropBets();
-    if (newBetsData && newBetsData.length > 0) {
-      const formattedBets: PropBet[] = newBetsData.map((b: any) => ({
-        ...b,
-        id: crypto.randomUUID(),
-        resolved: false
-      }));
-      setPropBets(prev => [...prev, ...formattedBets]);
-      
-      const aiMsg: ChatMessage = {
-        id: crypto.randomUUID(),
-        userId: 'ai-bot',
-        username: 'Gerry the Gambler',
-        text: `The Prop Lab is cooking! Just dropped ${newBetsData.length} fresh lines. Don't go broke on these!`,
-        timestamp: Date.now(),
-        isAI: true
-      };
-      setMessages(prev => [...prev, aiMsg]);
-    }
-    setIsGeneratingBets(false);
-  };
-
   const placeBet = (betId: string, amount: number, selection: string) => {
     if (!currentUser) return;
     
@@ -108,7 +83,7 @@ const App: React.FC = () => {
     };
 
     setUserBets(prev => [...prev, newBet]);
-    triggerAICommentary(`I just picked ${selection}! Let's see if I actually know football.`);
+    triggerAICommentary(`I just picked ${selection}! Good luck to everyone else!`);
   };
 
   const resolveBet = (betId: string, winningOption: string) => {
@@ -135,7 +110,7 @@ const App: React.FC = () => {
        const freshUser = updatedUsers.find(u => u.id === currentUser.id);
        if (freshUser) setCurrentUser(freshUser);
     }
-    triggerAICommentary(`Bet resolved! Check the leaderboard to see who's crying.`);
+    triggerAICommentary(`Result is in for the ${winningOption} bet! Points have been updated.`);
   };
 
   const sendMessage = (text: string) => {
@@ -175,20 +150,20 @@ const App: React.FC = () => {
             <div className="w-20 h-20 bg-white rounded-2xl mx-auto flex items-center justify-center mb-4 shadow-xl rotate-3">
               <i className="fas fa-football-ball text-red-600 text-4xl"></i>
             </div>
-            <h1 className="text-3xl font-black font-orbitron tracking-tighter">SUPER BOWL <span className="text-red-500">LIX</span></h1>
-            <p className="text-slate-300 font-semibold mt-2 uppercase tracking-widest text-xs">Prop Betting & Party Hub</p>
+            <h1 className="text-3xl font-black font-orbitron tracking-tighter">SBLIX <span className="text-red-500">PARTY</span></h1>
+            <p className="text-slate-300 font-semibold mt-2 uppercase tracking-widest text-xs">The Ultimate Prop Pool</p>
           </div>
 
           <form onSubmit={handleLogin} className="space-y-6">
             <div>
-              <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Pick an Avatar</label>
+              <label className="block text-xs font-bold text-slate-400 uppercase mb-2 text-center">Select Your Cheerleader Avatar</label>
               <div className="flex flex-wrap gap-2 justify-center">
                 {AVATARS.map(a => (
                   <button
                     key={a}
                     type="button"
                     onClick={() => setSelectedAvatar(a)}
-                    className={`w-10 h-10 text-xl flex items-center justify-center rounded-xl transition-all ${selectedAvatar === a ? 'bg-red-600 scale-110 shadow-lg' : 'bg-slate-800 hover:bg-slate-700'}`}
+                    className={`w-12 h-12 text-2xl flex items-center justify-center rounded-xl transition-all ${selectedAvatar === a ? 'bg-red-600 scale-110 shadow-lg border-2 border-white/50' : 'bg-slate-800 hover:bg-slate-700'}`}
                   >
                     {a}
                   </button>
@@ -201,10 +176,10 @@ const App: React.FC = () => {
               <input
                 autoFocus
                 type="text"
-                placeholder="Ex: TouchdownTom"
+                placeholder="Ex: SpiritSara"
                 value={loginUsername}
                 onChange={(e) => setLoginUsername(e.target.value)}
-                className="w-full bg-slate-900/50 border border-slate-700 rounded-xl px-4 py-3 text-white outline-none focus:border-red-500 font-semibold"
+                className="w-full bg-slate-900/50 border border-slate-700 rounded-xl px-4 py-3 text-white outline-none focus:border-red-500 font-semibold text-center"
               />
             </div>
 
@@ -213,7 +188,7 @@ const App: React.FC = () => {
                 type="submit"
                 className="w-full py-4 bg-white text-slate-900 rounded-xl font-black font-orbitron hover:bg-red-50 transition-all shadow-xl"
               >
-                JOIN THE PARTY
+                START BETTING
               </button>
               
               <button
@@ -221,7 +196,7 @@ const App: React.FC = () => {
                 onClick={handleCopyLink}
                 className="w-full py-3 bg-slate-800/50 text-slate-300 border border-slate-700 rounded-xl font-bold text-xs uppercase tracking-widest hover:bg-slate-700 transition-all flex items-center justify-center gap-2"
               >
-                {copied ? <><i className="fas fa-check text-green-400"></i> Copied!</> : <><i className="fas fa-link"></i> Copy Invite Link</>}
+                {copied ? <><i className="fas fa-check text-green-400"></i> Party Link Copied!</> : <><i className="fas fa-link"></i> Copy Invite Link</>}
               </button>
             </div>
           </form>
@@ -239,21 +214,14 @@ const App: React.FC = () => {
             <div className="flex bg-slate-800 rounded-lg px-2 py-1 items-center gap-2 border border-slate-700 text-[11px]">
               <span className="font-orbitron font-bold">{gameState.score.home}-{gameState.score.away}</span>
               <div className="w-px h-3 bg-slate-600"></div>
-              <span className="text-red-500 font-black uppercase animate-pulse">Q{gameState.quarter}</span>
+              <span className="text-red-500 font-black uppercase">LIVE</span>
             </div>
           </div>
 
           <div className="flex items-center gap-3">
-             <button 
-              onClick={handleCopyLink}
-              className={`p-2 rounded-lg border transition-all ${copied ? 'bg-green-500/10 border-green-500/50 text-green-400' : 'bg-slate-800 border-slate-700 text-slate-400'}`}
-            >
-              <i className={copied ? "fas fa-check" : "fas fa-share-nodes"}></i>
-            </button>
-
-            <div className="text-right hidden xs:block">
+            <div className="text-right">
               <div className={`text-sm font-orbitron font-bold ${currentUser.credits >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                {currentUser.credits}
+                {currentUser.credits} PTS
               </div>
             </div>
             <div className="flex items-center gap-2 bg-slate-800 p-1.5 rounded-xl border border-slate-700">
@@ -268,7 +236,7 @@ const App: React.FC = () => {
           {[
             { id: 'bets', icon: 'fa-ticket-alt', label: 'Props' },
             { id: 'chat', icon: 'fa-comments', label: 'Chat' },
-            { id: 'leaderboard', icon: 'fa-trophy', label: 'Rank' }
+            { id: 'leaderboard', icon: 'fa-trophy', label: 'Rankings' }
           ].map((tab) => (
             <button 
               key={tab.id}
@@ -290,8 +258,6 @@ const App: React.FC = () => {
                 user={currentUser} 
                 onPlaceBet={placeBet}
                 allBets={userBets}
-                onGenerateBets={handleGenerateBets}
-                isGenerating={isGeneratingBets}
                 onResolveBet={resolveBet}
              />
            )}
