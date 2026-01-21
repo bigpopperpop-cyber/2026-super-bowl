@@ -11,38 +11,14 @@ export const INITIAL_PROP_BETS: PropBet[] = [
   },
   {
     id: '2',
-    question: "National Anthem: Will the singer wear a hat?",
-    odds: 2.1,
-    category: 'Entertainment',
+    question: "Which team scores the first Touchdown?",
+    odds: 1.9,
+    category: 'Game',
     resolved: false,
-    options: ['Yes', 'No']
+    options: ['Home Team', 'Away Team', 'No TD']
   },
   {
     id: '3',
-    question: "First Team to record a 1st Down?",
-    odds: 1.9,
-    category: 'Game',
-    resolved: false,
-    options: ['Home Team', 'Away Team']
-  },
-  {
-    id: '4',
-    question: "Will there be a Touchdown scored in the 1st Quarter?",
-    odds: 2.2,
-    category: 'Stats',
-    resolved: false,
-    options: ['Yes', 'No']
-  },
-  {
-    id: '5',
-    question: "Leading team at Halftime?",
-    odds: 1.9,
-    category: 'Game',
-    resolved: false,
-    options: ['Home Team', 'Away Team', 'Tie']
-  },
-  {
-    id: '6',
     question: "Halftime Show: Will there be a Guest Performer?",
     odds: 1.5,
     category: 'Entertainment',
@@ -50,7 +26,7 @@ export const INITIAL_PROP_BETS: PropBet[] = [
     options: ['Yes', 'No']
   },
   {
-    id: '7',
+    id: '4',
     question: "Total Points at end of 3rd Quarter: Over or Under 34.5?",
     odds: 1.9,
     category: 'Stats',
@@ -58,12 +34,36 @@ export const INITIAL_PROP_BETS: PropBet[] = [
     options: ['Over 34.5', 'Under 34.5']
   },
   {
-    id: '8',
-    question: "Which team will be leading at the end of the 3rd Quarter?",
-    odds: 1.8,
+    id: '5',
+    question: "Will there be a score in the final 2 minutes of the game?",
+    odds: 2.1,
     category: 'Game',
     resolved: false,
-    options: ['Home Team', 'Away Team', 'Tie']
+    options: ['Yes', 'No']
+  },
+  {
+    id: '6',
+    question: "Who wins the Super Bowl LIX Title?",
+    odds: 1.9,
+    category: 'Game',
+    resolved: false,
+    options: ['Home Team', 'Away Team']
+  },
+  {
+    id: '7',
+    question: "MVP Award: Which position wins it?",
+    odds: 2.5,
+    category: 'Player',
+    resolved: false,
+    options: ['Quarterback', 'Wide Receiver', 'Defense', 'Other']
+  },
+  {
+    id: '8',
+    question: "Color of the Gatorade Shower on the winning coach?",
+    odds: 4.0,
+    category: 'Entertainment',
+    resolved: false,
+    options: ['Orange', 'Blue', 'Clear/Water', 'Yellow/Green', 'Red', 'Purple']
   }
 ];
 

@@ -63,10 +63,10 @@ const BettingPanel: React.FC<BettingPanelProps> = ({
           <div>
             <h2 className="text-xl font-orbitron flex items-center gap-2 text-white">
               <i className="fas fa-ticket-alt text-yellow-400"></i>
-              3rd Quarter Prop Pool
+              Full Game Prop Pool
             </h2>
             <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold mt-1">
-              Contest Ends after Q3 | Correct: +10 | Wrong: -3
+              Betting open until settled | Correct: +10 | Wrong: -3
             </p>
           </div>
         </div>
