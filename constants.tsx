@@ -53,5 +53,14 @@ export const INITIAL_PROP_BETS: PropBet[] = [
 ];
 
 export const AVATARS = [
-  '🏈', '🏟️', '📣', '🍔', '🍺', '🥨', '👟', '🏆', '🎰', '📺'
+  '🏈', // Football
+  '🏟️', // Stadium
+  '🏆', // Trophy
+  '👕', // Jersey
+  '🧤', // Receiver Gloves
+  '👟', // Cleats
+  '🚩', // Penalty Flag
+  '🧢', // Coach Cap
+  '🧊', // Ice Bucket (Gatorade Shower)
+  '📣'  // Megaphone
 ];
