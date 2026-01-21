@@ -1,11 +1,20 @@
 import { GoogleGenAI } from "@google/genai";
 
-// Ensure we have a valid key string or fallback
-const apiKey = (typeof process !== 'undefined' && process.env.API_KEY) ? process.env.API_KEY : '';
+// Improved environment detection for Vercel and generic ESM environments
+const getApiKey = () => {
+  try {
+    // Standard process.env check
+    if (typeof process !== 'undefined' && process.env?.API_KEY) return process.env.API_KEY;
+    // Vite specific import.meta check
+    if (import.meta && (import.meta as any).env?.VITE_API_KEY) return (import.meta as any).env.VITE_API_KEY;
+  } catch (e) {}
+  return '';
+};
 
-// Function to get a fresh instance - handles cases where key might be injected later
+const apiKey = getApiKey();
+
 const getAI = () => {
-  if (!apiKey || apiKey === 'undefined' || apiKey === '') return null;
+  if (!apiKey || apiKey === 'undefined') return null;
   return new GoogleGenAI({ apiKey });
 };
 
@@ -16,7 +25,6 @@ export const getAICommentary = async (
 ) => {
   const ai = getAI();
   if (!ai) {
-    console.warn("Gemini API Key missing or invalid. AI Commentary disabled.");
     return "The spirit in here is electric! Who's leading the pack?";
   }
 
@@ -44,6 +52,6 @@ export const getAICommentary = async (
     return response.text || "Leaderboard is moving! Someone's about to jump the standings!";
   } catch (error) {
     console.error("Gemini Error:", error);
-    return "Leaderboard is moving! Someone's about to jump the standings!";
+    return "The atmosphere is heating up! Keep those picks coming!";
   }
 };
