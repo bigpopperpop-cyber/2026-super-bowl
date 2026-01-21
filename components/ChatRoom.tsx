@@ -10,11 +10,13 @@ interface ChatRoomProps {
 const ChatRoom: React.FC<ChatRoomProps> = ({ user, messages, onSendMessage }) => {
   const [inputText, setInputText] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
+  const prevMsgCount = useRef(messages.length);
 
   useEffect(() => {
-    if (scrollRef.current) {
+    if (scrollRef.current && messages.length > prevMsgCount.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
+    prevMsgCount.current = messages.length;
   }, [messages]);
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -32,28 +34,37 @@ const ChatRoom: React.FC<ChatRoomProps> = ({ user, messages, onSendMessage }) =>
           <i className="fas fa-comments text-blue-400"></i>
           Party Chat
         </h3>
-        <span className="text-[10px] text-slate-500 uppercase font-bold px-2 py-0.5 rounded-full bg-slate-900">Live</span>
+        <div className="flex items-center gap-2">
+           <span className="text-[8px] text-slate-500 uppercase font-black">Multi-User Live</span>
+           <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse shadow-[0_0_5px_rgba(34,197,94,0.5)]"></div>
+        </div>
       </div>
 
       <div 
         ref={scrollRef}
         className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar"
       >
+        {messages.length === 0 && (
+          <div className="h-full flex flex-col items-center justify-center opacity-20 text-center p-8">
+            <i className="fas fa-ghost text-4xl mb-3"></i>
+            <p className="text-xs font-black uppercase tracking-widest leading-tight">Room is empty.<br/>Send a message to start the sync!</p>
+          </div>
+        )}
         {messages.map((msg) => (
           <div 
             key={msg.id} 
-            className={`flex flex-col ${msg.userId === user.id ? 'items-end' : 'items-start'}`}
+            className={`flex flex-col ${msg.userId === user.id ? 'items-end' : 'items-start'} animate-in fade-in slide-in-from-bottom-2 duration-300`}
           >
             <div className="flex items-center gap-2 mb-1">
               {msg.isAI && <span className="text-[9px] bg-yellow-500 text-black font-black px-1 rounded">BOT</span>}
-              <span className="text-xs font-bold text-slate-400">{msg.username}</span>
+              <span className="text-[10px] font-black uppercase text-slate-500 tracking-tighter">{msg.username}</span>
             </div>
-            <div className={`px-3 py-2 rounded-2xl text-sm max-w-[85%] ${
+            <div className={`px-4 py-2.5 rounded-2xl text-sm max-w-[85%] shadow-lg border ${
               msg.isAI 
-                ? 'bg-yellow-500/10 border border-yellow-500/30 text-yellow-100' 
+                ? 'bg-yellow-500/10 border-yellow-500/30 text-yellow-100' 
                 : msg.userId === user.id 
-                  ? 'bg-blue-600 text-white rounded-tr-none' 
-                  : 'bg-slate-700 text-white rounded-tl-none'
+                  ? 'bg-blue-600 border-blue-500 text-white rounded-tr-none' 
+                  : 'bg-slate-800 border-slate-700 text-slate-200 rounded-tl-none'
             }`}>
               {msg.text}
             </div>
@@ -61,19 +72,19 @@ const ChatRoom: React.FC<ChatRoomProps> = ({ user, messages, onSendMessage }) =>
         ))}
       </div>
 
-      <form onSubmit={handleSubmit} className="p-3 border-t border-slate-700 flex gap-2">
+      <form onSubmit={handleSubmit} className="p-3 border-t border-slate-700 bg-slate-900/50 flex gap-2">
         <input
           type="text"
           value={inputText}
           onChange={(e) => setInputText(e.target.value)}
-          placeholder="Talk trash here..."
-          className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 text-sm text-white outline-none focus:border-blue-500"
+          placeholder="Type something..."
+          className="flex-1 bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-sm text-white outline-none focus:border-blue-500 placeholder:text-slate-600 font-bold"
         />
         <button 
           type="submit"
-          className="w-10 h-10 flex items-center justify-center bg-blue-600 rounded-lg hover:bg-blue-500 transition-colors"
+          className="w-11 h-11 flex items-center justify-center bg-blue-600 rounded-xl hover:bg-blue-500 active:scale-90 transition-all shadow-lg"
         >
-          <i className="fas fa-paper-plane"></i>
+          <i className="fas fa-paper-plane text-white"></i>
         </button>
       </form>
     </div>
