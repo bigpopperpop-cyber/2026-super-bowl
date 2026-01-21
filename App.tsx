@@ -140,7 +140,10 @@ const App: React.FC = () => {
       if (savedCode) setPartyCode(savedCode);
       if (savedUser) {
         const parsedUser = JSON.parse(savedUser);
-        if (parsedUser && typeof parsedUser === 'object') setCurrentUser(parsedUser);
+        // Ensure user object is valid before skipping login
+        if (parsedUser && parsedUser.id && parsedUser.username) {
+           setCurrentUser(parsedUser);
+        }
       }
       if (savedUsers) {
         const parsedUsers = JSON.parse(savedUsers);
@@ -158,20 +161,34 @@ const App: React.FC = () => {
     return () => clearInterval(interval);
   }, [syncWithCloud]);
 
-  const handleLogin = async (e: React.FormEvent) => {
+  const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
     if (!loginUsername.trim() || !loginRealName.trim()) return;
     const code = loginPartyCode.trim().toUpperCase() || 'LOCAL';
     setPartyCode(code);
+    
     const existingUser = users.find(u => u.username.toLowerCase() === loginUsername.toLowerCase());
     if (existingUser) {
       setCurrentUser(existingUser);
     } else {
-      const newUser: User = { id: generateId(), username: loginUsername.trim(), realName: loginRealName.trim(), avatar: selectedAvatar, credits: 0 };
+      const newUser: User = { 
+        id: generateId(), 
+        username: loginUsername.trim(), 
+        realName: loginRealName.trim(), 
+        avatar: selectedAvatar, 
+        credits: 0 
+      };
       setUsers(prev => [...prev, newUser]);
       setCurrentUser(newUser);
     }
     setTimeout(() => syncWithCloud(true), 200);
+  };
+
+  const logout = () => {
+    if (confirm("Switch user? Your current progress is saved to this device.")) {
+      setCurrentUser(null);
+      localStorage.removeItem('sb_current_user');
+    }
   };
 
   const sendMessage = (text: string) => {
@@ -190,8 +207,6 @@ const App: React.FC = () => {
     syncWithCloud(true);
   };
 
-  const clearSession = () => { if (confirm("Clear session data?")) { localStorage.clear(); window.location.reload(); } };
-  
   const handleCopyLink = () => {
     const shareUrl = partyCode ? `${window.location.origin}${window.location.pathname}?room=${partyCode}` : window.location.href;
     navigator.clipboard.writeText(shareUrl);
@@ -202,34 +217,65 @@ const App: React.FC = () => {
   if (!currentUser) {
     return (
       <div className="fixed inset-0 flex items-center justify-center p-4 nfl-gradient overflow-y-auto">
-        <div className="max-w-md w-full glass-card p-6 rounded-[2rem] shadow-2xl border-white/20 my-auto">
-          <div className="text-center mb-6">
-            <div className="w-16 h-16 bg-white rounded-2xl mx-auto flex items-center justify-center mb-3 shadow-xl rotate-3">
-              <i className="fas fa-football-ball text-red-600 text-3xl"></i>
+        <div className="max-w-md w-full glass-card p-8 rounded-[2.5rem] shadow-2xl border-white/20 my-auto animate-in fade-in zoom-in duration-500">
+          <div className="text-center mb-8">
+            <div className="w-20 h-20 bg-white rounded-3xl mx-auto flex items-center justify-center mb-4 shadow-2xl rotate-3 border-4 border-red-600">
+              <i className="fas fa-football-ball text-red-600 text-4xl"></i>
             </div>
-            <h1 className="text-2xl font-black font-orbitron tracking-tighter uppercase">SB LIX <span className="text-red-500">Party</span></h1>
-            <p className="text-slate-400 font-bold uppercase tracking-widest text-[9px] mt-1">Join the Party Board</p>
+            <h1 className="text-3xl font-black font-orbitron tracking-tighter uppercase leading-none">
+              SB LIX <span className="text-red-500 block text-xl tracking-widest mt-1">PARTY HUB</span>
+            </h1>
+            <p className="text-slate-400 font-bold uppercase tracking-[0.2em] text-[10px] mt-4 opacity-60">
+              PREGAME • LIVE STATS • PROP BETS
+            </p>
           </div>
-          <form onSubmit={handleLogin} className="space-y-4">
-            <div className="flex flex-wrap gap-2 justify-center max-h-32 overflow-y-auto p-3 rounded-2xl bg-black/40 border border-white/5 custom-scrollbar">
-              {AVATARS.map(a => (
-                <button key={a} type="button" onClick={() => setSelectedAvatar(a)} className={`w-10 h-10 text-xl flex items-center justify-center rounded-xl transition-all ${selectedAvatar === a ? 'bg-red-600 scale-110 shadow-lg border-2 border-white' : 'bg-slate-800'}`}>{a}</button>
-              ))}
+
+          <form onSubmit={handleLogin} className="space-y-5">
+            <div>
+              <label className="text-[10px] font-black uppercase text-slate-500 mb-2 block ml-1">Choose Mascot</label>
+              <div className="flex flex-wrap gap-2 justify-center max-h-32 overflow-y-auto p-4 rounded-2xl bg-black/40 border border-white/5 custom-scrollbar shadow-inner">
+                {AVATARS.map(a => (
+                  <button 
+                    key={a} 
+                    type="button" 
+                    onClick={() => setSelectedAvatar(a)} 
+                    className={`w-11 h-11 text-2xl flex items-center justify-center rounded-xl transition-all active:scale-90 ${selectedAvatar === a ? 'bg-red-600 scale-110 shadow-lg border-2 border-white' : 'bg-slate-800 hover:bg-slate-700'}`}
+                  >
+                    {a}
+                  </button>
+                ))}
+              </div>
             </div>
+
             <div className="space-y-3">
               <div className="grid grid-cols-2 gap-3">
-                <input type="text" placeholder="Handle" value={loginUsername} onChange={(e) => setLoginUsername(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-blue-500 font-bold text-center" />
-                <input type="text" placeholder="Party Code" maxLength={10} value={loginPartyCode} onChange={(e) => setLoginPartyCode(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-red-500 font-bold text-center" />
+                <div className="space-y-1">
+                  <label className="text-[9px] font-black uppercase text-slate-500 ml-1 block">Handle</label>
+                  <input type="text" placeholder="e.g. Champ" value={loginUsername} onChange={(e) => setLoginUsername(e.target.value)} className="w-full bg-slate-900/80 border border-slate-700 rounded-2xl px-4 py-4 text-white text-sm outline-none focus:border-blue-500 font-bold text-center placeholder:text-slate-700 shadow-inner" />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[9px] font-black uppercase text-slate-500 ml-1 block">Party Code</label>
+                  <input type="text" placeholder="Optional" maxLength={10} value={loginPartyCode} onChange={(e) => setLoginPartyCode(e.target.value)} className="w-full bg-slate-900/80 border border-slate-700 rounded-2xl px-4 py-4 text-white text-sm outline-none focus:border-red-500 font-bold text-center placeholder:text-slate-700 shadow-inner" />
+                </div>
               </div>
-              <input type="text" placeholder="Real Name (e.g. Mike J.)" value={loginRealName} onChange={(e) => setLoginRealName(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-red-500 font-bold text-center" />
-              <button type="submit" disabled={!loginUsername.trim() || !loginRealName.trim()} className="w-full py-4 bg-white text-slate-950 rounded-xl font-black hover:bg-slate-200 transition-all shadow-xl uppercase tracking-widest text-sm disabled:opacity-50">JOIN GAME</button>
+              <div className="space-y-1">
+                <label className="text-[9px] font-black uppercase text-slate-500 ml-1 block">Real Name</label>
+                <input type="text" placeholder="John D." value={loginRealName} onChange={(e) => setLoginRealName(e.target.value)} className="w-full bg-slate-900/80 border border-slate-700 rounded-2xl px-4 py-4 text-white text-sm outline-none focus:border-red-500 font-bold text-center placeholder:text-slate-700 shadow-inner" />
+              </div>
+              <button type="submit" disabled={!loginUsername.trim() || !loginRealName.trim()} className="w-full py-5 bg-white text-slate-950 rounded-[1.5rem] font-black font-orbitron hover:bg-slate-200 transition-all shadow-2xl uppercase tracking-widest text-sm disabled:opacity-30 active:scale-95 mt-2">
+                ENTER HUB
+              </button>
             </div>
           </form>
-          <div className="mt-8 pt-6 border-t border-white/5 flex flex-col gap-3 text-center">
-             <button onClick={handleCopyLink} className="text-[10px] text-slate-400 uppercase font-black hover:text-white flex items-center justify-center gap-2">
-                <i className="fas fa-link"></i> {copied ? 'Copied Link!' : 'Invite Friends'}
+
+          <div className="mt-10 pt-6 border-t border-white/5 flex flex-col gap-4 text-center">
+             <button onClick={handleCopyLink} className="text-[11px] text-slate-300 uppercase font-black hover:text-white flex items-center justify-center gap-2 transition-colors">
+                <i className="fas fa-link text-blue-400"></i> {copied ? 'Link Copied!' : 'Invite Guests'}
              </button>
-             <button onClick={clearSession} className="text-[9px] text-slate-600 uppercase font-black">Reset Data</button>
+             <p className="text-[9px] text-slate-600 uppercase font-black tracking-widest leading-relaxed">
+               Syncing 20+ Guests Live<br/>
+               <span className="text-green-500/50">Cloud Database Connected</span>
+             </p>
           </div>
         </div>
       </div>
@@ -255,9 +301,11 @@ const App: React.FC = () => {
           </div>
           <div className="flex items-center gap-2">
             <div className={`text-[11px] font-orbitron font-black px-2 py-1 rounded-md bg-slate-950 border border-slate-800 ${(currentUser?.credits || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-              {currentUser?.credits || 0} PTS
+              {(currentUser?.credits || 0)} PTS
             </div>
-            <div className="w-8 h-8 flex items-center justify-center bg-slate-800 rounded-lg border border-slate-700 text-lg">{currentUser?.avatar}</div>
+            <button onClick={logout} className="w-8 h-8 flex items-center justify-center bg-slate-800 rounded-lg border border-slate-700 text-lg hover:bg-slate-700 transition-colors">
+              {currentUser?.avatar}
+            </button>
           </div>
         </div>
       </header>
@@ -283,16 +331,17 @@ const App: React.FC = () => {
         </div>
       </main>
 
-      <nav className="bg-slate-900 border-t border-slate-800 pb-safe">
+      <nav className="bg-slate-900 border-t border-slate-800 pb-safe shadow-[0_-10px_30px_rgba(0,0,0,0.5)]">
         <div className="container mx-auto flex">
           {[
             { id: 'bets', icon: 'fa-ticket-alt', label: 'Props' },
             { id: 'chat', icon: 'fa-comments', label: 'Chat' },
-            { id: 'leaderboard', icon: 'fa-trophy', label: 'Rank' }
+            { id: 'leaderboard', icon: 'fa-trophy', label: 'Rankings' }
           ].map((tab) => (
-            <button key={tab.id} onClick={() => setActiveTab(tab.id as TabType)} className={`flex-1 py-3 text-[9px] font-black uppercase transition-all flex flex-col items-center gap-1 ${activeTab === tab.id ? 'text-red-500 bg-red-500/5' : 'text-slate-500'}`}>
-              <i className={`fas ${tab.icon} text-lg mb-0.5`}></i>
+            <button key={tab.id} onClick={() => setActiveTab(tab.id as TabType)} className={`flex-1 py-4 text-[9px] font-black uppercase tracking-widest transition-all flex flex-col items-center gap-1.5 ${activeTab === tab.id ? 'text-red-500 bg-red-500/5' : 'text-slate-500'}`}>
+              <i className={`fas ${tab.icon} text-lg`}></i>
               {tab.label}
+              {activeTab === tab.id && <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"></div>}
             </button>
           ))}
         </div>
