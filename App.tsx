@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { User, PropBet, UserBet, ChatMessage, GameState, BetStatus } from './types';
 import { INITIAL_PROP_BETS, AVATARS } from './constants';
 import { getAICommentary } from './services/geminiService';
@@ -16,47 +16,144 @@ const App: React.FC = () => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [activeTab, setActiveTab] = useState<TabType>('bets');
   const [copied, setCopied] = useState(false);
+  const [partyCode, setPartyCode] = useState<string>('');
+  const [isSyncing, setIsSyncing] = useState(false);
   const [gameState, setGameState] = useState<GameState>({
     quarter: 1,
     timeRemaining: "15:00",
     score: { home: 0, away: 0 },
     possession: 'home'
   });
+  
+  // Login form states
   const [loginUsername, setLoginUsername] = useState('');
   const [loginRealName, setLoginRealName] = useState('');
+  const [loginPartyCode, setLoginPartyCode] = useState('');
   const [selectedAvatar, setSelectedAvatar] = useState(AVATARS[0]);
 
+  const lastSyncRef = useRef<number>(0);
+
+  // Load local cache
   useEffect(() => {
     const savedUsers = localStorage.getItem('sb_users');
     const savedBets = localStorage.getItem('sb_bets');
     const savedMessages = localStorage.getItem('sb_messages');
     const savedProps = localStorage.getItem('sb_props');
     const savedState = localStorage.getItem('sb_gamestate');
+    const savedCode = localStorage.getItem('sb_party_code');
+    const savedUser = localStorage.getItem('sb_current_user');
     
     if (savedUsers) setUsers(JSON.parse(savedUsers));
     if (savedBets) setUserBets(JSON.parse(savedBets));
     if (savedMessages) setMessages(JSON.parse(savedMessages));
     if (savedProps) setPropBets(JSON.parse(savedProps));
     if (savedState) setGameState(JSON.parse(savedState));
+    if (savedCode) setPartyCode(savedCode);
+    if (savedUser) setCurrentUser(JSON.parse(savedUser));
   }, []);
 
+  // Sync to Cloud Logic
+  const syncWithCloud = useCallback(async (push: boolean = false) => {
+    if (!partyCode) return;
+    
+    const url = `https://api.keyvalue.xyz/sbparty_${partyCode}/state`;
+    
+    try {
+      setIsSyncing(true);
+      if (push) {
+        await fetch(url, {
+          method: 'POST',
+          body: JSON.stringify({
+            users,
+            userBets,
+            messages,
+            propBets,
+            gameState,
+            updatedAt: Date.now()
+          }),
+        });
+      } else {
+        const response = await fetch(url);
+        if (response.ok) {
+          const cloudData = await response.json();
+          if (cloudData && cloudData.updatedAt > lastSyncRef.current) {
+            // Merging logic: Keep local user if exists, but merge others
+            setUsers(prev => {
+              const userMap = new Map(prev.map(u => [u.id, u]));
+              (cloudData.users || []).forEach((u: User) => userMap.set(u.id, u));
+              return Array.from(userMap.values());
+            });
+            
+            setUserBets(prev => {
+              const betMap = new Map(prev.map(b => [b.id, b]));
+              (cloudData.userBets || []).forEach((b: UserBet) => betMap.set(b.id, b));
+              return Array.from(betMap.values());
+            });
+
+            setMessages(prev => {
+              const msgMap = new Map(prev.map(m => [m.id, m]));
+              (cloudData.messages || []).forEach((m: ChatMessage) => msgMap.set(m.id, m));
+              return Array.from(msgMap.values()).sort((a, b) => a.timestamp - b.timestamp);
+            });
+
+            setPropBets(prev => {
+              const propMap = new Map(prev.map(p => [p.id, p]));
+              (cloudData.propBets || []).forEach((p: PropBet) => {
+                // Only take cloud updates if they are resolved (to avoid partial state conflicts)
+                const existing = propMap.get(p.id);
+                if (p.resolved || !existing) propMap.set(p.id, p);
+              });
+              return Array.from(propMap.values());
+            });
+
+            // Authority over GameState: the user who joined first (alphabetically)
+            // or just simple last-write-wins for this simple implementation
+            if (cloudData.gameState) setGameState(cloudData.gameState);
+            
+            lastSyncRef.current = cloudData.updatedAt;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("Cloud Sync failed. Operating in local mode.", e);
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [partyCode, users, userBets, messages, propBets, gameState]);
+
+  // Periodic polling
+  useEffect(() => {
+    if (!partyCode) return;
+    const interval = setInterval(() => syncWithCloud(false), 5000);
+    return () => clearInterval(interval);
+  }, [partyCode, syncWithCloud]);
+
+  // Persist to local storage as backup
   useEffect(() => {
     localStorage.setItem('sb_users', JSON.stringify(users));
     localStorage.setItem('sb_bets', JSON.stringify(userBets));
     localStorage.setItem('sb_messages', JSON.stringify(messages));
     localStorage.setItem('sb_props', JSON.stringify(propBets));
     localStorage.setItem('sb_gamestate', JSON.stringify(gameState));
-  }, [users, userBets, messages, propBets, gameState]);
+    localStorage.setItem('sb_party_code', partyCode);
+    if (currentUser) localStorage.setItem('sb_current_user', JSON.stringify(currentUser));
+  }, [users, userBets, messages, propBets, gameState, partyCode, currentUser]);
 
   const handleCopyLink = () => {
-    navigator.clipboard.writeText(window.location.href);
+    const shareUrl = partyCode 
+      ? `${window.location.origin}${window.location.pathname}?room=${partyCode}` 
+      : window.location.href;
+    navigator.clipboard.writeText(shareUrl);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!loginUsername.trim() || !loginRealName.trim()) return;
+
+    const code = loginPartyCode.trim().toUpperCase() || 'LOCAL';
+    setPartyCode(code);
 
     const existingUser = users.find(u => u.username.toLowerCase() === loginUsername.toLowerCase());
     if (existingUser) {
@@ -72,6 +169,9 @@ const App: React.FC = () => {
       setUsers(prev => [...prev, newUser]);
       setCurrentUser(newUser);
     }
+    
+    // Immediate sync push after joining
+    setTimeout(() => syncWithCloud(true), 500);
   };
 
   const clearSession = () => {
@@ -123,6 +223,7 @@ const App: React.FC = () => {
       if (freshUser) setCurrentUser(freshUser);
     }
     triggerAICommentary(`The 3rd Quarter is OVER! All pending props have been simulated.`);
+    setTimeout(() => syncWithCloud(true), 100);
   };
 
   const placeBet = (betId: string, amount: number, selection: string) => {
@@ -138,6 +239,7 @@ const App: React.FC = () => {
     };
     setUserBets(prev => [...prev, newBet]);
     triggerAICommentary(`I just picked ${selection}! Let's go!`);
+    setTimeout(() => syncWithCloud(true), 100);
   };
 
   const resolveBet = (betId: string, winningOption: string) => {
@@ -147,10 +249,9 @@ const App: React.FC = () => {
       if (ub.betId === betId && ub.status === BetStatus.PENDING) {
         const isWin = ub.selection === winningOption;
         const points = isWin ? 10 : -3;
-        const uIdx = updatedUsers.findIndex(u => u.id === updatedUsers[uIdx]?.id); // safer find
         const foundIdx = updatedUsers.findIndex(u => u.id === ub.userId);
         if (foundIdx !== -1) {
-          updatedUsers[foundIdx] = { ...updatedUsers[foundIdx], credits: updatedUsers[foundIdx].credits + points };
+          updatedUsers[foundIdx] = { ...updatedUsers[foundIdx], credits: (updatedUsers[foundIdx].credits || 0) + points };
         }
         return { ...ub, status: isWin ? BetStatus.WON : BetStatus.LOST };
       }
@@ -163,6 +264,7 @@ const App: React.FC = () => {
        if (freshUser) setCurrentUser(freshUser);
     }
     triggerAICommentary(`Bet result: ${winningOption}!`);
+    setTimeout(() => syncWithCloud(true), 100);
   };
 
   const sendMessage = (text: string) => {
@@ -178,10 +280,11 @@ const App: React.FC = () => {
     if (Math.random() > 0.4) {
       setTimeout(() => triggerAICommentary(text), 1500);
     }
+    setTimeout(() => syncWithCloud(true), 100);
   };
 
   const triggerAICommentary = async (context: string) => {
-    const sortedUsers = [...users].sort((a, b) => b.credits - a.credits);
+    const sortedUsers = [...users].sort((a, b) => (b.credits || 0) - (a.credits || 0));
     const commentary = await getAICommentary(messages, gameState, sortedUsers);
     const aiMsg: ChatMessage = {
       id: crypto.randomUUID(),
@@ -192,6 +295,7 @@ const App: React.FC = () => {
       isAI: true
     };
     setMessages(prev => [...prev, aiMsg]);
+    setTimeout(() => syncWithCloud(true), 100);
   };
 
   if (!currentUser) {
@@ -221,15 +325,28 @@ const App: React.FC = () => {
             </div>
 
             <div className="space-y-3">
-              <div>
-                <label className="text-[10px] font-black uppercase text-slate-500 ml-1 mb-1 block">Chat Handle</label>
-                <input
-                  type="text"
-                  placeholder="e.g. TouchdownKing"
-                  value={loginUsername}
-                  onChange={(e) => setLoginUsername(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white outline-none focus:border-blue-500 font-bold text-center placeholder:text-slate-700 shadow-inner"
-                />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[10px] font-black uppercase text-slate-500 ml-1 mb-1 block">Chat Handle</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. King"
+                    value={loginUsername}
+                    onChange={(e) => setLoginUsername(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-blue-500 font-bold text-center placeholder:text-slate-700 shadow-inner"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-black uppercase text-slate-500 ml-1 mb-1 block">Party Code</label>
+                  <input
+                    type="text"
+                    placeholder="6 Digits"
+                    maxLength={10}
+                    value={loginPartyCode}
+                    onChange={(e) => setLoginPartyCode(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-red-500 font-bold text-center placeholder:text-slate-700 shadow-inner"
+                  />
+                </div>
               </div>
 
               <div>
@@ -239,7 +356,7 @@ const App: React.FC = () => {
                   placeholder="e.g. John D."
                   value={loginRealName}
                   onChange={(e) => setLoginRealName(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white outline-none focus:border-red-500 font-bold text-center placeholder:text-slate-700 shadow-inner"
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-red-500 font-bold text-center placeholder:text-slate-700 shadow-inner"
                 />
               </div>
 
@@ -289,14 +406,20 @@ const App: React.FC = () => {
                 </button>
               )}
             </div>
+            {partyCode && partyCode !== 'LOCAL' && (
+              <div className="flex items-center gap-1.5 bg-blue-600/10 border border-blue-500/20 rounded-md px-2 py-0.5 text-[8px] font-black uppercase tracking-tighter text-blue-400">
+                <i className={`fas fa-cloud ${isSyncing ? 'animate-pulse' : ''}`}></i>
+                {partyCode}
+              </div>
+            )}
           </div>
 
           <div className="flex items-center gap-2">
-            <div className={`text-[11px] font-orbitron font-black px-2 py-1 rounded-md bg-slate-950 border border-slate-800 ${currentUser.credits >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-              {currentUser.credits} PTS
+            <div className={`text-[11px] font-orbitron font-black px-2 py-1 rounded-md bg-slate-950 border border-slate-800 ${(currentUser?.credits || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+              {currentUser?.credits || 0} PTS
             </div>
             <div className="w-8 h-8 flex items-center justify-center bg-slate-800 rounded-lg border border-slate-700 text-lg">
-              {currentUser.avatar}
+              {currentUser?.avatar}
             </div>
           </div>
         </div>
