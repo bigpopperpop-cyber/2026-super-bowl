@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { User, PropBet, UserBet, ChatMessage, GameState, BetStatus } from './types';
 import { INITIAL_PROP_BETS, AVATARS } from './constants';
@@ -40,92 +41,95 @@ const App: React.FC = () => {
   const [loginPartyCode, setLoginPartyCode] = useState('');
   const [selectedAvatar, setSelectedAvatar] = useState(AVATARS[0]);
 
-  const stateRef = useRef({ users, userBets, messages, propBets, gameState });
+  // Use refs to avoid stale closures in sync intervals
+  const stateRef = useRef({ users, userBets, messages, propBets, gameState, partyCode });
 
-  // Keep stateRef in sync
   useEffect(() => {
-    stateRef.current = { users, userBets, messages, propBets, gameState };
-  }, [users, userBets, messages, propBets, gameState]);
+    stateRef.current = { users, userBets, messages, propBets, gameState, partyCode };
+  }, [users, userBets, messages, propBets, gameState, partyCode]);
 
-  // Persist to LocalStorage
+  // Persist local identity
   useEffect(() => {
-    if (users.length > 0) localStorage.setItem('sb_users', JSON.stringify(users));
-    if (userBets.length > 0) localStorage.setItem('sb_bets', JSON.stringify(userBets));
-    if (messages.length > 0) localStorage.setItem('sb_messages', JSON.stringify(messages));
-    if (partyCode) localStorage.setItem('sb_party_code', partyCode);
     if (currentUser) localStorage.setItem('sb_current_user', JSON.stringify(currentUser));
-  }, [users, userBets, messages, partyCode, currentUser]);
+    if (partyCode) localStorage.setItem('sb_party_code', partyCode);
+  }, [currentUser, partyCode]);
 
-  const syncWithCloud = useCallback(async (push: boolean = false) => {
-    // We only sync if a party code is set and it's not the default local mode
-    if (!partyCode || partyCode === 'LOCAL') return;
+  // Helper to merge remote state into local state
+  const mergeState = useCallback((cloudData: any) => {
+    if (!cloudData) return;
+
+    setMessages(prev => {
+      const msgMap = new Map(prev.map(m => [m.id, m]));
+      (cloudData.messages || []).forEach((m: ChatMessage) => msgMap.set(m.id, m));
+      // Fix: Explicitly type the sort arguments to resolve 'unknown' property access errors
+      return Array.from(msgMap.values())
+        .sort((a: ChatMessage, b: ChatMessage) => a.timestamp - b.timestamp)
+        .slice(-100);
+    });
+
+    setUsers(prev => {
+      const userMap = new Map(prev.map(u => [u.id, u]));
+      (cloudData.users || []).forEach((u: User) => {
+        const existing = userMap.get(u.id);
+        if (!existing || u.credits !== existing.credits) {
+          userMap.set(u.id, u);
+        }
+      });
+      return Array.from(userMap.values());
+    });
+
+    if (cloudData.updatedAt > lastSyncedAtRef.current) {
+      if (cloudData.userBets) {
+        setUserBets(prev => {
+          const betMap = new Map(prev.map(b => [b.id, b]));
+          cloudData.userBets.forEach((b: UserBet) => betMap.set(b.id, b));
+          return Array.from(betMap.values());
+        });
+      }
+      if (cloudData.gameState) setGameState(cloudData.gameState);
+      lastSyncedAtRef.current = cloudData.updatedAt;
+    }
+  }, []);
+
+  const syncWithCloud = useCallback(async (isPush: boolean = false) => {
+    const code = stateRef.current.partyCode;
+    if (!code || code === 'LOCAL') return;
     
-    // KeyValue.xyz requires a specific key format
-    const syncKey = `sblix_party_v1_${partyCode.toLowerCase().trim()}`;
+    // We use a specific, unique key for KeyValue.xyz to avoid clashing with others
+    const syncKey = `sblix_party_v2_${code.toLowerCase().trim()}`;
     const url = `https://api.keyvalue.xyz/${syncKey}`;
     
     try {
       setIsSyncing(true);
       
+      // 1. ALWAYS FETCH FIRST (to avoid overwriting other people's data)
       const response = await fetch(url);
-      let cloudData: any = null;
+      let remoteData: any = null;
       
       if (response.ok) {
         const text = await response.text();
         try {
-          cloudData = JSON.parse(text);
+          remoteData = JSON.parse(text);
+          mergeState(remoteData);
         } catch (e) {
-          // Key doesn't exist yet or is empty
+          // New room or corrupted data
         }
       }
 
-      if (cloudData) {
-        // Merge messages: Keep unique IDs, sort by time
-        setMessages(prev => {
-          const msgMap = new Map(prev.map(m => [m.id, m]));
-          (cloudData.messages || []).forEach((m: ChatMessage) => msgMap.set(m.id, m));
-          const merged = Array.from(msgMap.values())
-            .sort((a, b) => a.timestamp - b.timestamp)
-            .slice(-100);
-          return merged;
-        });
-
-        // Merge users
-        setUsers(prev => {
-          const userMap = new Map(prev.map(u => [u.id, u]));
-          (cloudData.users || []).forEach((u: User) => {
-            const existing = userMap.get(u.id);
-            // Update user if credits changed or they are new
-            if (!existing || u.credits !== existing.credits) {
-              userMap.set(u.id, u);
-            }
-          });
-          return Array.from(userMap.values());
-        });
-
-        // Update Game State if cloud is newer
-        if (cloudData.updatedAt > lastSyncedAtRef.current) {
-          if (cloudData.userBets) {
-            setUserBets(prev => {
-              const betMap = new Map(prev.map(b => [b.id, b]));
-              cloudData.userBets.forEach((b: UserBet) => betMap.set(b.id, b));
-              return Array.from(betMap.values());
-            });
-          }
-          if (cloudData.gameState) setGameState(cloudData.gameState);
-          lastSyncedAtRef.current = cloudData.updatedAt;
-        }
-      }
-
-      // If we are pushing (after sending a message or placing a bet)
-      if (push) {
+      // 2. IF WE NEED TO PUSH (e.g. after a message or bet)
+      if (isPush) {
+        // Build the payload by merging current local state into the freshest remote data
         const payload = {
-          users: stateRef.current.users,
-          userBets: stateRef.current.userBets,
-          messages: stateRef.current.messages.slice(-60), // Keep cloud payload light
+          users: Array.from(new Map([...(remoteData?.users || []).map(u => [u.id, u]), ...stateRef.current.users.map(u => [u.id, u])]).values()),
+          // Fix: Explicitly type the sort arguments to resolve 'unknown' property access errors
+          messages: Array.from(new Map([...(remoteData?.messages || []).map(m => [m.id, m]), ...stateRef.current.messages.map(m => [m.id, m])]).values())
+            .sort((a: ChatMessage, b: ChatMessage) => a.timestamp - b.timestamp)
+            .slice(-60),
+          userBets: Array.from(new Map([...(remoteData?.userBets || []).map(b => [b.id, b]), ...stateRef.current.userBets.map(b => [b.id, b])]).values()),
           gameState: stateRef.current.gameState,
           updatedAt: Date.now()
         };
+
         await fetch(url, { 
           method: 'POST', 
           body: JSON.stringify(payload),
@@ -133,50 +137,34 @@ const App: React.FC = () => {
         });
       }
     } catch (e) {
-      console.warn("Cloud Sync interrupted:", e);
+      console.warn("Sync error:", e);
     } finally {
       setIsSyncing(false);
     }
-  }, [partyCode]);
+  }, [mergeState]);
 
   useEffect(() => {
-    // Initialize session from LocalStorage
-    const savedCode = localStorage.getItem('sb_party_code');
-    const savedUser = localStorage.getItem('sb_current_user');
-    
-    // Check URL params for a room code (sharing feature)
+    // Session Restoration
     const params = new URLSearchParams(window.location.search);
     const roomFromUrl = params.get('room');
+    const savedCode = localStorage.getItem('sb_party_code');
+    const savedUser = localStorage.getItem('sb_current_user');
 
     if (roomFromUrl) {
       setPartyCode(roomFromUrl.toUpperCase());
-      setLoginPartyCode(roomFromUrl.toUpperCase());
     } else if (savedCode) {
       setPartyCode(savedCode);
     }
 
     if (savedUser) {
       try {
-        const parsedUser = JSON.parse(savedUser);
-        if (parsedUser && parsedUser.id && parsedUser.username) {
-          setCurrentUser(parsedUser);
-        }
+        const parsed = JSON.parse(savedUser);
+        if (parsed?.id) setCurrentUser(parsed);
       } catch (e) {}
     }
 
-    // Load initial messages/users to avoid flickering
-    const savedUsers = localStorage.getItem('sb_users');
-    const savedMessages = localStorage.getItem('sb_messages');
-    try {
-      if (savedUsers) setUsers(JSON.parse(savedUsers));
-      if (savedMessages) setMessages(JSON.parse(savedMessages));
-    } catch (e) {}
-
-    // Initial Sync
-    setTimeout(() => syncWithCloud(false), 500);
-
-    // Continuous Sync Loop
-    const interval = setInterval(() => syncWithCloud(false), 4000);
+    // Faster polling for better "live" feel (2 seconds instead of 4)
+    const interval = setInterval(() => syncWithCloud(false), 2000);
     return () => clearInterval(interval);
   }, [syncWithCloud]);
 
@@ -187,29 +175,29 @@ const App: React.FC = () => {
     const code = loginPartyCode.trim().toUpperCase() || 'LOCAL';
     setPartyCode(code);
     
-    // Check if user already exists in local list
-    const existingUser = users.find(u => u.username.toLowerCase() === loginUsername.toLowerCase());
+    const newUser: User = { 
+      id: generateId(), 
+      username: loginUsername.trim(), 
+      realName: loginRealName.trim(), 
+      avatar: selectedAvatar, 
+      credits: 0 
+    };
     
-    if (existingUser) {
-      setCurrentUser(existingUser);
-    } else {
-      const newUser: User = { 
-        id: generateId(), 
-        username: loginUsername.trim(), 
-        realName: loginRealName.trim(), 
-        avatar: selectedAvatar, 
-        credits: 0 
-      };
-      setUsers(prev => [...prev, newUser]);
-      setCurrentUser(newUser);
+    setUsers(prev => [...prev, newUser]);
+    setCurrentUser(newUser);
+    
+    // Update URL without refreshing to allow easy sharing
+    if (code !== 'LOCAL') {
+      const newUrl = window.location.protocol + "//" + window.location.host + window.location.pathname + '?room=' + code;
+      window.history.pushState({ path: newUrl }, '', newUrl);
     }
     
-    // Force a push to cloud immediately after login
-    setTimeout(() => syncWithCloud(true), 500);
+    // Immediate sync to register presence
+    setTimeout(() => syncWithCloud(true), 100);
   };
 
   const logout = () => {
-    if (confirm("Logout? Your data is saved on this device.")) {
+    if (confirm("Logout? Your progress is saved on this device.")) {
       setCurrentUser(null);
       localStorage.removeItem('sb_current_user');
     }
@@ -225,20 +213,14 @@ const App: React.FC = () => {
       timestamp: Date.now() 
     };
     setMessages(prev => [...prev, newMsg]);
-    
-    // Push to cloud immediately
     syncWithCloud(true);
     
-    // Random AI interaction
-    if (Math.random() > 0.6) {
-      setTimeout(() => triggerAICommentary(), 1500);
-    }
+    if (Math.random() > 0.7) setTimeout(() => triggerAICommentary(), 2000);
   };
 
   const triggerAICommentary = async () => {
-    const sortedUsers = [...stateRef.current.users].sort((a, b) => (b.credits || 0) - (a.credits || 0));
+    const sortedUsers = [...stateRef.current.users].sort((a: User, b: User) => (b.credits || 0) - (a.credits || 0));
     const commentary = await getAICommentary(stateRef.current.messages, stateRef.current.gameState, sortedUsers);
-    
     const aiMsg: ChatMessage = { 
       id: generateId(), 
       userId: 'ai-bot', 
@@ -247,7 +229,6 @@ const App: React.FC = () => {
       timestamp: Date.now(), 
       isAI: true 
     };
-    
     setMessages(prev => [...prev, aiMsg]);
     syncWithCloud(true);
   };
@@ -270,57 +251,28 @@ const App: React.FC = () => {
             <h1 className="text-3xl font-black font-orbitron tracking-tighter uppercase leading-none">
               SB LIX <span className="text-red-500 block text-xl tracking-widest mt-1">PARTY HUB</span>
             </h1>
-            <p className="text-slate-400 font-bold uppercase tracking-[0.2em] text-[10px] mt-4 opacity-60">
-              PREGAME • LIVE STATS • PROP BETS
-            </p>
           </div>
 
           <form onSubmit={handleLogin} className="space-y-5">
             <div>
-              <label className="text-[10px] font-black uppercase text-slate-500 mb-2 block ml-1">Choose Mascot</label>
+              <label className="text-[10px] font-black uppercase text-slate-500 mb-2 block ml-1">Mascot</label>
               <div className="flex flex-wrap gap-2 justify-center max-h-32 overflow-y-auto p-4 rounded-2xl bg-black/40 border border-white/5 custom-scrollbar shadow-inner">
                 {AVATARS.map(a => (
-                  <button 
-                    key={a} 
-                    type="button" 
-                    onClick={() => setSelectedAvatar(a)} 
-                    className={`w-11 h-11 text-2xl flex items-center justify-center rounded-xl transition-all active:scale-90 ${selectedAvatar === a ? 'bg-red-600 scale-110 shadow-lg border-2 border-white' : 'bg-slate-800 hover:bg-slate-700'}`}
-                  >
-                    {a}
-                  </button>
+                  <button key={a} type="button" onClick={() => setSelectedAvatar(a)} className={`w-11 h-11 text-2xl flex items-center justify-center rounded-xl transition-all ${selectedAvatar === a ? 'bg-red-600 scale-110 shadow-lg border-2 border-white' : 'bg-slate-800'}`}>{a}</button>
                 ))}
               </div>
             </div>
-
             <div className="space-y-3">
               <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="text-[9px] font-black uppercase text-slate-500 ml-1 block">Handle</label>
-                  <input type="text" placeholder="e.g. Champ" value={loginUsername} onChange={(e) => setLoginUsername(e.target.value)} className="w-full bg-slate-900/80 border border-slate-700 rounded-2xl px-4 py-4 text-white text-sm outline-none focus:border-blue-500 font-bold text-center placeholder:text-slate-700 shadow-inner" />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[9px] font-black uppercase text-slate-500 ml-1 block">Party Code</label>
-                  <input type="text" placeholder="Optional" maxLength={10} value={loginPartyCode} onChange={(e) => setLoginPartyCode(e.target.value)} className="w-full bg-slate-900/80 border border-slate-700 rounded-2xl px-4 py-4 text-white text-sm outline-none focus:border-red-500 font-bold text-center placeholder:text-slate-700 shadow-inner" />
-                </div>
+                <input type="text" placeholder="Handle" value={loginUsername} onChange={(e) => setLoginUsername(e.target.value)} className="w-full bg-slate-900/80 border border-slate-700 rounded-2xl px-4 py-4 text-white text-sm outline-none text-center font-bold" />
+                <input type="text" placeholder="Room Code" maxLength={10} value={loginPartyCode} onChange={(e) => setLoginPartyCode(e.target.value)} className="w-full bg-slate-900/80 border border-slate-700 rounded-2xl px-4 py-4 text-white text-sm outline-none text-center font-bold" />
               </div>
-              <div className="space-y-1">
-                <label className="text-[9px] font-black uppercase text-slate-500 ml-1 block">Real Name</label>
-                <input type="text" placeholder="John D." value={loginRealName} onChange={(e) => setLoginRealName(e.target.value)} className="w-full bg-slate-900/80 border border-slate-700 rounded-2xl px-4 py-4 text-white text-sm outline-none focus:border-red-500 font-bold text-center placeholder:text-slate-700 shadow-inner" />
-              </div>
-              <button type="submit" disabled={!loginUsername.trim() || !loginRealName.trim()} className="w-full py-5 bg-white text-slate-950 rounded-[1.5rem] font-black font-orbitron hover:bg-slate-200 transition-all shadow-2xl uppercase tracking-widest text-sm disabled:opacity-30 active:scale-95 mt-2">
-                ENTER HUB
-              </button>
+              <input type="text" placeholder="Real Name (e.g. John D.)" value={loginRealName} onChange={(e) => setLoginRealName(e.target.value)} className="w-full bg-slate-900/80 border border-slate-700 rounded-2xl px-4 py-4 text-white text-sm outline-none text-center font-bold" />
+              <button type="submit" disabled={!loginUsername.trim() || !loginRealName.trim()} className="w-full py-5 bg-white text-slate-950 rounded-[1.5rem] font-black font-orbitron shadow-2xl uppercase tracking-widest text-sm disabled:opacity-30">ENTER HUB</button>
             </div>
           </form>
-
-          <div className="mt-10 pt-6 border-t border-white/5 flex flex-col gap-4 text-center">
-             <button onClick={handleCopyLink} className="text-[11px] text-slate-300 uppercase font-black hover:text-white flex items-center justify-center gap-2 transition-colors">
-                <i className="fas fa-link text-blue-400"></i> {copied ? 'Link Copied!' : 'Invite Guests'}
-             </button>
-             <p className="text-[9px] text-slate-600 uppercase font-black tracking-widest leading-relaxed">
-               Syncing 20+ Guests Live<br/>
-               <span className="text-green-500/50">Cloud Database Connected</span>
-             </p>
+          <div className="mt-8 text-center">
+            <button onClick={handleCopyLink} className="text-[11px] text-slate-300 uppercase font-black hover:text-white transition-colors">{copied ? 'Link Copied!' : 'Invite Guests'}</button>
           </div>
         </div>
       </div>
@@ -334,7 +286,7 @@ const App: React.FC = () => {
           <div className="flex items-center gap-2">
             <h1 className="text-lg font-black font-orbitron text-red-600">SBLIX</h1>
             <div className="flex items-center gap-1.5 bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-[10px]">
-              <span className="font-orbitron font-bold text-slate-200 uppercase tracking-tighter">Q{gameState.quarter}</span>
+              <span className="font-orbitron font-bold text-slate-200 uppercase">Q{gameState.quarter}</span>
               <span className="text-slate-400 font-bold">{gameState.score.home}-{gameState.score.away}</span>
             </div>
             {partyCode && partyCode !== 'LOCAL' && (
@@ -360,7 +312,7 @@ const App: React.FC = () => {
            {activeTab === 'bets' && <BettingPanel propBets={propBets} user={currentUser} onPlaceBet={(bid, amt, sel) => {
               const nb: UserBet = { id: generateId(), userId: currentUser.id, betId: bid, amount: 0, selection: sel, status: BetStatus.PENDING, placedAt: Date.now() };
               setUserBets(p => [...p, nb]);
-              setTimeout(() => syncWithCloud(true), 200);
+              setTimeout(() => syncWithCloud(true), 100);
            }} allBets={userBets} onResolveBet={(bid, win) => {
               setPropBets(p => p.map(pb => pb.id === bid ? { ...pb, resolved: true, outcome: win } : pb));
               setUsers(uList => uList.map(u => {
@@ -369,7 +321,7 @@ const App: React.FC = () => {
                 return u;
               }));
               setUserBets(ubList => ubList.map(ub => ub.betId === bid ? { ...ub, status: ub.selection === win ? BetStatus.WON : BetStatus.LOST } : ub));
-              setTimeout(() => syncWithCloud(true), 200);
+              setTimeout(() => syncWithCloud(true), 100);
            }} />}
            {activeTab === 'chat' && <ChatRoom user={currentUser} messages={messages} onSendMessage={sendMessage} users={users} />}
            {activeTab === 'leaderboard' && <Leaderboard users={users} currentUser={currentUser} propBets={propBets} userBets={userBets} />}
