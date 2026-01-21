@@ -3,8 +3,8 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Super Bowl LIX Party Hub</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0" />
+    <title>SBLIX Party Hub</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
@@ -13,10 +13,9 @@
         font-family: 'Inter', sans-serif;
         background-color: #0f172a;
         color: white;
+        overscroll-behavior-y: contain;
       }
-      .font-orbitron {
-        font-family: 'Orbitron', sans-serif;
-      }
+      .font-orbitron { font-family: 'Orbitron', sans-serif; }
       .glass-card {
         background: rgba(30, 41, 59, 0.7);
         backdrop-filter: blur(10px);
@@ -25,34 +24,32 @@
       .nfl-gradient {
         background: linear-gradient(135deg, #013369 0%, #d50a0a 100%);
       }
-      .custom-scrollbar::-webkit-scrollbar {
-        width: 6px;
-      }
-      .custom-scrollbar::-webkit-scrollbar-track {
-        background: #1e293b;
-      }
-      .custom-scrollbar::-webkit-scrollbar-thumb {
-        background: #475569;
-        border-radius: 3px;
-      }
+      .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+      .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+      .custom-scrollbar::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
+      
+      /* Mobile tap highlight removal */
+      * { -webkit-tap-highlight-color: transparent; }
     </style>
+    <script>
+      // Shim process for browser environment
+      window.process = window.process || { env: {} };
+    </script>
   <script type="importmap">
 {
   "imports": {
-    "@google/genai": "https://esm.sh/@google/genai@^1.38.0",
-    "react": "https://esm.sh/react@19.0.0",
-    "react-dom": "https://esm.sh/react-dom@19.0.0",
-    "react-dom/client": "https://esm.sh/react-dom@19.0.0/client",
-    "uuid": "https://esm.sh/uuid@11.0.5",
+    "react": "https://esm.sh/react@^19.2.3",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
     "react/": "https://esm.sh/react@^19.2.3/",
-    "react-dom/": "https://esm.sh/react-dom@^19.2.3/"
+    "@google/genai": "https://esm.sh/@google/genai@^1.38.0",
+    "vite": "https://esm.sh/vite@^7.3.1",
+    "@vitejs/plugin-react": "https://esm.sh/@vitejs/plugin-react@^5.1.2"
   }
 }
 </script>
 </head>
-  <body class="overflow-x-hidden">
+  <body>
     <div id="root"></div>
-    <!-- Crucial: The entry point for the application -->
-    <script type="module" src="index.tsx"></script>
+    <script type="module" src="/index.tsx"></script>
   </body>
 </html>

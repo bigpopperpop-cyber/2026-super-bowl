@@ -1,6 +1,5 @@
 
-import React, { useState, useEffect, useCallback } from 'react';
-import { v4 as uuidv4 } from 'uuid';
+import React, { useState, useEffect } from 'react';
 import { User, PropBet, UserBet, ChatMessage, GameState, BetStatus } from './types.ts';
 import { INITIAL_PROP_BETS, AVATARS } from './constants.tsx';
 import { getAICommentary, generatePropBets } from './services/geminiService.ts';
@@ -21,8 +20,8 @@ const App: React.FC = () => {
   const [copied, setCopied] = useState(false);
   const [gameState, setGameState] = useState<GameState>({
     quarter: 1,
-    timeRemaining: "12:45",
-    score: { home: 7, away: 3 },
+    timeRemaining: "15:00",
+    score: { home: 0, away: 0 },
     possession: 'home'
   });
   const [loginUsername, setLoginUsername] = useState('');
@@ -62,7 +61,7 @@ const App: React.FC = () => {
       setCurrentUser(existingUser);
     } else {
       const newUser: User = {
-        id: uuidv4(),
+        id: crypto.randomUUID(),
         username: loginUsername.trim(),
         avatar: selectedAvatar,
         credits: 0 
@@ -75,16 +74,16 @@ const App: React.FC = () => {
   const handleGenerateBets = async () => {
     setIsGeneratingBets(true);
     const newBetsData = await generatePropBets();
-    if (newBetsData.length > 0) {
+    if (newBetsData && newBetsData.length > 0) {
       const formattedBets: PropBet[] = newBetsData.map((b: any) => ({
         ...b,
-        id: uuidv4(),
+        id: crypto.randomUUID(),
         resolved: false
       }));
       setPropBets(prev => [...prev, ...formattedBets]);
       
       const aiMsg: ChatMessage = {
-        id: uuidv4(),
+        id: crypto.randomUUID(),
         userId: 'ai-bot',
         username: 'Gerry the Gambler',
         text: `The Prop Lab is cooking! Just dropped ${newBetsData.length} fresh lines. Don't go broke on these!`,
@@ -100,7 +99,7 @@ const App: React.FC = () => {
     if (!currentUser) return;
     
     const newBet: UserBet = {
-      id: uuidv4(),
+      id: crypto.randomUUID(),
       userId: currentUser.id,
       betId,
       amount: 0,
@@ -134,7 +133,8 @@ const App: React.FC = () => {
     setUsers(updatedUsers);
     setUserBets(updatedUserBets);
     if (currentUser) {
-       setCurrentUser(updatedUsers.find(u => u.id === currentUser.id) || null);
+       const freshUser = updatedUsers.find(u => u.id === currentUser.id);
+       if (freshUser) setCurrentUser(freshUser);
     }
     triggerAICommentary(`Bet resolved! Check the leaderboard to see who's crying.`);
   };
@@ -142,7 +142,7 @@ const App: React.FC = () => {
   const sendMessage = (text: string) => {
     if (!currentUser) return;
     const newMsg: ChatMessage = {
-      id: uuidv4(),
+      id: crypto.randomUUID(),
       userId: currentUser.id,
       username: currentUser.username,
       text,
@@ -158,7 +158,7 @@ const App: React.FC = () => {
     const sortedUsers = [...users].sort((a, b) => b.credits - a.credits);
     const commentary = await getAICommentary(messages, gameState, sortedUsers);
     const aiMsg: ChatMessage = {
-      id: uuidv4(),
+      id: crypto.randomUUID(),
       userId: 'ai-bot',
       username: 'Gerry the Gambler',
       text: commentary,
@@ -170,7 +170,7 @@ const App: React.FC = () => {
 
   if (!currentUser) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-4 nfl-gradient">
+      <div className="fixed inset-0 flex items-center justify-center p-4 nfl-gradient">
         <div className="max-w-md w-full glass-card p-8 rounded-3xl shadow-2xl border-white/20">
           <div className="text-center mb-8">
             <div className="w-20 h-20 bg-white rounded-2xl mx-auto flex items-center justify-center mb-4 shadow-xl rotate-3">
@@ -183,13 +183,13 @@ const App: React.FC = () => {
           <form onSubmit={handleLogin} className="space-y-6">
             <div>
               <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Pick an Avatar</label>
-              <div className="flex flex-wrap gap-3 justify-center">
+              <div className="flex flex-wrap gap-2 justify-center">
                 {AVATARS.map(a => (
                   <button
                     key={a}
                     type="button"
                     onClick={() => setSelectedAvatar(a)}
-                    className={`w-12 h-12 text-2xl flex items-center justify-center rounded-xl transition-all ${selectedAvatar === a ? 'bg-red-600 scale-110 shadow-lg' : 'bg-slate-800 hover:bg-slate-700'}`}
+                    className={`w-10 h-10 text-xl flex items-center justify-center rounded-xl transition-all ${selectedAvatar === a ? 'bg-red-600 scale-110 shadow-lg' : 'bg-slate-800 hover:bg-slate-700'}`}
                   >
                     {a}
                   </button>
@@ -226,131 +226,90 @@ const App: React.FC = () => {
               </button>
             </div>
           </form>
-          
-          <div className="mt-8 text-center">
-            <p className="text-[10px] text-white/50 uppercase tracking-widest font-bold">Starts at 0: +10 Win | -3 Loss</p>
-          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 flex flex-col h-screen overflow-hidden">
-      <header className="bg-slate-900 border-b border-slate-800 p-4 sticky top-0 z-40">
+    <div className="fixed inset-0 bg-slate-950 flex flex-col overflow-hidden">
+      <header className="bg-slate-900 border-b border-slate-800 p-4 shrink-0 z-40">
         <div className="container mx-auto flex items-center justify-between gap-4">
-          <div className="flex items-center gap-4">
-            <h1 className="text-xl font-black font-orbitron"><span className="text-red-600">SBLIX</span> HUB</h1>
-            <div className="hidden md:flex bg-slate-800 rounded-lg px-3 py-1 items-center gap-4 border border-slate-700">
-              <div className="flex items-center gap-2">
-                <span className="text-[10px] font-bold text-slate-500 uppercase">Home</span>
-                <span className="font-orbitron text-lg">{gameState.score.home}</span>
-              </div>
-              <div className="w-px h-4 bg-slate-600"></div>
-              <div className="flex items-center gap-2">
-                <span className="font-orbitron text-lg">{gameState.score.away}</span>
-                <span className="text-[10px] font-bold text-slate-500 uppercase">Away</span>
-              </div>
-              <div className="ml-4 px-2 py-0.5 bg-red-600 rounded text-[10px] font-bold animate-pulse">
-                Q{gameState.quarter} - {gameState.timeRemaining}
-              </div>
+          <div className="flex items-center gap-3">
+            <h1 className="text-xl font-black font-orbitron"><span className="text-red-600">SBLIX</span></h1>
+            <div className="flex bg-slate-800 rounded-lg px-2 py-1 items-center gap-2 border border-slate-700 text-[11px]">
+              <span className="font-orbitron font-bold">{gameState.score.home}-{gameState.score.away}</span>
+              <div className="w-px h-3 bg-slate-600"></div>
+              <span className="text-red-500 font-black uppercase animate-pulse">Q{gameState.quarter}</span>
             </div>
           </div>
 
-          <div className="flex items-center gap-4 sm:gap-6">
+          <div className="flex items-center gap-3">
              <button 
               onClick={handleCopyLink}
-              className={`hidden xs:flex items-center gap-2 px-3 py-1.5 rounded-lg border text-[10px] font-black uppercase tracking-widest transition-all ${copied ? 'bg-green-500/10 border-green-500/50 text-green-400' : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-500'}`}
+              className={`p-2 rounded-lg border transition-all ${copied ? 'bg-green-500/10 border-green-500/50 text-green-400' : 'bg-slate-800 border-slate-700 text-slate-400'}`}
             >
-              {copied ? <i className="fas fa-check"></i> : <i className="fas fa-share-nodes"></i>}
-              {copied ? 'Copied' : 'Invite'}
+              <i className={copied ? "fas fa-check" : "fas fa-share-nodes"}></i>
             </button>
 
-            <div className="text-right hidden sm:block">
-              <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Score</div>
-              <div className={`text-lg font-orbitron flex items-center gap-1 ${currentUser.credits >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                {currentUser.credits} pts
+            <div className="text-right hidden xs:block">
+              <div className={`text-sm font-orbitron font-bold ${currentUser.credits >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                {currentUser.credits}
               </div>
             </div>
             <div className="flex items-center gap-2 bg-slate-800 p-1.5 rounded-xl border border-slate-700">
-              <span className="text-xl">{currentUser.avatar}</span>
-              <div className="hidden sm:block">
-                <div className="text-sm font-bold truncate max-w-[80px]">{currentUser.username}</div>
-              </div>
+              <span className="text-lg">{currentUser.avatar}</span>
             </div>
           </div>
         </div>
       </header>
 
-      <nav className="bg-slate-900 border-b border-slate-800">
+      <nav className="bg-slate-900 border-b border-slate-800 shrink-0">
         <div className="container mx-auto flex">
-          <button 
-            onClick={() => setActiveTab('bets')}
-            className={`flex-1 py-4 text-xs font-orbitron font-bold tracking-widest uppercase transition-all border-b-2 flex items-center justify-center gap-2 ${activeTab === 'bets' ? 'border-red-600 text-white bg-red-600/5' : 'border-transparent text-slate-500'}`}
-          >
-            <i className="fas fa-ticket-alt"></i>
-            <span className="hidden sm:inline">Prop Bets</span>
-          </button>
-          <button 
-            onClick={() => setActiveTab('chat')}
-            className={`flex-1 py-4 text-xs font-orbitron font-bold tracking-widest uppercase transition-all border-b-2 flex items-center justify-center gap-2 ${activeTab === 'chat' ? 'border-blue-600 text-white bg-blue-600/5' : 'border-transparent text-slate-500'}`}
-          >
-            <i className="fas fa-comments"></i>
-            <span className="hidden sm:inline">Party Chat</span>
-          </button>
-          <button 
-            onClick={() => setActiveTab('leaderboard')}
-            className={`flex-1 py-4 text-xs font-orbitron font-bold tracking-widest uppercase transition-all border-b-2 flex items-center justify-center gap-2 ${activeTab === 'leaderboard' ? 'border-yellow-500 text-white bg-yellow-500/5' : 'border-transparent text-slate-500'}`}
-          >
-            <i className="fas fa-trophy"></i>
-            <span className="hidden sm:inline">Standings</span>
-          </button>
+          {[
+            { id: 'bets', icon: 'fa-ticket-alt', label: 'Props' },
+            { id: 'chat', icon: 'fa-comments', label: 'Chat' },
+            { id: 'leaderboard', icon: 'fa-trophy', label: 'Rank' }
+          ].map((tab) => (
+            <button 
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id as TabType)}
+              className={`flex-1 py-3 text-[10px] font-orbitron font-bold tracking-widest uppercase transition-all border-b-2 flex flex-col items-center gap-1 ${activeTab === tab.id ? 'border-red-600 text-white bg-red-600/5' : 'border-transparent text-slate-500'}`}
+            >
+              <i className={`fas ${tab.icon} text-base`}></i>
+              {tab.label}
+            </button>
+          ))}
         </div>
       </nav>
 
-      <main className="flex-1 container mx-auto p-4 overflow-hidden relative">
-        <div className="h-full">
+      <main className="flex-1 overflow-hidden p-3 pb-safe">
+        <div className="h-full container mx-auto">
            {activeTab === 'bets' && (
-             <div className="h-full bg-slate-900/30 rounded-2xl border border-slate-800/50">
-               <BettingPanel 
-                  propBets={propBets} 
-                  user={currentUser} 
-                  onPlaceBet={placeBet}
-                  allBets={userBets}
-                  onGenerateBets={handleGenerateBets}
-                  isGenerating={isGeneratingBets}
-                  onResolveBet={resolveBet}
-               />
-             </div>
+             <BettingPanel 
+                propBets={propBets} 
+                user={currentUser} 
+                onPlaceBet={placeBet}
+                allBets={userBets}
+                onGenerateBets={handleGenerateBets}
+                isGenerating={isGeneratingBets}
+                onResolveBet={resolveBet}
+             />
            )}
 
            {activeTab === 'chat' && (
-             <div className="h-full">
-               <ChatRoom 
-                user={currentUser} 
-                messages={messages} 
-                onSendMessage={sendMessage} 
-               />
-             </div>
+             <ChatRoom 
+              user={currentUser} 
+              messages={messages} 
+              onSendMessage={sendMessage} 
+             />
            )}
 
            {activeTab === 'leaderboard' && (
-             <div className="h-full">
-               <Leaderboard users={users} currentUser={currentUser} />
-             </div>
+             <Leaderboard users={users} currentUser={currentUser} />
            )}
         </div>
       </main>
-
-      <style>{`
-        @keyframes marquee {
-          0% { transform: translateX(0); }
-          100% { transform: translateX(-50%); }
-        }
-        .animate-marquee {
-          animation: marquee 30s linear infinite;
-        }
-      `}</style>
     </div>
   );
 };
