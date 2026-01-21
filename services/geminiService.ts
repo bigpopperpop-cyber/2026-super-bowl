@@ -1,7 +1,16 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+// Safe access to environment variables
+const getApiKey = () => {
+  try {
+    return (typeof process !== 'undefined' && process.env.API_KEY) || '';
+  } catch {
+    return '';
+  }
+};
+
+const ai = new GoogleGenAI({ apiKey: getApiKey() });
 
 export const getAICommentary = async (
   messages: any[],
@@ -9,7 +18,6 @@ export const getAICommentary = async (
   leaderboard: any[]
 ) => {
   try {
-    // Prepare leaderboard string for the AI
     const standings = leaderboard
       .slice(0, 5)
       .map((u, i) => `#${i + 1} ${u.username} (${u.credits} pts)`)

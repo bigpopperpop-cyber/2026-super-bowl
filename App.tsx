@@ -1,12 +1,12 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import { User, PropBet, UserBet, ChatMessage, GameState, BetStatus } from './types';
-import { INITIAL_PROP_BETS, AVATARS } from './constants';
-import { getAICommentary, generatePropBets } from './services/geminiService';
-import BettingPanel from './components/BettingPanel';
-import ChatRoom from './components/ChatRoom';
-import Leaderboard from './components/Leaderboard';
+import { User, PropBet, UserBet, ChatMessage, GameState, BetStatus } from './types.ts';
+import { INITIAL_PROP_BETS, AVATARS } from './constants.tsx';
+import { getAICommentary, generatePropBets } from './services/geminiService.ts';
+import BettingPanel from './components/BettingPanel.tsx';
+import ChatRoom from './components/ChatRoom.tsx';
+import Leaderboard from './components/Leaderboard.tsx';
 
 type TabType = 'bets' | 'chat' | 'leaderboard';
 
@@ -28,7 +28,6 @@ const App: React.FC = () => {
   const [loginUsername, setLoginUsername] = useState('');
   const [selectedAvatar, setSelectedAvatar] = useState(AVATARS[0]);
 
-  // Persistent storage simulation (Local Storage)
   useEffect(() => {
     const savedUsers = localStorage.getItem('sb_users');
     const savedBets = localStorage.getItem('sb_bets');
@@ -137,7 +136,7 @@ const App: React.FC = () => {
     if (currentUser) {
        setCurrentUser(updatedUsers.find(u => u.id === currentUser.id) || null);
     }
-    triggerAICommentary(`Bet ${betId} just closed! Some of you are eating steak, others are eating crow!`);
+    triggerAICommentary(`Bet resolved! Check the leaderboard to see who's crying.`);
   };
 
   const sendMessage = (text: string) => {
@@ -238,7 +237,6 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-slate-950 flex flex-col h-screen overflow-hidden">
-      {/* Header / Scoreboard */}
       <header className="bg-slate-900 border-b border-slate-800 p-4 sticky top-0 z-40">
         <div className="container mx-auto flex items-center justify-between gap-4">
           <div className="flex items-center gap-4">
@@ -284,7 +282,6 @@ const App: React.FC = () => {
         </div>
       </header>
 
-      {/* Tab Navigation */}
       <nav className="bg-slate-900 border-b border-slate-800">
         <div className="container mx-auto flex">
           <button 
@@ -293,7 +290,6 @@ const App: React.FC = () => {
           >
             <i className="fas fa-ticket-alt"></i>
             <span className="hidden sm:inline">Prop Bets</span>
-            <span className="sm:hidden">Bets</span>
           </button>
           <button 
             onClick={() => setActiveTab('chat')}
@@ -301,7 +297,6 @@ const App: React.FC = () => {
           >
             <i className="fas fa-comments"></i>
             <span className="hidden sm:inline">Party Chat</span>
-            <span className="sm:hidden">Chat</span>
           </button>
           <button 
             onClick={() => setActiveTab('leaderboard')}
@@ -309,7 +304,6 @@ const App: React.FC = () => {
           >
             <i className="fas fa-trophy"></i>
             <span className="hidden sm:inline">Standings</span>
-            <span className="sm:hidden">Leader</span>
           </button>
         </div>
       </nav>
@@ -347,21 +341,6 @@ const App: React.FC = () => {
            )}
         </div>
       </main>
-
-      <div className="bg-red-600 py-1 overflow-hidden whitespace-nowrap hidden sm:block flex-shrink-0">
-        <div className="flex animate-marquee gap-8">
-          {[1,2,3].map(i => (
-            <span key={i} className="text-[10px] font-black uppercase tracking-[0.2em] flex items-center gap-4">
-              <span>Next Prop: "Will there be a scuffle in the 2nd quarter?" Odds: x4.50</span>
-              <span className="opacity-30">|</span>
-              <span>Prop: "Over/Under 2.5 Interceptions" Odds: x2.10</span>
-              <span className="opacity-30">|</span>
-              <span>Gerry the Gambler: "Don't blink or you'll miss the money!"</span>
-              <span className="opacity-30">|</span>
-            </span>
-          ))}
-        </div>
-      </div>
 
       <style>{`
         @keyframes marquee {

@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo } from 'react';
-import { PropBet, User, UserBet, BetStatus } from '../types';
+import { PropBet, User, UserBet, BetStatus } from '../types.ts';
 
 interface BettingPanelProps {
   propBets: PropBet[];
@@ -63,7 +63,6 @@ const BettingPanel: React.FC<BettingPanelProps> = ({
 
   return (
     <div className="p-4 flex flex-col h-full overflow-hidden">
-      {/* Header Section */}
       <div className="flex flex-col gap-4 mb-6">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div>
@@ -73,14 +72,6 @@ const BettingPanel: React.FC<BettingPanelProps> = ({
             </h2>
             <div className="flex items-center gap-3 mt-1">
               <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">Win: +10 | Loss: -3</p>
-              {user.credits < 0 && (
-                <button 
-                  onClick={() => window.alert("Plea for mercy sent to the host! Better start talking nice in the chat...")}
-                  className="text-[10px] bg-red-500/10 text-red-400 border border-red-500/20 px-2 py-0.5 rounded hover:bg-red-500/20 transition-all font-black uppercase"
-                >
-                  Negotiate Debt
-                </button>
-              )}
             </div>
           </div>
           
@@ -101,7 +92,6 @@ const BettingPanel: React.FC<BettingPanelProps> = ({
           </button>
         </div>
 
-        {/* Category Filters */}
         <div className="flex gap-2 overflow-x-auto pb-2 custom-scrollbar no-scrollbar">
           {categories.map(cat => (
             <button
@@ -119,7 +109,6 @@ const BettingPanel: React.FC<BettingPanelProps> = ({
         </div>
       </div>
 
-      {/* Bets Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 overflow-y-auto custom-scrollbar pr-2 pb-10">
         {filteredBets.map((bet) => {
           const myBet = getMyBetOn(bet.id);
@@ -138,7 +127,6 @@ const BettingPanel: React.FC<BettingPanelProps> = ({
               }`}
               onClick={() => !myBet && !bet.resolved && setSelectedBet(bet)}
             >
-              {/* AI Generated Badge */}
               {isAIBet && (
                 <div className="absolute -top-1 -right-1 z-10">
                   <div className="bg-indigo-600 text-[8px] font-black uppercase px-2 py-1 rounded-bl-lg shadow-sm">AI</div>
@@ -195,7 +183,6 @@ const BettingPanel: React.FC<BettingPanelProps> = ({
                 </div>
               )}
 
-              {/* Host Control */}
               {!bet.resolved && (
                 <button 
                   onClick={(e) => {
@@ -211,16 +198,8 @@ const BettingPanel: React.FC<BettingPanelProps> = ({
             </div>
           );
         })}
-
-        {filteredBets.length === 0 && (
-          <div className="col-span-full py-20 text-center opacity-30">
-            <i className="fas fa-filter text-4xl mb-4"></i>
-            <p className="font-orbitron">No props in this category yet.</p>
-          </div>
-        )}
       </div>
 
-      {/* Place Bet Modal */}
       {selectedBet && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-slate-900 border border-slate-700 p-6 rounded-2xl w-full max-w-md shadow-2xl">
@@ -255,15 +234,6 @@ const BettingPanel: React.FC<BettingPanelProps> = ({
                 </div>
               </div>
 
-              <div className="bg-blue-600/10 p-4 rounded-xl border border-blue-500/20">
-                 <div className="flex items-center gap-3 text-blue-400">
-                    <i className="fas fa-shield-halved text-xl"></i>
-                    <div className="text-[10px] uppercase font-black tracking-widest leading-tight">
-                       This pick is final once locked. 10 points for a win, -3 for a loss.
-                    </div>
-                 </div>
-              </div>
-
               <div className="flex gap-3">
                 <button
                   type="submit"
@@ -278,7 +248,6 @@ const BettingPanel: React.FC<BettingPanelProps> = ({
         </div>
       )}
 
-      {/* Settle Bet Modal */}
       {resolvingBet && (
         <div className="fixed inset-0 bg-black/90 backdrop-blur-md flex items-center justify-center p-4 z-50">
           <div className="bg-slate-950 border-2 border-red-500/30 p-8 rounded-3xl w-full max-w-md shadow-2xl relative overflow-hidden">
@@ -287,7 +256,6 @@ const BettingPanel: React.FC<BettingPanelProps> = ({
             <p className="text-white mb-8 font-bold leading-relaxed border-l-4 border-slate-700 pl-4">{resolvingBet.question}</p>
             
             <div className="space-y-3">
-              <label className="block text-[10px] font-black uppercase text-slate-500 mb-2 tracking-widest">Select the actual outcome</label>
               {resolvingBet.options.map(opt => (
                 <button
                   key={opt}
@@ -305,22 +273,12 @@ const BettingPanel: React.FC<BettingPanelProps> = ({
                 onClick={() => setResolvingBet(null)}
                 className="w-full mt-6 py-2 text-slate-500 text-[10px] font-black uppercase tracking-widest hover:text-white transition-colors"
               >
-                Abort Settlement
+                Cancel
               </button>
             </div>
           </div>
         </div>
       )}
-
-      <style>{`
-        .no-scrollbar::-webkit-scrollbar {
-          display: none;
-        }
-        .no-scrollbar {
-          -ms-overflow-style: none;
-          scrollbar-width: none;
-        }
-      `}</style>
     </div>
   );
 };
