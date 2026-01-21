@@ -1,6 +1,5 @@
-
 import React, { useState, useEffect, useRef } from 'react';
-import { ChatMessage, User } from '../types.ts';
+import { ChatMessage, User } from '../types';
 
 interface ChatRoomProps {
   user: User;

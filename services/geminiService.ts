@@ -1,17 +1,22 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
 
-// process.env.API_KEY is replaced at build time by Vite or shimmed in index.html
-const apiKey = process.env.API_KEY || '';
-const ai = new GoogleGenAI({ apiKey });
+// Ensure we have a valid key string or fallback
+const apiKey = (typeof process !== 'undefined' && process.env.API_KEY) ? process.env.API_KEY : '';
+
+// Function to get a fresh instance - handles cases where key might be injected later
+const getAI = () => {
+  if (!apiKey || apiKey === 'undefined' || apiKey === '') return null;
+  return new GoogleGenAI({ apiKey });
+};
 
 export const getAICommentary = async (
   messages: any[],
   gameState: any,
   leaderboard: any[]
 ) => {
-  if (!apiKey) {
-    console.warn("Gemini API Key missing. Commentary disabled.");
+  const ai = getAI();
+  if (!ai) {
+    console.warn("Gemini API Key missing or invalid. AI Commentary disabled.");
     return "The betting floor is heating up! Who's taking the over?";
   }
 
@@ -36,7 +41,7 @@ export const getAICommentary = async (
       If someone has negative points, give them some grief! If someone is winning, call them a 'sharp' or ask if they're fixing the game. 
       Use heavy sports betting lingo (parlays, spreads, locks, bad beats). Be punchy and hilarious.`,
     });
-    return response.text;
+    return response.text || "Standings are looking wild! Someone's about to go bust!";
   } catch (error) {
     console.error("Gemini Error:", error);
     return "Standings are looking wild! Someone's about to go bust!";
@@ -44,7 +49,8 @@ export const getAICommentary = async (
 };
 
 export const generatePropBets = async () => {
-  if (!apiKey) return [];
+  const ai = getAI();
+  if (!ai) return [];
   
   try {
     const response = await ai.models.generateContent({
@@ -72,7 +78,7 @@ export const generatePropBets = async () => {
       }
     });
     
-    return JSON.parse(response.text);
+    return JSON.parse(response.text || "[]");
   } catch (error) {
     console.error("Error generating bets:", error);
     return [];

@@ -1,6 +1,5 @@
-
 import React from 'react';
-import { User } from '../types.ts';
+import { User } from '../types';
 
 interface LeaderboardProps {
   users: User[];

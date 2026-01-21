@@ -1,11 +1,10 @@
-
 import React, { useState, useEffect } from 'react';
-import { User, PropBet, UserBet, ChatMessage, GameState, BetStatus } from './types.ts';
-import { INITIAL_PROP_BETS, AVATARS } from './constants.tsx';
-import { getAICommentary, generatePropBets } from './services/geminiService.ts';
-import BettingPanel from './components/BettingPanel.tsx';
-import ChatRoom from './components/ChatRoom.tsx';
-import Leaderboard from './components/Leaderboard.tsx';
+import { User, PropBet, UserBet, ChatMessage, GameState, BetStatus } from './types';
+import { INITIAL_PROP_BETS, AVATARS } from './constants';
+import { getAICommentary, generatePropBets } from './services/geminiService';
+import BettingPanel from './components/BettingPanel';
+import ChatRoom from './components/ChatRoom';
+import Leaderboard from './components/Leaderboard';
 
 type TabType = 'bets' | 'chat' | 'leaderboard';
 
