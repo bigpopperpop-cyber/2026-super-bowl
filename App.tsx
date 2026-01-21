@@ -8,6 +8,13 @@ import Leaderboard from './components/Leaderboard';
 
 type TabType = 'bets' | 'chat' | 'leaderboard';
 
+const generateId = () => {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  return Math.random().toString(36).substring(2) + Date.now().toString(36);
+};
+
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [users, setUsers] = useState<User[]>([]);
@@ -31,13 +38,12 @@ const App: React.FC = () => {
   const [loginPartyCode, setLoginPartyCode] = useState('');
   const [selectedAvatar, setSelectedAvatar] = useState(AVATARS[0]);
 
-  // Ref to track state without closure issues
   const stateRef = useRef({ users, userBets, messages, propBets, gameState });
 
   useEffect(() => {
     stateRef.current = { users, userBets, messages, propBets, gameState };
     
-    // Persist to local storage
+    // Save to local storage
     localStorage.setItem('sb_users', JSON.stringify(users));
     localStorage.setItem('sb_bets', JSON.stringify(userBets));
     localStorage.setItem('sb_messages', JSON.stringify(messages));
@@ -54,7 +60,6 @@ const App: React.FC = () => {
     try {
       setIsSyncing(true);
       
-      // If pushing, we actually want to FETCH first to merge and prevent overwriting others
       let cloudData: any = null;
       if (push) {
         const preFetch = await fetch(url);
@@ -65,8 +70,6 @@ const App: React.FC = () => {
       }
 
       if (cloudData) {
-        // ALWAYS merge messages by ID, regardless of overall timestamp
-        // This is the key to multi-user chat working
         setMessages(prev => {
           const msgMap = new Map(prev.map(m => [m.id, m]));
           (cloudData.messages || []).forEach((m: ChatMessage) => msgMap.set(m.id, m));
@@ -75,7 +78,6 @@ const App: React.FC = () => {
             .slice(-100);
         });
 
-        // Merge users and credits
         setUsers(prev => {
           const userMap = new Map(prev.map(u => [u.id, u]));
           (cloudData.users || []).forEach((u: User) => {
@@ -85,7 +87,6 @@ const App: React.FC = () => {
           return Array.from(userMap.values());
         });
 
-        // Other state updates (Game state, Props) only if cloud is actually newer
         if (cloudData.updatedAt > lastSyncedAt || push) {
           if (cloudData.userBets) {
             setUserBets(prev => {
@@ -109,7 +110,6 @@ const App: React.FC = () => {
       }
 
       if (push) {
-        // Wait a micro-task for states to settle before pushing the merged result
         setTimeout(async () => {
           const payload = {
             users: stateRef.current.users,
@@ -122,7 +122,6 @@ const App: React.FC = () => {
           await fetch(url, { method: 'POST', body: JSON.stringify(payload) });
         }, 50);
       }
-
     } catch (e) {
       console.error("Sync error:", e);
     } finally {
@@ -131,12 +130,31 @@ const App: React.FC = () => {
   }, [partyCode, lastSyncedAt]);
 
   useEffect(() => {
+    // Restore from LocalStorage on mount
     const savedCode = localStorage.getItem('sb_party_code');
     const savedUser = localStorage.getItem('sb_current_user');
-    if (savedCode) setPartyCode(savedCode);
-    if (savedUser) setCurrentUser(JSON.parse(savedUser));
+    const savedUsers = localStorage.getItem('sb_users');
+    const savedMessages = localStorage.getItem('sb_messages');
 
-    const interval = setInterval(() => syncWithCloud(false), 3000);
+    try {
+      if (savedCode) setPartyCode(savedCode);
+      if (savedUser) {
+        const parsedUser = JSON.parse(savedUser);
+        if (parsedUser && typeof parsedUser === 'object') setCurrentUser(parsedUser);
+      }
+      if (savedUsers) {
+        const parsedUsers = JSON.parse(savedUsers);
+        if (Array.isArray(parsedUsers)) setUsers(parsedUsers);
+      }
+      if (savedMessages) {
+        const parsedMessages = JSON.parse(savedMessages);
+        if (Array.isArray(parsedMessages)) setMessages(parsedMessages);
+      }
+    } catch (e) {
+      console.warn("Failed to load local session data", e);
+    }
+
+    const interval = setInterval(() => syncWithCloud(false), 3500);
     return () => clearInterval(interval);
   }, [syncWithCloud]);
 
@@ -149,7 +167,7 @@ const App: React.FC = () => {
     if (existingUser) {
       setCurrentUser(existingUser);
     } else {
-      const newUser: User = { id: crypto.randomUUID(), username: loginUsername.trim(), realName: loginRealName.trim(), avatar: selectedAvatar, credits: 0 };
+      const newUser: User = { id: generateId(), username: loginUsername.trim(), realName: loginRealName.trim(), avatar: selectedAvatar, credits: 0 };
       setUsers(prev => [...prev, newUser]);
       setCurrentUser(newUser);
     }
@@ -158,9 +176,8 @@ const App: React.FC = () => {
 
   const sendMessage = (text: string) => {
     if (!currentUser) return;
-    const newMsg: ChatMessage = { id: crypto.randomUUID(), userId: currentUser.id, username: currentUser.username, text, timestamp: Date.now() };
+    const newMsg: ChatMessage = { id: generateId(), userId: currentUser.id, username: currentUser.username, text, timestamp: Date.now() };
     setMessages(prev => [...prev, newMsg]);
-    // Immediate push trigger
     syncWithCloud(true);
     if (Math.random() > 0.4) setTimeout(() => triggerAICommentary(), 2000);
   };
@@ -168,12 +185,13 @@ const App: React.FC = () => {
   const triggerAICommentary = async () => {
     const sortedUsers = [...users].sort((a, b) => (b.credits || 0) - (a.credits || 0));
     const commentary = await getAICommentary(messages, gameState, sortedUsers);
-    const aiMsg: ChatMessage = { id: crypto.randomUUID(), userId: 'ai-bot', username: 'Gerry the Gambler', text: commentary, timestamp: Date.now(), isAI: true };
+    const aiMsg: ChatMessage = { id: generateId(), userId: 'ai-bot', username: 'Gerry the Gambler', text: commentary, timestamp: Date.now(), isAI: true };
     setMessages(prev => [...prev, aiMsg]);
     syncWithCloud(true);
   };
 
-  const clearSession = () => { if (confirm("Clear session?")) { localStorage.clear(); window.location.reload(); } };
+  const clearSession = () => { if (confirm("Clear session data?")) { localStorage.clear(); window.location.reload(); } };
+  
   const handleCopyLink = () => {
     const shareUrl = partyCode ? `${window.location.origin}${window.location.pathname}?room=${partyCode}` : window.location.href;
     navigator.clipboard.writeText(shareUrl);
@@ -190,10 +208,10 @@ const App: React.FC = () => {
               <i className="fas fa-football-ball text-red-600 text-3xl"></i>
             </div>
             <h1 className="text-2xl font-black font-orbitron tracking-tighter uppercase">SB LIX <span className="text-red-500">Party</span></h1>
-            <p className="text-slate-400 font-bold uppercase tracking-widest text-[9px] mt-1">Real-time Multi-user Sync Enabled</p>
+            <p className="text-slate-400 font-bold uppercase tracking-widest text-[9px] mt-1">Join the Party Board</p>
           </div>
           <form onSubmit={handleLogin} className="space-y-4">
-            <div className="flex flex-wrap gap-2 justify-center max-h-32 overflow-y-auto p-3 rounded-2xl bg-black/40 border border-white/5">
+            <div className="flex flex-wrap gap-2 justify-center max-h-32 overflow-y-auto p-3 rounded-2xl bg-black/40 border border-white/5 custom-scrollbar">
               {AVATARS.map(a => (
                 <button key={a} type="button" onClick={() => setSelectedAvatar(a)} className={`w-10 h-10 text-xl flex items-center justify-center rounded-xl transition-all ${selectedAvatar === a ? 'bg-red-600 scale-110 shadow-lg border-2 border-white' : 'bg-slate-800'}`}>{a}</button>
               ))}
@@ -236,8 +254,10 @@ const App: React.FC = () => {
             )}
           </div>
           <div className="flex items-center gap-2">
-            <div className={`text-[11px] font-orbitron font-black px-2 py-1 rounded-md bg-slate-950 border border-slate-800 ${currentUser.credits >= 0 ? 'text-green-400' : 'text-red-400'}`}>{currentUser.credits} PTS</div>
-            <div className="w-8 h-8 flex items-center justify-center bg-slate-800 rounded-lg border border-slate-700 text-lg">{currentUser.avatar}</div>
+            <div className={`text-[11px] font-orbitron font-black px-2 py-1 rounded-md bg-slate-950 border border-slate-800 ${(currentUser?.credits || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+              {currentUser?.credits || 0} PTS
+            </div>
+            <div className="w-8 h-8 flex items-center justify-center bg-slate-800 rounded-lg border border-slate-700 text-lg">{currentUser?.avatar}</div>
           </div>
         </div>
       </header>
@@ -245,14 +265,14 @@ const App: React.FC = () => {
       <main className="flex-1 overflow-hidden">
         <div className="h-full container mx-auto">
            {activeTab === 'bets' && <BettingPanel propBets={propBets} user={currentUser} onPlaceBet={(bid, amt, sel) => {
-              const nb: UserBet = { id: crypto.randomUUID(), userId: currentUser.id, betId: bid, amount: 0, selection: sel, status: BetStatus.PENDING, placedAt: Date.now() };
+              const nb: UserBet = { id: generateId(), userId: currentUser.id, betId: bid, amount: 0, selection: sel, status: BetStatus.PENDING, placedAt: Date.now() };
               setUserBets(p => [...p, nb]);
               syncWithCloud(true);
            }} allBets={userBets} onResolveBet={(bid, win) => {
               setPropBets(p => p.map(pb => pb.id === bid ? { ...pb, resolved: true, outcome: win } : pb));
               setUsers(uList => uList.map(u => {
                 const b = userBets.find(ub => ub.betId === bid && ub.userId === u.id);
-                if (b) return { ...u, credits: u.credits + (b.selection === win ? 10 : -3) };
+                if (b) return { ...u, credits: (u.credits || 0) + (b.selection === win ? 10 : -3) };
                 return u;
               }));
               setUserBets(ubList => ubList.map(ub => ub.betId === bid ? { ...ub, status: ub.selection === win ? BetStatus.WON : BetStatus.LOST } : ub));
