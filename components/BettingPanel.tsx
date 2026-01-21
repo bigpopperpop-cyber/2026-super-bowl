@@ -57,29 +57,29 @@ const BettingPanel: React.FC<BettingPanelProps> = ({
   };
 
   return (
-    <div className="p-4 flex flex-col h-full overflow-hidden">
-      <div className="flex flex-col gap-4 mb-6">
+    <div className="flex flex-col h-full overflow-hidden">
+      <div className="px-4 pt-2 flex flex-col gap-3 mb-4 shrink-0">
         <div className="flex justify-between items-center">
           <div>
-            <h2 className="text-xl font-orbitron flex items-center gap-2 text-white">
-              <i className="fas fa-ticket-alt text-yellow-400"></i>
-              Full Game Prop Pool
+            <h2 className="text-lg font-orbitron flex items-center gap-2 text-white">
+              <i className="fas fa-ticket-alt text-yellow-400 text-sm"></i>
+              Prop Pool
             </h2>
-            <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold mt-1">
-              Betting open until settled | Correct: +10 | Wrong: -3
+            <p className="text-[9px] text-slate-500 uppercase tracking-widest font-black mt-0.5">
+              Winner: +10 | Loser: -3
             </p>
           </div>
         </div>
 
-        <div className="flex gap-2 overflow-x-auto pb-2 custom-scrollbar no-scrollbar">
+        <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
           {categories.map(cat => (
             <button
               key={cat}
               onClick={() => setCategoryFilter(cat)}
-              className={`px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-tighter transition-all whitespace-nowrap border ${
+              className={`px-4 py-2 rounded-full text-[10px] font-black uppercase tracking-tight transition-all whitespace-nowrap border ${
                 categoryFilter === cat 
-                  ? 'bg-white text-slate-900 border-white shadow-lg' 
-                  : 'bg-slate-800 text-slate-400 border-slate-700 hover:border-slate-500'
+                  ? 'bg-white text-slate-900 border-white shadow-lg scale-105' 
+                  : 'bg-slate-800 text-slate-400 border-slate-700'
               }`}
             >
               {cat}
@@ -88,7 +88,7 @@ const BettingPanel: React.FC<BettingPanelProps> = ({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 overflow-y-auto custom-scrollbar pr-2 pb-10">
+      <div className="flex-1 overflow-y-auto custom-scrollbar px-4 pb-20 space-y-3">
         {filteredBets.map((bet) => {
           const myBet = getMyBetOn(bet.id);
           const stats = getBetStats(bet.id);
@@ -96,45 +96,49 @@ const BettingPanel: React.FC<BettingPanelProps> = ({
           return (
             <div 
               key={bet.id} 
-              className={`p-5 rounded-2xl glass-card transition-all border relative overflow-hidden flex flex-col group ${
+              className={`p-4 rounded-2xl glass-card transition-all border relative overflow-hidden flex flex-col active:scale-[0.98] ${
                 bet.resolved 
                   ? 'border-slate-800 opacity-60' 
                   : myBet 
-                    ? 'border-blue-500/50 bg-blue-500/5 shadow-inner shadow-blue-500/10' 
-                    : 'border-slate-700 hover:border-blue-500/50 cursor-pointer'
+                    ? 'border-blue-500/40 bg-blue-500/5' 
+                    : 'border-slate-700 cursor-pointer'
               }`}
               onClick={() => !myBet && !bet.resolved && setSelectedBet(bet)}
             >
-              <div className="flex justify-between items-start mb-3">
-                <span className={`text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded ${bet.resolved ? 'bg-slate-800 text-slate-500' : 'bg-slate-800 text-slate-400'}`}>
+              <div className="flex justify-between items-start mb-2">
+                <span className={`text-[8px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded ${bet.resolved ? 'bg-slate-800 text-slate-600' : 'bg-slate-800 text-slate-400'}`}>
                   {bet.category}
                 </span>
                 {bet.resolved && (
-                   <span className="text-[9px] font-black text-green-500 bg-green-500/10 border border-green-500/30 px-2 rounded-full uppercase">Settled</span>
+                   <span className="text-[8px] font-black text-green-500 bg-green-500/10 border border-green-500/30 px-1.5 rounded-full uppercase">Settled</span>
                 )}
               </div>
               
-              <p className="font-bold text-base mb-4 text-white leading-tight">{bet.question}</p>
+              <p className={`font-bold text-sm mb-3 leading-tight transition-colors ${
+                bet.resolved 
+                  ? 'text-slate-500' 
+                  : myBet 
+                    ? 'text-blue-400' 
+                    : 'text-white'
+              }`}>
+                {bet.question}
+              </p>
               
               <div className="flex-1">
                 {bet.resolved ? (
-                  <div className="space-y-2">
-                    <div className="text-[11px] text-slate-400 uppercase font-black">Winner: <span className="text-yellow-400 ml-1">{bet.outcome}</span></div>
-                    {myBet && (
-                       <div className={`text-[10px] font-black py-1 px-3 rounded-lg inline-block ${myBet.status === BetStatus.WON ? 'bg-green-500 text-white' : 'bg-red-500 text-white'}`}>
-                         {myBet.status === BetStatus.WON ? 'WIN (+10)' : 'LOSS (-3)'}
-                       </div>
-                    )}
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-slate-400 font-bold uppercase">Result:</span>
+                    <span className="text-[10px] text-yellow-400 font-black uppercase">{bet.outcome}</span>
                   </div>
                 ) : myBet ? (
-                  <div className="flex items-center gap-2 text-xs font-bold text-blue-400 mt-2 bg-blue-500/10 p-3 rounded-xl border border-blue-500/20">
-                    <i className="fas fa-check-circle"></i>
-                    Your Pick: {myBet.selection}
+                  <div className="flex items-center gap-1.5 text-[10px] font-black text-blue-400 bg-blue-500/10 py-1.5 px-2.5 rounded-lg border border-blue-500/20 w-fit">
+                    <i className="fas fa-check-circle text-[8px]"></i>
+                    LOCKED: {myBet.selection}
                   </div>
                 ) : (
-                  <div className="flex gap-2 flex-wrap mt-2">
+                  <div className="flex gap-1.5 flex-wrap">
                     {bet.options.map(opt => (
-                      <span key={opt} className="px-3 py-1.5 bg-slate-800/80 text-[10px] rounded-lg border border-slate-700 font-bold text-slate-300">
+                      <span key={opt} className="px-2 py-1 bg-slate-900/50 text-[9px] rounded-md border border-slate-800 font-bold text-slate-400">
                         {opt}
                       </span>
                     ))}
@@ -143,29 +147,21 @@ const BettingPanel: React.FC<BettingPanelProps> = ({
               </div>
 
               {!bet.resolved && (
-                <div className="mt-5 pt-4 border-t border-slate-800/50 flex justify-between items-center text-[9px] uppercase font-black tracking-widest">
-                  <div className="flex flex-col gap-0.5">
-                    <span className="text-slate-600">Total Bets</span>
-                    <span className="text-white font-orbitron">{stats?.count || 0}</span>
+                <div className="mt-3 pt-3 border-t border-slate-800/50 flex justify-between items-center text-[8px] uppercase font-black tracking-widest">
+                  <div className="flex gap-3">
+                    <span className="text-slate-600">Bets: <span className="text-white ml-0.5">{stats?.count || 0}</span></span>
+                    <span className="text-slate-600">Top: <span className="text-yellow-500 ml-0.5">{stats?.popularPick || '-'}</span></span>
                   </div>
-                  <div className="flex flex-col gap-0.5 text-right">
-                    <span className="text-slate-600">Top Pick</span>
-                    <span className="text-yellow-500 truncate max-w-[100px]">{stats?.popularPick || 'TBD'}</span>
-                  </div>
+                  <button 
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setResolvingBet(bet);
+                    }}
+                    className="text-slate-600 hover:text-red-500 p-1"
+                  >
+                    <i className="fas fa-gavel"></i>
+                  </button>
                 </div>
-              )}
-
-              {!bet.resolved && (
-                <button 
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setResolvingBet(bet);
-                  }}
-                  className="mt-4 py-2 text-[10px] font-black uppercase tracking-widest text-slate-600 hover:text-red-500 transition-colors flex items-center justify-center gap-2 border border-slate-800 rounded-lg hover:border-red-500/30"
-                >
-                  <i className="fas fa-gavel"></i>
-                  Settle Result
-                </button>
               )}
             </div>
           );
@@ -173,28 +169,28 @@ const BettingPanel: React.FC<BettingPanelProps> = ({
       </div>
 
       {selectedBet && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-slate-900 border border-slate-700 p-8 rounded-3xl w-full max-w-md shadow-2xl">
-            <div className="flex justify-between items-start mb-6">
+        <div className="fixed inset-0 bg-black/90 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4 z-50">
+          <div className="bg-slate-900 border-t sm:border border-slate-700 p-6 rounded-t-3xl sm:rounded-3xl w-full max-w-md shadow-2xl animate-in slide-in-from-bottom duration-300">
+            <div className="flex justify-between items-start mb-4">
                <div>
-                <h3 className="text-xl font-orbitron text-white">Make Your Choice</h3>
-                <span className="text-[10px] text-blue-400 font-black uppercase tracking-widest">{selectedBet.category} Prop</span>
+                <h3 className="text-lg font-orbitron text-white">Make Your Pick</h3>
+                <span className="text-[9px] text-blue-400 font-black uppercase tracking-widest">{selectedBet.category} Prop</span>
                </div>
-               <button onClick={() => setSelectedBet(null)} className="text-slate-500 hover:text-white p-2"><i className="fas fa-times text-xl"></i></button>
+               <button onClick={() => setSelectedBet(null)} className="text-slate-500 p-2"><i className="fas fa-times text-xl"></i></button>
             </div>
-            <p className="text-white mb-8 font-bold leading-tight text-xl">{selectedBet.question}</p>
+            <p className="text-white mb-6 font-bold leading-tight text-lg">{selectedBet.question}</p>
             
-            <form onSubmit={handleBetSubmit} className="space-y-6">
-              <div className="grid grid-cols-1 gap-3">
+            <form onSubmit={handleBetSubmit} className="space-y-4">
+              <div className="grid grid-cols-1 gap-2">
                 {selectedBet.options.map(opt => (
                   <button
                     key={opt}
                     type="button"
                     onClick={() => setSelection(opt)}
-                    className={`py-4 px-5 rounded-2xl text-sm font-black border transition-all text-left flex justify-between items-center ${
+                    className={`py-4 px-5 rounded-xl text-sm font-black border transition-all text-left flex justify-between items-center active:scale-95 ${
                       selection === opt 
-                        ? 'bg-blue-600 border-blue-400 text-white shadow-lg shadow-blue-600/30 ring-2 ring-white/20' 
-                        : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-500'
+                        ? 'bg-blue-600 border-blue-400 text-white shadow-lg ring-1 ring-white/20' 
+                        : 'bg-slate-800 border-slate-700 text-slate-400'
                     }`}
                   >
                     {opt}
@@ -206,24 +202,23 @@ const BettingPanel: React.FC<BettingPanelProps> = ({
               <button
                 type="submit"
                 disabled={!selection}
-                className="w-full py-5 bg-white text-slate-950 rounded-2xl font-black shadow-xl disabled:opacity-30 uppercase tracking-widest text-sm hover:scale-[1.02] active:scale-[0.98] transition-all"
+                className="w-full py-4 bg-white text-slate-950 rounded-xl font-black shadow-xl disabled:opacity-20 uppercase tracking-widest text-xs active:scale-95 transition-all mt-2"
               >
                 LOCK IN PICK
               </button>
             </form>
+            <div className="h-safe"></div>
           </div>
         </div>
       )}
 
       {resolvingBet && (
-        <div className="fixed inset-0 bg-black/90 backdrop-blur-md flex items-center justify-center p-4 z-50">
-          <div className="bg-slate-950 border-2 border-red-500/30 p-8 rounded-3xl w-full max-w-md shadow-2xl relative overflow-hidden">
-            <div className="absolute top-0 left-0 w-full h-1 bg-red-600"></div>
-            <h3 className="text-xl font-black font-orbitron mb-4 text-red-500 tracking-tighter uppercase italic">Host Control: Settle Prop</h3>
-            <p className="text-white mb-8 font-bold leading-relaxed border-l-4 border-slate-700 pl-4 text-lg">{resolvingBet.question}</p>
+        <div className="fixed inset-0 bg-black/95 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-slate-950 border-2 border-red-900/50 p-6 rounded-2xl w-full max-w-sm shadow-2xl">
+            <h3 className="text-sm font-black font-orbitron mb-3 text-red-500 uppercase italic">Host Settle</h3>
+            <p className="text-white mb-6 font-bold leading-tight text-sm border-l-2 border-red-500 pl-3">{resolvingBet.question}</p>
             
-            <div className="space-y-3">
-              <p className="text-[10px] font-black text-slate-500 uppercase mb-2 tracking-widest">Select the actual outcome:</p>
+            <div className="space-y-2">
               {resolvingBet.options.map(opt => (
                 <button
                   key={opt}
@@ -231,17 +226,17 @@ const BettingPanel: React.FC<BettingPanelProps> = ({
                     onResolveBet?.(resolvingBet.id, opt);
                     setResolvingBet(null);
                   }}
-                  className="w-full py-4 rounded-xl text-sm font-black border border-slate-800 bg-slate-900 text-white hover:bg-green-600 hover:text-white hover:border-green-400 transition-all transform active:scale-95 flex items-center justify-between px-6"
+                  className="w-full py-3 rounded-lg text-[11px] font-black border border-slate-800 bg-slate-900 text-slate-300 active:bg-green-600 active:text-white transition-all flex items-center justify-between px-4"
                 >
                   {opt}
-                  <i className="fas fa-check"></i>
+                  <i className="fas fa-check text-[10px]"></i>
                 </button>
               ))}
               <button
                 onClick={() => setResolvingBet(null)}
-                className="w-full mt-6 py-2 text-slate-500 text-[10px] font-black uppercase tracking-widest hover:text-white transition-colors"
+                className="w-full mt-4 py-2 text-slate-600 text-[10px] font-black uppercase tracking-widest"
               >
-                Close Without Settling
+                Cancel
               </button>
             </div>
           </div>
