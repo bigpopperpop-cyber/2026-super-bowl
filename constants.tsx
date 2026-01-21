@@ -11,11 +11,11 @@ export const INITIAL_PROP_BETS: PropBet[] = [
   },
   {
     id: '2',
-    question: "Which team scores the first Touchdown?",
+    question: "First Team to record a 1st Down?",
     odds: 1.9,
     category: 'Game',
     resolved: false,
-    options: ['Home Team', 'Away Team', 'No TD']
+    options: ['Home Team', 'Away Team']
   },
   {
     id: '3',
@@ -35,35 +35,35 @@ export const INITIAL_PROP_BETS: PropBet[] = [
   },
   {
     id: '5',
-    question: "Will there be a score in the final 2 minutes of the game?",
-    odds: 2.1,
+    question: "Will there be a Replay Challenge in the 4th Quarter?",
+    odds: 2.2,
     category: 'Game',
     resolved: false,
     options: ['Yes', 'No']
   },
   {
     id: '6',
-    question: "Who wins the Super Bowl LIX Title?",
-    odds: 1.9,
+    question: "Will the game go into Overtime?",
+    odds: 5.0,
     category: 'Game',
     resolved: false,
-    options: ['Home Team', 'Away Team']
+    options: ['Yes', 'No']
   },
   {
     id: '7',
-    question: "MVP Award: Which position wins it?",
-    odds: 2.5,
+    question: "Will any player finish with 100+ Receiving Yards?",
+    odds: 1.8,
     category: 'Player',
     resolved: false,
-    options: ['Quarterback', 'Wide Receiver', 'Defense', 'Other']
+    options: ['Yes', 'No']
   },
   {
     id: '8',
-    question: "Color of the Gatorade Shower on the winning coach?",
-    odds: 4.0,
-    category: 'Entertainment',
+    question: "Will there be a successful 4th Down Conversion in the 2nd Half?",
+    odds: 1.6,
+    category: 'Stats',
     resolved: false,
-    options: ['Orange', 'Blue', 'Clear/Water', 'Yellow/Green', 'Red', 'Purple']
+    options: ['Yes', 'No']
   }
 ];
 

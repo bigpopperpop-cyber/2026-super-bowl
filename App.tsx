@@ -30,11 +30,13 @@ const App: React.FC = () => {
     const savedBets = localStorage.getItem('sb_bets');
     const savedMessages = localStorage.getItem('sb_messages');
     const savedProps = localStorage.getItem('sb_props');
+    const savedState = localStorage.getItem('sb_gamestate');
     
     if (savedUsers) setUsers(JSON.parse(savedUsers));
     if (savedBets) setUserBets(JSON.parse(savedBets));
     if (savedMessages) setMessages(JSON.parse(savedMessages));
     if (savedProps) setPropBets(JSON.parse(savedProps));
+    if (savedState) setGameState(JSON.parse(savedState));
   }, []);
 
   useEffect(() => {
@@ -42,7 +44,8 @@ const App: React.FC = () => {
     localStorage.setItem('sb_bets', JSON.stringify(userBets));
     localStorage.setItem('sb_messages', JSON.stringify(messages));
     localStorage.setItem('sb_props', JSON.stringify(propBets));
-  }, [users, userBets, messages, propBets]);
+    localStorage.setItem('sb_gamestate', JSON.stringify(gameState));
+  }, [users, userBets, messages, propBets, gameState]);
 
   const handleCopyLink = () => {
     navigator.clipboard.writeText(window.location.href);
@@ -74,6 +77,62 @@ const App: React.FC = () => {
       localStorage.clear();
       window.location.reload();
     }
+  };
+
+  const autoResolveAllPendingBets = () => {
+    if (!confirm("The 3rd quarter has ended. Settle all pending props with simulated results?")) return;
+
+    // Update Game State
+    const newState: GameState = {
+      ...gameState,
+      quarter: 4,
+      timeRemaining: "15:00"
+    };
+    setGameState(newState);
+
+    // Resolve logic
+    const updatedProps = [...propBets];
+    let updatedUserBets = [...userBets];
+    let updatedUsers = [...users];
+
+    updatedProps.forEach((bet) => {
+      if (!bet.resolved) {
+        // Pick a random simulated winner from the options
+        const winningOption = bet.options[Math.floor(Math.random() * bet.options.length)];
+        bet.resolved = true;
+        bet.outcome = winningOption;
+
+        // Apply results to user bets
+        updatedUserBets = updatedUserBets.map(ub => {
+          if (ub.betId === bet.id && ub.status === BetStatus.PENDING) {
+            const isWin = ub.selection === winningOption;
+            const points = isWin ? 10 : -3;
+            
+            // Find user in updated list to modify their credits
+            const uIdx = updatedUsers.findIndex(u => u.id === ub.userId);
+            if (uIdx !== -1) {
+              updatedUsers[uIdx] = { 
+                ...updatedUsers[uIdx], 
+                credits: updatedUsers[uIdx].credits + points 
+              };
+            }
+            return { ...ub, status: isWin ? BetStatus.WON : BetStatus.LOST };
+          }
+          return ub;
+        });
+      }
+    });
+
+    setPropBets(updatedProps);
+    setUserBets(updatedUserBets);
+    setUsers(updatedUsers);
+    
+    if (currentUser) {
+      const freshUser = updatedUsers.find(u => u.id === currentUser.id);
+      if (freshUser) setCurrentUser(freshUser);
+    }
+
+    triggerAICommentary(`The 3rd Quarter is OVER! All pending props have been simulated. Check the rankings for the current leaders!`);
   };
 
   const placeBet = (betId: string, amount: number, selection: string) => {
@@ -193,7 +252,7 @@ const App: React.FC = () => {
             <div className="space-y-3">
               <button
                 type="submit"
-                className="w-full py-4 bg-white text-slate-900 rounded-xl font-black font-orbitron hover:bg-red-50 transition-all shadow-xl"
+                className="w-full py-4 bg-white text-slate-950 rounded-xl font-black font-orbitron hover:bg-red-50 transition-all shadow-xl"
               >
                 JOIN POOL
               </button>
@@ -225,9 +284,16 @@ const App: React.FC = () => {
           <div className="flex items-center gap-3">
             <h1 className="text-xl font-black font-orbitron"><span className="text-red-600">SBLIX</span></h1>
             <div className="flex bg-slate-800 rounded-lg px-2 py-1 items-center gap-2 border border-slate-700 text-[11px]">
-              <span className="font-orbitron font-bold">{gameState.score.home}-{gameState.score.away}</span>
+              <span className="font-orbitron font-bold">Q{gameState.quarter} {gameState.score.home}-{gameState.score.away}</span>
               <div className="w-px h-3 bg-slate-600"></div>
-              <span className="text-red-500 font-black uppercase">LIVE</span>
+              {gameState.quarter < 4 && (
+                <button 
+                  onClick={autoResolveAllPendingBets}
+                  className="bg-red-600 hover:bg-red-500 text-[9px] px-2 py-0.5 rounded font-black uppercase tracking-tighter transition-colors"
+                >
+                  End Q3
+                </button>
+              )}
             </div>
           </div>
 
