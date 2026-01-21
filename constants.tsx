@@ -68,16 +68,19 @@ export const INITIAL_PROP_BETS: PropBet[] = [
 ];
 
 export const AVATARS = [
-  '🦅', // Eagles/Seahawks/Falcons/Cardinals/Ravens
+  '🦅', // Eagles/Seahawks
   '🦁', // Lions
   '🐯', // Bengals
   '🐆', // Jaguars
-  '🐎', // Colts/Broncos
+  '🐎', // Broncos/Colts
   '🐃', // Bills/Texans
   '🐻', // Bears
   '🐏', // Rams
   '🐬', // Dolphins
-  '⚔️', // Raiders/Vikings/Buccaneers/Titans
-  '🧀', // Packers (Cheesehead)
+  '⚔️', // Vikings/Raiders
+  '🏹', // Chiefs
+  '⛏️', // 49ers
+  '🐦', // Falcons/Cardinals/Ravens
+  '🧀', // Packers
   '⚜️'  // Saints
 ];

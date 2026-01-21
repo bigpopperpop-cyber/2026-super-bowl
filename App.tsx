@@ -69,6 +69,13 @@ const App: React.FC = () => {
     }
   };
 
+  const clearSession = () => {
+    if (confirm("Clear all game data for this device?")) {
+      localStorage.clear();
+      window.location.reload();
+    }
+  };
+
   const placeBet = (betId: string, amount: number, selection: string) => {
     if (!currentUser) return;
     
@@ -83,7 +90,7 @@ const App: React.FC = () => {
     };
 
     setUserBets(prev => [...prev, newBet]);
-    triggerAICommentary(`I just picked ${selection}! Good luck to everyone else!`);
+    triggerAICommentary(`I just picked ${selection}! Let's go!`);
   };
 
   const resolveBet = (betId: string, winningOption: string) => {
@@ -110,7 +117,7 @@ const App: React.FC = () => {
        const freshUser = updatedUsers.find(u => u.id === currentUser.id);
        if (freshUser) setCurrentUser(freshUser);
     }
-    triggerAICommentary(`Result is in for the ${winningOption} bet! Points have been updated.`);
+    triggerAICommentary(`Bet result: ${winningOption}! Scores updated!`);
   };
 
   const sendMessage = (text: string) => {
@@ -150,14 +157,14 @@ const App: React.FC = () => {
             <div className="w-20 h-20 bg-white rounded-2xl mx-auto flex items-center justify-center mb-4 shadow-xl rotate-3">
               <i className="fas fa-football-ball text-red-600 text-4xl"></i>
             </div>
-            <h1 className="text-3xl font-black font-orbitron tracking-tighter">SBLIX <span className="text-red-500">PARTY</span></h1>
-            <p className="text-slate-300 font-semibold mt-2 uppercase tracking-widest text-xs">The Ultimate Prop Pool</p>
+            <h1 className="text-3xl font-black font-orbitron tracking-tighter">SBLIX <span className="text-red-500">MASCOTS</span></h1>
+            <p className="text-slate-300 font-semibold mt-2 uppercase tracking-widest text-xs">Pick Your Team & Start Betting</p>
           </div>
 
           <form onSubmit={handleLogin} className="space-y-6">
             <div>
-              <label className="block text-xs font-bold text-slate-400 uppercase mb-2 text-center">Select Your NFL Mascot</label>
-              <div className="flex flex-wrap gap-2 justify-center">
+              <label className="block text-xs font-bold text-slate-400 uppercase mb-3 text-center">Select Your NFL Mascot Avatar</label>
+              <div className="flex flex-wrap gap-2 justify-center max-h-32 overflow-y-auto p-2 rounded-xl bg-black/20 custom-scrollbar">
                 {AVATARS.map(a => (
                   <button
                     key={a}
@@ -188,7 +195,7 @@ const App: React.FC = () => {
                 type="submit"
                 className="w-full py-4 bg-white text-slate-900 rounded-xl font-black font-orbitron hover:bg-red-50 transition-all shadow-xl"
               >
-                START BETTING
+                JOIN POOL
               </button>
               
               <button
@@ -196,10 +203,16 @@ const App: React.FC = () => {
                 onClick={handleCopyLink}
                 className="w-full py-3 bg-slate-800/50 text-slate-300 border border-slate-700 rounded-xl font-bold text-xs uppercase tracking-widest hover:bg-slate-700 transition-all flex items-center justify-center gap-2"
               >
-                {copied ? <><i className="fas fa-check text-green-400"></i> Party Link Copied!</> : <><i className="fas fa-link"></i> Copy Invite Link</>}
+                {copied ? <><i className="fas fa-check text-green-400"></i> Copied!</> : <><i className="fas fa-link"></i> Copy Invite Link</>}
               </button>
             </div>
           </form>
+
+          <div className="mt-8 text-center">
+            <button onClick={clearSession} className="text-[10px] text-slate-600 uppercase font-black hover:text-white transition-colors">
+              Reset Session Data
+            </button>
+          </div>
         </div>
       </div>
     );
