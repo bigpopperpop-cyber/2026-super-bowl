@@ -27,7 +27,10 @@ const App: React.FC = () => {
   const [copied, setCopied] = useState(false);
   const [partyCode, setPartyCode] = useState<string>('');
   const [isSyncing, setIsSyncing] = useState(false);
+  const [showHostPanel, setShowHostPanel] = useState(false);
   const lastSyncedAtRef = useRef<number>(0);
+  const sessionIdRef = useRef<string | null>(null);
+  
   const [gameState, setGameState] = useState<GameState>({
     quarter: 1,
     timeRemaining: "15:00",
@@ -40,30 +43,40 @@ const App: React.FC = () => {
   const [loginPartyCode, setLoginPartyCode] = useState('');
   const [selectedAvatar, setSelectedAvatar] = useState(AVATARS[0]);
 
-  // Use refs to avoid stale closures in sync intervals
   const stateRef = useRef({ users, userBets, messages, propBets, gameState, partyCode });
 
   useEffect(() => {
     stateRef.current = { users, userBets, messages, propBets, gameState, partyCode };
   }, [users, userBets, messages, propBets, gameState, partyCode]);
 
-  // Persist local identity
   useEffect(() => {
     if (currentUser) localStorage.setItem('sb_current_user', JSON.stringify(currentUser));
     if (partyCode) localStorage.setItem('sb_party_code', partyCode);
   }, [currentUser, partyCode]);
 
-  // Helper to merge remote state into local state
   const mergeState = useCallback((cloudData: any) => {
     if (!cloudData) return;
 
-    // Detect a hard reset from cloud (empty arrays but newer timestamp)
-    const isHardReset = cloudData.updatedAt > lastSyncedAtRef.current && 
-                        (!cloudData.messages || cloudData.messages.length === 0) &&
-                        (!cloudData.users || cloudData.users.length <= 1);
+    // Check for a new session (Global Nuke detected)
+    const cloudSessionId = cloudData.sessionId || null;
+    if (cloudSessionId && sessionIdRef.current && cloudSessionId !== sessionIdRef.current) {
+      console.log("Global reset detected. Wiping local state...");
+      setMessages([]);
+      setUserBets([]);
+      setPropBets(INITIAL_PROP_BETS.map(pb => ({ ...pb, resolved: false, outcome: undefined })));
+      // Keep current user but reset their credits
+      if (currentUser) {
+        setCurrentUser(prev => prev ? { ...prev, credits: 0 } : null);
+        setUsers([currentUser]);
+      }
+      sessionIdRef.current = cloudSessionId;
+      lastSyncedAtRef.current = cloudData.updatedAt;
+      return;
+    }
+    
+    if (!sessionIdRef.current) sessionIdRef.current = cloudSessionId;
 
     setMessages(prev => {
-      if (isHardReset) return [];
       const msgMap = new Map(prev.map(m => [m.id, m]));
       (cloudData.messages || []).forEach((m: ChatMessage) => msgMap.set(m.id, m));
       return Array.from(msgMap.values())
@@ -72,10 +85,6 @@ const App: React.FC = () => {
     });
 
     setUsers(prev => {
-      if (isHardReset) {
-        // Keep current user but clear others
-        return currentUser ? [currentUser] : [];
-      }
       const userMap = new Map(prev.map(u => [u.id, u]));
       (cloudData.users || []).forEach((u: User) => {
         const existing = userMap.get(u.id);
@@ -89,7 +98,6 @@ const App: React.FC = () => {
     if (cloudData.updatedAt > lastSyncedAtRef.current) {
       if (cloudData.userBets) {
         setUserBets(prev => {
-          if (isHardReset) return [];
           const betMap = new Map(prev.map(b => [b.id, b]));
           cloudData.userBets.forEach((b: UserBet) => betMap.set(b.id, b));
           return Array.from(betMap.values());
@@ -109,7 +117,6 @@ const App: React.FC = () => {
     
     try {
       setIsSyncing(true);
-      
       const response = await fetch(url);
       let remoteData: any = null;
       
@@ -123,6 +130,7 @@ const App: React.FC = () => {
 
       if (isPush) {
         const payload = {
+          sessionId: sessionIdRef.current || generateId(),
           users: Array.from(new Map([...(remoteData?.users || []).map((u: any) => [u.id, u]), ...stateRef.current.users.map(u => [u.id, u])]).values()),
           messages: Array.from(new Map([...(remoteData?.messages || []).map((m: any) => [m.id, m]), ...stateRef.current.messages.map(m => [m.id, m])]).values())
             .sort((a: any, b: any) => a.timestamp - b.timestamp)
@@ -145,26 +153,20 @@ const App: React.FC = () => {
     }
   }, [mergeState]);
 
-  const resetRoom = async () => {
+  const nukeRoom = async () => {
     if (!partyCode || partyCode === 'LOCAL') return;
-    if (!confirm("⚠️ RESET HUB? This will clear all messages, bets, and players for EVERYONE in this room. This cannot be undone.")) return;
+    if (!confirm("☢️ NUKE HUB? This wipes EVERY guest's chat and credits. Guests will see a clean room within 2 seconds.")) return;
 
     try {
       setIsSyncing(true);
       const syncKey = `sblix_party_v2_${partyCode.toLowerCase().trim()}`;
       const url = `https://api.keyvalue.xyz/${syncKey}`;
       
-      // Local Clear
-      setMessages([]);
-      setUserBets([]);
-      if (currentUser) {
-        const resetUser = { ...currentUser, credits: 0 };
-        setCurrentUser(resetUser);
-        setUsers([resetUser]);
-      }
-
-      // Cloud Wipe Payload
+      const newSessionId = generateId();
+      
+      // Wipe cloud first
       const payload = {
+        sessionId: newSessionId,
         users: currentUser ? [{ ...currentUser, credits: 0 }] : [],
         messages: [],
         userBets: [],
@@ -172,18 +174,36 @@ const App: React.FC = () => {
         updatedAt: Date.now()
       };
 
-      await fetch(url, { 
+      const res = await fetch(url, { 
         method: 'POST', 
         body: JSON.stringify(payload),
         headers: { 'Content-Type': 'application/json' }
       });
+
+      if (!res.ok) throw new Error("Cloud reset failed");
       
-      alert("Room has been reset. Fresh start!");
+      // Update local state
+      sessionIdRef.current = newSessionId;
+      setMessages([]);
+      setUserBets([]);
+      if (currentUser) {
+        const resetUser = { ...currentUser, credits: 0 };
+        setCurrentUser(resetUser);
+        setUsers([resetUser]);
+      }
+      setPropBets(INITIAL_PROP_BETS.map(pb => ({ ...pb, resolved: false, outcome: undefined })));
+      setShowHostPanel(false);
+      alert("Hub Nuked! All guests have been cleared.");
     } catch (e) {
-      alert("Failed to reset room. Check connection.");
+      alert("Nuke failed. Check internet and try again.");
     } finally {
       setIsSyncing(false);
     }
+  };
+
+  const updateGameScore = (team: 'home' | 'away', change: number) => {
+    setGameState(prev => ({ ...prev, score: { ...prev.score, [team]: Math.max(0, prev.score[team] + change) } }));
+    setTimeout(() => syncWithCloud(true), 100);
   };
 
   useEffect(() => {
@@ -235,13 +255,6 @@ const App: React.FC = () => {
     setTimeout(() => syncWithCloud(true), 100);
   };
 
-  const logout = () => {
-    if (confirm("Logout? Your progress is saved on this device.")) {
-      setCurrentUser(null);
-      localStorage.removeItem('sb_current_user');
-    }
-  };
-
   const sendMessage = (text: string) => {
     if (!currentUser) return;
     const newMsg: ChatMessage = { 
@@ -279,6 +292,13 @@ const App: React.FC = () => {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const resetAllLocal = () => {
+    if(confirm("Wipe your local data? This won't affect others, but will let you log in fresh.")) {
+      localStorage.clear();
+      window.location.href = window.location.pathname;
+    }
+  }
+
   if (!currentUser) {
     return (
       <div className="fixed inset-0 flex items-center justify-center p-4 nfl-gradient overflow-y-auto">
@@ -310,8 +330,9 @@ const App: React.FC = () => {
               <button type="submit" disabled={!loginUsername.trim() || !loginRealName.trim()} className="w-full py-5 bg-white text-slate-950 rounded-[1.5rem] font-black font-orbitron shadow-2xl uppercase tracking-widest text-sm disabled:opacity-30">ENTER HUB</button>
             </div>
           </form>
-          <div className="mt-8 text-center">
-            <button onClick={handleCopyLink} className="text-[11px] text-slate-300 uppercase font-black hover:text-white transition-colors">{copied ? 'Link Copied!' : 'Invite Guests'}</button>
+          <div className="mt-8 flex flex-col gap-2 text-center">
+            <p className="text-slate-500 text-[10px] italic">Hosting 20+ guests? Use the same Room Code.</p>
+            <button onClick={resetAllLocal} className="text-[9px] text-slate-600 uppercase font-black hover:text-white transition-colors">Reset My Local App</button>
           </div>
         </div>
       </div>
@@ -320,7 +341,7 @@ const App: React.FC = () => {
 
   return (
     <div className="fixed inset-0 bg-slate-950 flex flex-col overflow-hidden">
-      <header className="bg-slate-900 border-b border-slate-800 p-3 shrink-0 z-40">
+      <header className="bg-slate-900 border-b border-slate-800 p-3 shrink-0 z-40 shadow-xl">
         <div className="container mx-auto flex items-center justify-between">
           <div className="flex items-center gap-2">
             <h1 className="text-lg font-black font-orbitron text-red-600">SBLIX</h1>
@@ -328,30 +349,25 @@ const App: React.FC = () => {
               <span className="font-orbitron font-bold text-slate-200 uppercase">Q{gameState.quarter}</span>
               <span className="text-slate-400 font-bold">{gameState.score.home}-{gameState.score.away}</span>
             </div>
-            {partyCode && partyCode !== 'LOCAL' && (
-              <div className="flex items-center gap-1 bg-slate-950 border border-slate-800 rounded-md overflow-hidden">
-                <div className={`flex items-center gap-1 px-2 py-0.5 text-[8px] font-black uppercase transition-all ${isSyncing ? 'text-blue-400' : 'text-green-500'}`}>
-                  <div className={`w-1 h-1 rounded-full ${isSyncing ? 'bg-blue-400 animate-pulse' : 'bg-green-500'}`}></div>
-                  {partyCode}
-                </div>
-                <button onClick={resetRoom} className="px-2 py-0.5 border-l border-slate-800 text-[8px] text-slate-600 hover:text-red-500 transition-colors bg-slate-900" title="Reset Room for Everyone">
-                  <i className="fas fa-trash-alt"></i>
-                </button>
-              </div>
-            )}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
+             {partyCode && partyCode !== 'LOCAL' && (
+              <button onClick={() => setShowHostPanel(true)} className="flex items-center gap-1.5 bg-red-600 text-white border border-red-500 rounded-full px-3 py-1 animate-pulse shadow-[0_0_15px_rgba(220,38,38,0.3)]">
+                <i className="fas fa-crown text-[10px]"></i>
+                <span className="text-[10px] font-black uppercase tracking-tighter">HOST</span>
+              </button>
+            )}
             <div className={`text-[11px] font-orbitron font-black px-2 py-1 rounded-md bg-slate-950 border border-slate-800 ${(currentUser?.credits || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
               {(currentUser?.credits || 0)} PTS
             </div>
-            <button onClick={logout} className="w-8 h-8 flex items-center justify-center bg-slate-800 rounded-lg border border-slate-700 text-lg hover:bg-slate-700 transition-colors">
+            <button onClick={() => setShowHostPanel(true)} className="w-8 h-8 flex items-center justify-center bg-slate-800 rounded-lg border border-slate-700 text-lg hover:bg-slate-700 transition-colors">
               {currentUser?.avatar}
             </button>
           </div>
         </div>
       </header>
 
-      <main className="flex-1 overflow-hidden">
+      <main className="flex-1 overflow-hidden relative">
         <div className="h-full container mx-auto">
            {activeTab === 'bets' && <BettingPanel propBets={propBets} user={currentUser} onPlaceBet={(bid, amt, sel) => {
               const nb: UserBet = { id: generateId(), userId: currentUser.id, betId: bid, amount: 0, selection: sel, status: BetStatus.PENDING, placedAt: Date.now() };
@@ -370,6 +386,78 @@ const App: React.FC = () => {
            {activeTab === 'chat' && <ChatRoom user={currentUser} messages={messages} onSendMessage={sendMessage} users={users} />}
            {activeTab === 'leaderboard' && <Leaderboard users={users} currentUser={currentUser} propBets={propBets} userBets={userBets} />}
         </div>
+
+        {showHostPanel && (
+          <div className="absolute inset-0 z-50 bg-black/95 backdrop-blur-2xl animate-in fade-in slide-in-from-right duration-300">
+            <div className="h-full flex flex-col p-6 max-w-lg mx-auto overflow-y-auto custom-scrollbar">
+              <div className="flex justify-between items-center mb-8 shrink-0">
+                <h2 className="text-2xl font-black font-orbitron text-white">ROOM SETTINGS</h2>
+                <button onClick={() => setShowHostPanel(false)} className="text-slate-500 hover:text-white p-2">
+                  <i className="fas fa-times text-2xl"></i>
+                </button>
+              </div>
+
+              <div className="space-y-8">
+                {/* Score Controls */}
+                <div className="glass-card p-6 rounded-3xl border-white/10">
+                  <h3 className="text-[10px] font-black uppercase text-slate-500 tracking-widest mb-4">Update Game State</h3>
+                  <div className="grid grid-cols-2 gap-4 mb-4">
+                    <div className="space-y-2">
+                      <div className="text-center font-orbitron text-4xl font-black text-white">{gameState.score.home}</div>
+                      <div className="flex gap-2">
+                        <button onClick={() => updateGameScore('home', -1)} className="flex-1 bg-slate-800 p-3 rounded-xl text-slate-400">-</button>
+                        <button onClick={() => updateGameScore('home', 1)} className="flex-1 bg-red-600 p-3 rounded-xl text-white">+</button>
+                      </div>
+                      <div className="text-center text-[9px] font-black text-slate-600 uppercase">Home Score</div>
+                    </div>
+                    <div className="space-y-2">
+                      <div className="text-center font-orbitron text-4xl font-black text-white">{gameState.score.away}</div>
+                      <div className="flex gap-2">
+                        <button onClick={() => updateGameScore('away', -1)} className="flex-1 bg-slate-800 p-3 rounded-xl text-slate-400">-</button>
+                        <button onClick={() => updateGameScore('away', 1)} className="flex-1 bg-red-600 p-3 rounded-xl text-white">+</button>
+                      </div>
+                      <div className="text-center text-[9px] font-black text-slate-600 uppercase">Away Score</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Session Management */}
+                <div className="glass-card p-6 rounded-3xl border-red-900/30 bg-red-900/5">
+                  <h3 className="text-[10px] font-black uppercase text-red-500 tracking-widest mb-4 flex items-center gap-2">
+                    <i className="fas fa-exclamation-triangle"></i>
+                    Danger Zone
+                  </h3>
+                  <div className="space-y-4">
+                    <div className="p-4 bg-slate-900/50 rounded-2xl border border-white/5">
+                      <div className="text-[10px] font-bold text-slate-500 mb-1 uppercase">Hub Invite Code</div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-lg font-black text-white flex-1 font-orbitron tracking-widest">{partyCode}</span>
+                        <button onClick={handleCopyLink} className="bg-blue-600 px-3 py-2 rounded-lg text-white text-[10px] font-black uppercase">{copied ? 'COPIED' : 'COPY'}</button>
+                      </div>
+                    </div>
+                    
+                    <button onClick={nukeRoom} className="w-full py-6 bg-red-600 border border-red-400 text-white rounded-2xl font-black uppercase tracking-widest text-sm hover:scale-[1.02] active:scale-95 transition-all shadow-[0_0_20px_rgba(220,38,38,0.4)]">
+                      ☢️ NUKE ROOM & CLEAR GUESTS
+                    </button>
+                    <p className="text-[10px] text-slate-500 text-center uppercase font-black leading-tight">
+                      Instantly wipes all chat, credits, and player lists for everyone connected to room "{partyCode}".
+                    </p>
+                  </div>
+                </div>
+
+                <div className="pt-8 border-t border-white/5 flex flex-col gap-3">
+                   <button onClick={() => { localStorage.removeItem('sb_current_user'); window.location.reload(); }} className="w-full py-4 bg-slate-800 text-white rounded-2xl font-black uppercase tracking-widest text-[10px]">
+                    Switch Profile
+                  </button>
+                  <button onClick={resetAllLocal} className="w-full py-4 text-slate-600 text-[10px] font-black uppercase tracking-widest hover:text-white transition-colors">
+                    Reset My Local Data
+                  </button>
+                </div>
+              </div>
+              <div className="h-20"></div>
+            </div>
+          </div>
+        )}
       </main>
 
       <nav className="bg-slate-900 border-t border-slate-800 pb-safe shadow-[0_-10px_30px_rgba(0,0,0,0.5)]">
