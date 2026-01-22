@@ -241,6 +241,9 @@ const App: React.FC = () => {
   }
 
   if (mode === 'HOST') {
+    const playerLink = `${window.location.origin}${window.location.pathname}?room=${partyCode}`;
+    const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(playerLink)}`;
+
     return (
       <div className="fixed inset-0 bg-slate-950 flex flex-col overflow-hidden font-orbitron">
         <header className="p-6 bg-slate-900 border-b border-slate-800 flex justify-between items-center">
@@ -277,22 +280,33 @@ const App: React.FC = () => {
             </div>
           </div>
 
-          <div className="glass-card p-8 rounded-[2rem] border-blue-900/20 bg-blue-950/5">
+          <div className="glass-card p-8 rounded-[2rem] border-blue-900/20 bg-blue-950/5 text-center">
             <h2 className="text-[11px] font-black text-blue-500 uppercase tracking-widest mb-6">Guest Invitation</h2>
-            <div className="flex flex-col gap-4">
-              <div className="p-4 bg-black rounded-xl border border-slate-800 text-[11px] text-slate-400 font-bold truncate">
-                {window.location.origin}/?room={partyCode}
+            
+            <div className="flex flex-col items-center gap-6">
+              <div className="bg-white p-4 rounded-3xl shadow-2xl border-4 border-blue-500/20">
+                <img 
+                  src={qrCodeUrl} 
+                  alt="Player Invite QR Code" 
+                  className="w-[200px] h-[200px]"
+                />
               </div>
-              <button onClick={handleCopyLink} className="w-full py-4 bg-blue-600 text-white rounded-xl font-black uppercase tracking-widest text-xs">
-                {copied ? 'COPIED!' : 'COPY PLAYER LINK'}
-              </button>
-              <p className="text-[9px] text-slate-500 text-center uppercase font-black">Share this with your 20 guests</p>
+              
+              <div className="w-full space-y-4">
+                <div className="p-4 bg-black rounded-xl border border-slate-800 text-[11px] text-slate-400 font-bold truncate">
+                  {playerLink}
+                </div>
+                <button onClick={handleCopyLink} className="w-full py-4 bg-blue-600 text-white rounded-xl font-black uppercase tracking-widest text-xs shadow-lg shadow-blue-600/20 active:scale-95 transition-all">
+                  {copied ? 'COPIED!' : 'COPY PLAYER LINK'}
+                </button>
+                <p className="text-[9px] text-slate-500 uppercase font-black">Scan to join the Hub instantly</p>
+              </div>
             </div>
           </div>
 
           <div className="glass-card p-8 rounded-[2rem] border-red-900/40 bg-red-950/10">
             <h2 className="text-[11px] font-black text-red-500 uppercase tracking-widest mb-4">Emergency Controls</h2>
-            <button onClick={nukeRoom} className="w-full py-6 bg-red-600 border-2 border-red-400 text-white rounded-2xl font-black uppercase tracking-widest text-sm shadow-2xl shadow-red-600/30">
+            <button onClick={nukeRoom} className="w-full py-6 bg-red-600 border-2 border-red-400 text-white rounded-2xl font-black uppercase tracking-widest text-sm shadow-2xl shadow-red-600/30 active:scale-95 transition-all">
               NUKE ROOM & CLEAR GUESTS
             </button>
           </div>
