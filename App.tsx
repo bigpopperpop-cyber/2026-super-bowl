@@ -7,7 +7,7 @@ import ChatRoom from './components/ChatRoom';
 import Leaderboard from './components/Leaderboard';
 
 type AppMode = 'LANDING' | 'GAME';
-type TabType = 'bets' | 'chat' | 'leaderboard' | 'command';
+type TabType = 'bets' | 'halftime' | 'chat' | 'leaderboard' | 'command';
 
 const generateId = () => Math.random().toString(36).substring(2, 15) + Date.now().toString(36);
 
@@ -208,9 +208,13 @@ const App: React.FC = () => {
     setPropBets(p => p.map(pb => pb.id === betId ? { ...pb, resolved: true, outcome } : pb));
     setUsers(uList => uList.map(u => {
       const b = userBets.find(ub => ub.betId === betId && ub.userId === u.id);
-      if (b) return { ...u, credits: (u.credits || 0) + (b.selection === outcome ? 10 : -3) };
+      if (b) {
+        const isWin = b.selection === outcome;
+        return { ...u, credits: (u.credits || 0) + (isWin ? 10 : -3) };
+      }
       return u;
     }));
+    setUserBets(prev => prev.map(b => b.betId === betId ? { ...b, status: b.selection === outcome ? BetStatus.WON : BetStatus.LOST } : b));
     setTimeout(() => syncWithCloud(true), 100);
   };
 
@@ -296,7 +300,7 @@ const App: React.FC = () => {
         <div className="h-full container mx-auto flex flex-col">
            {activeTab === 'bets' && (
              <BettingPanel 
-               propBets={propBets} 
+               propBets={propBets.filter(b => b.category !== 'Halftime')} 
                user={currentUser} 
                onPlaceBet={(bid, amt, sel) => {
                  const nb: UserBet = { id: generateId(), userId: currentUser.id, betId: bid, amount: 0, selection: sel, status: BetStatus.PENDING, placedAt: Date.now() };
@@ -305,6 +309,28 @@ const App: React.FC = () => {
                }} 
                allBets={userBets} 
              />
+           )}
+           {activeTab === 'halftime' && (
+             <div className="flex-1 overflow-y-auto">
+               <div className="p-4 bg-slate-900/50 border-b border-white/5 flex flex-col gap-1">
+                 <h2 className="text-sm font-black font-orbitron text-white uppercase tracking-widest flex items-center gap-2">
+                   <i className="fas fa-stopwatch text-red-500"></i>
+                   1st Half Player Stats
+                 </h2>
+                 <p className="text-[9px] text-slate-500 font-bold uppercase">Props relevant only up to Halftime settlement</p>
+               </div>
+               <BettingPanel 
+                 propBets={propBets.filter(b => b.category === 'Halftime')} 
+                 user={currentUser} 
+                 onPlaceBet={(bid, amt, sel) => {
+                   const nb: UserBet = { id: generateId(), userId: currentUser.id, betId: bid, amount: 0, selection: sel, status: BetStatus.PENDING, placedAt: Date.now() };
+                   setUserBets(p => [...p, nb]);
+                   setTimeout(() => syncWithCloud(true), 100);
+                 }} 
+                 allBets={userBets} 
+                 hideFilters={true}
+               />
+             </div>
            )}
            {activeTab === 'chat' && (
              <ChatRoom 
@@ -366,23 +392,52 @@ const App: React.FC = () => {
 
                 <div className="glass-card p-6 rounded-[2rem] border-red-900/40 bg-red-950/10">
                   <h2 className="text-[11px] font-black text-red-500 uppercase tracking-widest mb-4">Prop Resolutions</h2>
-                  <div className="space-y-3">
-                    {propBets.map(bet => (
-                      <div key={bet.id} className="p-3 bg-slate-900 rounded-xl border border-slate-800 flex flex-col gap-2">
-                        <span className="text-[10px] font-bold text-slate-300 leading-tight">{bet.question}</span>
-                        <div className="flex gap-2">
-                          {bet.options.map(opt => (
-                            <button 
-                              key={opt} 
-                              onClick={() => resolveBet(bet.id, opt)}
-                              className={`flex-1 py-1.5 rounded-lg text-[9px] font-black uppercase ${bet.outcome === opt ? 'bg-green-600 text-white' : 'bg-slate-800 text-slate-400'}`}
-                            >
-                              {opt}
-                            </button>
-                          ))}
-                        </div>
+                  <div className="space-y-6">
+                    {/* Halftime Props First */}
+                    <div>
+                      <h3 className="text-[9px] font-black text-slate-400 uppercase mb-3 border-b border-white/5 pb-2">Halftime Settlements</h3>
+                      <div className="space-y-3">
+                        {propBets.filter(b => b.category === 'Halftime').map(bet => (
+                          <div key={bet.id} className="p-3 bg-slate-900 rounded-xl border border-slate-800 flex flex-col gap-2">
+                            <span className="text-[10px] font-bold text-slate-300 leading-tight">{bet.question}</span>
+                            <div className="flex gap-2">
+                              {bet.options.map(opt => (
+                                <button 
+                                  key={opt} 
+                                  onClick={() => resolveBet(bet.id, opt)}
+                                  className={`flex-1 py-1.5 rounded-lg text-[9px] font-black uppercase ${bet.outcome === opt ? 'bg-green-600 text-white' : 'bg-slate-800 text-slate-400'}`}
+                                >
+                                  {opt}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
                       </div>
-                    ))}
+                    </div>
+
+                    {/* General Props */}
+                    <div>
+                      <h3 className="text-[9px] font-black text-slate-400 uppercase mb-3 border-b border-white/5 pb-2">General Game Props</h3>
+                      <div className="space-y-3">
+                        {propBets.filter(b => b.category !== 'Halftime').map(bet => (
+                          <div key={bet.id} className="p-3 bg-slate-900 rounded-xl border border-slate-800 flex flex-col gap-2">
+                            <span className="text-[10px] font-bold text-slate-300 leading-tight">{bet.question}</span>
+                            <div className="flex gap-2">
+                              {bet.options.map(opt => (
+                                <button 
+                                  key={opt} 
+                                  onClick={() => resolveBet(bet.id, opt)}
+                                  className={`flex-1 py-1.5 rounded-lg text-[9px] font-black uppercase ${bet.outcome === opt ? 'bg-green-600 text-white' : 'bg-slate-800 text-slate-400'}`}
+                                >
+                                  {opt}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   </div>
                 </div>
 
@@ -400,6 +455,7 @@ const App: React.FC = () => {
         <div className="container mx-auto flex">
           {[
             { id: 'bets', icon: 'fa-ticket-alt', label: 'Props' },
+            { id: 'halftime', icon: 'fa-stopwatch', label: 'Halftime' },
             { id: 'chat', icon: 'fa-comments', label: 'Chat' },
             { id: 'leaderboard', icon: 'fa-trophy', label: 'Rankings' },
             ...(isHostAuthenticated ? [{ id: 'command', icon: 'fa-crown', label: 'COMMAND' }] : [])

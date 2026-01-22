@@ -6,21 +6,23 @@ interface BettingPanelProps {
   user: User;
   onPlaceBet: (betId: string, amount: number, selection: string) => void;
   allBets: UserBet[];
+  hideFilters?: boolean;
 }
 
-type CategoryFilter = 'All' | 'Game' | 'Player' | 'Entertainment' | 'Stats';
+type CategoryFilter = 'All' | 'Game' | 'Player' | 'Entertainment' | 'Stats' | 'Halftime';
 
 const BettingPanel: React.FC<BettingPanelProps> = ({ 
   propBets, 
   user, 
   onPlaceBet, 
-  allBets
+  allBets,
+  hideFilters = false
 }) => {
   const [selectedBet, setSelectedBet] = useState<PropBet | null>(null);
   const [selection, setSelection] = useState<string>('');
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>('All');
 
-  const categories: CategoryFilter[] = ['All', 'Game', 'Player', 'Entertainment', 'Stats'];
+  const categories: CategoryFilter[] = ['All', 'Game', 'Player', 'Entertainment', 'Stats', 'Halftime'];
 
   const filteredBets = useMemo(() => {
     let bets = [...propBets];
@@ -52,27 +54,34 @@ const BettingPanel: React.FC<BettingPanelProps> = ({
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      <div className="px-4 pt-4 flex flex-col gap-3 mb-4 shrink-0">
-        <h2 className="text-xl font-orbitron flex items-center gap-2 text-white">
-          <i className="fas fa-ticket-alt text-yellow-400 text-sm"></i>
-          Prop Pool
-        </h2>
-        <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
-          {categories.map(cat => (
-            <button
-              key={cat}
-              onClick={() => setCategoryFilter(cat)}
-              className={`px-5 py-2.5 rounded-full text-[11px] font-black uppercase border transition-all whitespace-nowrap ${
-                categoryFilter === cat ? 'bg-white text-slate-900 border-white' : 'bg-slate-800 text-slate-400 border-slate-700'
-              }`}
-            >
-              {cat}
-            </button>
-          ))}
+      {!hideFilters && (
+        <div className="px-4 pt-4 flex flex-col gap-3 mb-4 shrink-0">
+          <h2 className="text-xl font-orbitron flex items-center gap-2 text-white">
+            <i className="fas fa-ticket-alt text-yellow-400 text-sm"></i>
+            Prop Pool
+          </h2>
+          <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
+            {categories.filter(c => c !== 'Halftime').map(cat => (
+              <button
+                key={cat}
+                onClick={() => setCategoryFilter(cat)}
+                className={`px-5 py-2.5 rounded-full text-[11px] font-black uppercase border transition-all whitespace-nowrap ${
+                  categoryFilter === cat ? 'bg-white text-slate-900 border-white' : 'bg-slate-800 text-slate-400 border-slate-700'
+                }`}
+              >
+                {cat}
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
 
-      <div className="flex-1 overflow-y-auto custom-scrollbar px-4 pb-20 space-y-4">
+      <div className={`flex-1 overflow-y-auto custom-scrollbar px-4 pb-20 space-y-4 ${hideFilters ? 'pt-4' : ''}`}>
+        {filteredBets.length === 0 && (
+          <div className="py-10 text-center text-slate-600 uppercase font-black text-[10px] tracking-widest">
+            No props available in this category
+          </div>
+        )}
         {filteredBets.map((bet) => {
           const myBet = getMyBetOn(bet.id);
           const stats = getBetStats(bet.id);
@@ -86,7 +95,9 @@ const BettingPanel: React.FC<BettingPanelProps> = ({
               onClick={() => !myBet && !bet.resolved && setSelectedBet(bet)}
             >
               <div className="flex justify-between items-start mb-2">
-                <span className="text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded bg-slate-800 text-slate-400">
+                <span className={`text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded border ${
+                  bet.category === 'Halftime' ? 'bg-red-500/10 border-red-500/30 text-red-500' : 'bg-slate-800 border-slate-700 text-slate-400'
+                }`}>
                   {bet.category}
                 </span>
                 {bet.resolved && (

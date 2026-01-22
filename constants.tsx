@@ -1,3 +1,4 @@
+
 import { PropBet } from './types';
 
 export const INITIAL_PROP_BETS: PropBet[] = [
@@ -53,7 +54,7 @@ export const INITIAL_PROP_BETS: PropBet[] = [
     id: '7',
     question: "Will any player have 60+ Receiving Yards by Halftime?",
     odds: 1.8,
-    category: 'Player',
+    category: 'Halftime',
     resolved: false,
     options: ['Yes', 'No']
   },
@@ -61,7 +62,7 @@ export const INITIAL_PROP_BETS: PropBet[] = [
     id: '13',
     question: "Will a Quarterback have 150+ Passing Yards by Halftime?",
     odds: 2.0,
-    category: 'Player',
+    category: 'Halftime',
     resolved: false,
     options: ['Yes', 'No']
   },
@@ -69,7 +70,7 @@ export const INITIAL_PROP_BETS: PropBet[] = [
     id: '14',
     question: "Will any player have 40+ Rushing Yards by Halftime?",
     odds: 1.9,
-    category: 'Player',
+    category: 'Halftime',
     resolved: false,
     options: ['Yes', 'No']
   },
@@ -77,7 +78,7 @@ export const INITIAL_PROP_BETS: PropBet[] = [
     id: '15',
     question: "Will there be a 1st Half Rushing Touchdown?",
     odds: 1.7,
-    category: 'Player',
+    category: 'Halftime',
     resolved: false,
     options: ['Yes', 'No']
   },
@@ -124,5 +125,5 @@ export const INITIAL_PROP_BETS: PropBet[] = [
 ];
 
 export const AVATARS = [
-  '🦅', '🦁', '🐯', '🐆', '🐎', '🐃', '🐻', '🐏', '🐬', '⚔️', '🏹', '⛏️', '🐦', '🧀', '⚜️'
+  '🦅', '🦁', '🐯', '🐯', '🐆', '🐎', '🐃', '🐻', '🐏', '🐬', '⚔️', '🏹', '⛏️', '🐦', '🧀', '⚜️'
 ];

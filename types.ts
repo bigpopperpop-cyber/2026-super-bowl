@@ -17,7 +17,7 @@ export interface PropBet {
   id: string;
   question: string;
   odds: number; // Decimal odds: 2.0 = 100 profit on 100 bet
-  category: 'Game' | 'Player' | 'Entertainment' | 'Stats';
+  category: 'Game' | 'Player' | 'Entertainment' | 'Stats' | 'Halftime';
   resolved: boolean;
   outcome?: string;
   options: string[];
