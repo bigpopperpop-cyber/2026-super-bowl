@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { User, PropBet, UserBet, ChatMessage, GameState, BetStatus } from './types';
 import { INITIAL_PROP_BETS, AVATARS } from './constants';
@@ -28,11 +27,12 @@ const App: React.FC = () => {
   const [copied, setCopied] = useState(false);
   const [partyCode, setPartyCode] = useState<string>('');
   const [isSyncing, setIsSyncing] = useState(false);
+  const [lastSyncSuccessful, setLastSyncSuccessful] = useState(true);
   const [showHostPanel, setShowHostPanel] = useState(false);
   const [globalResetActive, setGlobalResetActive] = useState(false);
   
   const lastSyncedAtRef = useRef<number>(0);
-  const resetEpochRef = useRef<number>(parseInt(localStorage.getItem('sb_reset_epoch') || '0'));
+  const resetEpochRef = useRef<number>(parseInt(localStorage.getItem('sb_reset_epoch_v6') || '0'));
   const ignorePushesUntilRef = useRef<number>(0);
 
   const [gameState, setGameState] = useState<GameState>({
@@ -56,18 +56,16 @@ const App: React.FC = () => {
   useEffect(() => {
     if (currentUser) localStorage.setItem('sb_current_user', JSON.stringify(currentUser));
     if (partyCode) localStorage.setItem('sb_party_code', partyCode);
-    localStorage.setItem('sb_reset_epoch', resetEpochRef.current.toString());
+    localStorage.setItem('sb_reset_epoch_v6', resetEpochRef.current.toString());
   }, [currentUser, partyCode]);
 
   const mergeState = useCallback((cloudData: any) => {
     if (!cloudData) return;
 
-    // 1. HARD RESET CHECK: Use an Epoch (Timestamp) instead of SessionID for better reliability
+    // 1. HARD RESET CHECK: Use an Epoch (Timestamp) 
     const cloudResetEpoch = cloudData.resetEpoch || 0;
     if (cloudResetEpoch > resetEpochRef.current) {
-      console.log("!!! SYSTEM REFRESH DETECTED !!!");
       setGlobalResetActive(true);
-      
       setMessages([]);
       setUserBets([]);
       setPropBets(INITIAL_PROP_BETS.map(pb => ({ ...pb, resolved: false, outcome: undefined })));
@@ -78,16 +76,15 @@ const App: React.FC = () => {
       }
 
       resetEpochRef.current = cloudResetEpoch;
-      localStorage.setItem('sb_reset_epoch', cloudResetEpoch.toString());
+      localStorage.setItem('sb_reset_epoch_v6', cloudResetEpoch.toString());
       lastSyncedAtRef.current = cloudData.updatedAt || Date.now();
       
       setTimeout(() => setGlobalResetActive(false), 3000);
       return;
     }
 
-    // 2. USER SYNC: Deduplicate and update credits
+    // 2. USER SYNC: Robust merging
     setUsers(prev => {
-      // Fix: Explicitly type the userMap to avoid 'unknown' property access errors.
       const userMap = new Map<string, User>(prev.map(u => [u.id, u]));
       (cloudData.users || []).forEach((u: User) => {
         const existing = userMap.get(u.id);
@@ -98,9 +95,8 @@ const App: React.FC = () => {
       return Array.from(userMap.values());
     });
 
-    // 3. CHAT SYNC: Deduplicate by ID
+    // 3. CHAT SYNC
     setMessages(prev => {
-      // Fix: Explicitly type the msgMap and sort parameters to avoid 'unknown' property access errors.
       const msgMap = new Map<string, ChatMessage>(prev.map(m => [m.id, m]));
       (cloudData.messages || []).forEach((m: ChatMessage) => msgMap.set(m.id, m));
       return Array.from(msgMap.values())
@@ -108,11 +104,11 @@ const App: React.FC = () => {
         .slice(-80);
     });
 
-    // 4. GAME & BET SYNC: Only if cloud data is newer
+    // 4. GAME & BET SYNC
     if (cloudData.updatedAt > lastSyncedAtRef.current) {
       if (cloudData.userBets) {
         setUserBets(prev => {
-          const betMap = new Map(prev.map(b => [b.id, b]));
+          const betMap = new Map<string, UserBet>(prev.map(b => [b.id, b]));
           cloudData.userBets.forEach((b: UserBet) => betMap.set(b.id, b));
           return Array.from(betMap.values());
         });
@@ -126,11 +122,11 @@ const App: React.FC = () => {
     const code = stateRef.current.partyCode;
     if (!code || code === 'LOCAL') return;
     
-    // Silence during/after nuke to let it propagate
+    // Safety check: Avoid fighting a global reset
     if (isPush && Date.now() < ignorePushesUntilRef.current) return;
 
-    // Unique Room Key - V4 for clean start
-    const syncKey = `sblix_party_v4_${code.toLowerCase().trim()}`;
+    // UNIQUE SYNC KEY V6
+    const syncKey = `sblix_party_v6_${code.toLowerCase().trim()}`;
     const url = `https://api.keyvalue.xyz/${syncKey}`;
     
     try {
@@ -148,8 +144,7 @@ const App: React.FC = () => {
         }
       }
 
-      if (isPush || !remoteData) {
-        // If we are pushing OR the room is brand new
+      if (isPush || (!remoteData && isPush)) {
         const payload = {
           resetEpoch: Math.max(resetEpochRef.current, remoteData?.resetEpoch || 0),
           users: Array.from(new Map([...(remoteData?.users || []), ...stateRef.current.users].map(u => [u.id, u])).values()),
@@ -161,13 +156,17 @@ const App: React.FC = () => {
           updatedAt: Date.now()
         };
 
-        await fetch(url, { 
+        const postRes = await fetch(url, { 
           method: 'POST', 
           body: JSON.stringify(payload),
           headers: { 'Content-Type': 'application/json' }
         });
+        setLastSyncSuccessful(postRes.ok);
+      } else {
+        setLastSyncSuccessful(true);
       }
     } catch (e) {
+      setLastSyncSuccessful(false);
       console.warn("Sync failed:", e);
     } finally {
       setIsSyncing(false);
@@ -176,11 +175,14 @@ const App: React.FC = () => {
 
   const nukeRoom = async () => {
     if (!partyCode || partyCode === 'LOCAL') return;
-    if (!confirm(`☢️ NUKE ROOM "${partyCode}"?\n\nThis wipes all 20+ guests, scores, and chat immediately.`)) return;
+    if (!confirm(`☢️ NUKE ROOM "${partyCode}"?\n\nThis will clear all 20+ guests, chat, and scores for everyone connected to this Room Code.`)) return;
 
+    // LOCK: Disable background sync immediately to prevent race conditions
+    ignorePushesUntilRef.current = Date.now() + 10000;
+    
     try {
       setIsSyncing(true);
-      const syncKey = `sblix_party_v4_${partyCode.toLowerCase().trim()}`;
+      const syncKey = `sblix_party_v6_${partyCode.toLowerCase().trim()}`;
       const url = `https://api.keyvalue.xyz/${syncKey}`;
       
       const newEpoch = Date.now();
@@ -201,11 +203,10 @@ const App: React.FC = () => {
         headers: { 'Content-Type': 'application/json' }
       });
 
-      if (!res.ok) throw new Error("Could not reach cloud server.");
+      if (!res.ok) throw new Error("Could not update cloud. Error Code: " + res.status);
       
-      ignorePushesUntilRef.current = Date.now() + 3000;
       resetEpochRef.current = newEpoch;
-      localStorage.setItem('sb_reset_epoch', newEpoch.toString());
+      localStorage.setItem('sb_reset_epoch_v6', newEpoch.toString());
       
       setMessages([]);
       setUserBets([]);
@@ -217,9 +218,11 @@ const App: React.FC = () => {
       setPropBets(INITIAL_PROP_BETS.map(pb => ({ ...pb, resolved: false, outcome: undefined })));
       setShowHostPanel(false);
       
-      alert("✅ Hub reset. It's now a clean field!");
+      alert("✅ HUB NUKE SUCCESSFUL. All guests have been reset.");
     } catch (e) {
-      alert("❌ Reset failed. Please check your connection.");
+      // Release lock on fail
+      ignorePushesUntilRef.current = 0;
+      alert("❌ Reset failed. Check your internet or Room Code.\n\n" + (e instanceof Error ? e.message : "Network Error"));
     } finally {
       setIsSyncing(false);
     }
@@ -237,10 +240,8 @@ const App: React.FC = () => {
     const savedUser = localStorage.getItem('sb_current_user');
 
     if (roomFromUrl) {
-      setPartyCode(roomFromUrl.toUpperCase());
       setLoginPartyCode(roomFromUrl.toUpperCase());
     } else if (savedCode) {
-      setPartyCode(savedCode);
       setLoginPartyCode(savedCode);
     }
 
@@ -251,7 +252,7 @@ const App: React.FC = () => {
       } catch (e) {}
     }
 
-    // Jittered polling to prevent synchronized "herd" requests from 20 devices
+    // Jittered polling
     const jitter = Math.random() * 800;
     const interval = setInterval(() => syncWithCloud(false), 2000 + jitter);
     return () => clearInterval(interval);
@@ -260,7 +261,7 @@ const App: React.FC = () => {
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
     if (!loginUsername.trim() || !loginRealName.trim() || !loginPartyCode.trim()) {
-      alert("Please enter a username, real name, and Room Code!");
+      alert("Required: Username, Real Name, and Room Code!");
       return;
     }
     
@@ -281,7 +282,6 @@ const App: React.FC = () => {
     const newUrl = window.location.protocol + "//" + window.location.host + window.location.pathname + '?room=' + code;
     window.history.pushState({ path: newUrl }, '', newUrl);
     
-    // Immediate push to claim/join room
     setTimeout(() => syncWithCloud(true), 300);
   };
 
@@ -337,7 +337,7 @@ const App: React.FC = () => {
 
           <form onSubmit={handleLogin} className="space-y-5">
             <div>
-              <label className="text-[10px] font-black uppercase text-slate-500 mb-2 block ml-1">Choose Mascot</label>
+              <label className="text-[10px] font-black uppercase text-slate-500 mb-2 block ml-1">Mascot Selection</label>
               <div className="flex flex-wrap gap-2 justify-center p-3 rounded-2xl bg-black/40 border border-white/5 shadow-inner">
                 {AVATARS.map(a => (
                   <button key={a} type="button" onClick={() => setSelectedAvatar(a)} className={`w-10 h-10 text-xl flex items-center justify-center rounded-xl transition-all ${selectedAvatar === a ? 'bg-red-600 scale-110 shadow-lg border-2 border-white' : 'bg-slate-800'}`}>{a}</button>
@@ -345,17 +345,17 @@ const App: React.FC = () => {
               </div>
             </div>
             <div className="space-y-4">
-              <input type="text" placeholder="Your Handle (e.g. TurboTom)" value={loginUsername} onChange={(e) => setLoginUsername(e.target.value)} className="w-full bg-slate-900/80 border border-slate-700 rounded-2xl px-4 py-4 text-white text-base outline-none font-bold" />
-              <input type="text" placeholder="Real Name (e.g. John D.)" value={loginRealName} onChange={(e) => setLoginRealName(e.target.value)} className="w-full bg-slate-900/80 border border-slate-700 rounded-2xl px-4 py-4 text-white text-base outline-none font-bold" />
+              <input type="text" placeholder="Handle (e.g. BlitzKing)" value={loginUsername} onChange={(e) => setLoginUsername(e.target.value)} className="w-full bg-slate-900/80 border border-slate-700 rounded-2xl px-4 py-4 text-white text-base outline-none font-bold" />
+              <input type="text" placeholder="Real Name (for Leaderboard)" value={loginRealName} onChange={(e) => setLoginRealName(e.target.value)} className="w-full bg-slate-900/80 border border-slate-700 rounded-2xl px-4 py-4 text-white text-base outline-none font-bold" />
               <div className="pt-2">
-                <label className="text-[10px] font-black uppercase text-red-500 mb-1 block ml-1">Room Code (Required to join friends)</label>
-                <input type="text" placeholder="E.G. SUPERBOWL2025" maxLength={15} value={loginPartyCode} onChange={(e) => setLoginPartyCode(e.target.value)} className="w-full bg-slate-950 border-2 border-red-900/50 rounded-2xl px-4 py-4 text-white text-xl outline-none text-center font-black font-orbitron tracking-widest uppercase" />
+                <label className="text-[10px] font-black uppercase text-red-500 mb-1 block ml-1">Room Code (Must match friends)</label>
+                <input type="text" placeholder="E.G. CHIEFSVSEAGLES" maxLength={20} value={loginPartyCode} onChange={(e) => setLoginPartyCode(e.target.value)} className="w-full bg-slate-950 border-2 border-red-900/50 rounded-2xl px-4 py-4 text-white text-xl outline-none text-center font-black font-orbitron tracking-widest uppercase" />
               </div>
-              <button type="submit" disabled={!loginUsername.trim() || !loginRealName.trim() || !loginPartyCode.trim()} className="w-full py-5 bg-white text-slate-950 rounded-[1.5rem] font-black font-orbitron shadow-2xl uppercase tracking-widest text-sm disabled:opacity-30 active:scale-95 transition-all">ENTER PARTY</button>
+              <button type="submit" disabled={!loginUsername.trim() || !loginRealName.trim() || !loginPartyCode.trim()} className="w-full py-5 bg-white text-slate-950 rounded-[1.5rem] font-black font-orbitron shadow-2xl uppercase tracking-widest text-sm disabled:opacity-30 active:scale-95 transition-all">START PARTY</button>
             </div>
           </form>
           <div className="mt-8 text-center">
-            <p className="text-slate-500 text-[11px] font-bold">ALL 20 GUESTS MUST USE THE SAME ROOM CODE</p>
+            <p className="text-slate-500 text-[11px] font-bold">ALL 20+ GUESTS MUST ENTER THE SAME ROOM CODE</p>
           </div>
         </div>
       </div>
@@ -369,8 +369,8 @@ const App: React.FC = () => {
         <div className="fixed inset-0 z-[100] bg-red-600 flex items-center justify-center">
           <div className="text-center p-12 bg-black/60 backdrop-blur-2xl rounded-3xl border-4 border-white shadow-2xl animate-pulse">
             <i className="fas fa-sync-alt text-6xl text-white mb-6 animate-spin"></i>
-            <h2 className="text-3xl font-black font-orbitron text-white">SYSTEM REFRESH</h2>
-            <p className="text-white/80 font-bold uppercase tracking-widest mt-4">Host has cleared the game...</p>
+            <h2 className="text-3xl font-black font-orbitron text-white">HUB RESETTING</h2>
+            <p className="text-white/80 font-bold uppercase tracking-widest mt-4">The host has cleared the game data</p>
           </div>
         </div>
       )}
@@ -384,8 +384,8 @@ const App: React.FC = () => {
               <span className="text-slate-400 font-bold">{gameState.score.home}-{gameState.score.away}</span>
             </div>
             <div className="flex items-center gap-1 bg-slate-950/50 px-2 py-1 rounded-md">
-              <div className={`w-1.5 h-1.5 rounded-full ${isSyncing ? 'bg-blue-400 animate-pulse' : 'bg-green-500'}`}></div>
-              <span className="text-[9px] font-black text-slate-600 uppercase">{users.length} ON</span>
+              <div className={`w-1.5 h-1.5 rounded-full ${!lastSyncSuccessful ? 'bg-red-500 animate-bounce' : isSyncing ? 'bg-blue-400 animate-pulse' : 'bg-green-500'}`}></div>
+              <span className="text-[9px] font-black text-slate-600 uppercase">{users.length} ONLINE</span>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -394,7 +394,7 @@ const App: React.FC = () => {
             </div>
             <button onClick={() => setShowHostPanel(true)} className="flex items-center gap-1.5 bg-red-600 text-white border border-red-500 rounded-lg px-3 py-1.5 shadow-lg active:scale-95 transition-all">
               <i className="fas fa-crown text-[10px]"></i>
-              <span className="text-[10px] font-black uppercase tracking-tighter">HOST</span>
+              <span className="text-[10px] font-black uppercase tracking-tighter">HOST PANEL</span>
             </button>
           </div>
         </div>
@@ -421,16 +421,16 @@ const App: React.FC = () => {
         </div>
 
         {showHostPanel && (
-          <div className="absolute inset-0 z-50 bg-black/95 backdrop-blur-3xl animate-in fade-in slide-in-from-right duration-300">
-            <div className="h-full flex flex-col p-6 max-w-lg mx-auto overflow-y-auto">
+          <div className="absolute inset-0 z-50 bg-black/95 backdrop-blur-3xl animate-in fade-in slide-in-from-right duration-300 overflow-y-auto">
+            <div className="min-h-full flex flex-col p-6 max-w-lg mx-auto">
               <div className="flex justify-between items-center mb-8 shrink-0">
                 <div className="flex items-center gap-3">
                   <div className="w-12 h-12 bg-red-600 rounded-2xl flex items-center justify-center text-white text-xl shadow-xl shadow-red-600/20">
                     <i className="fas fa-crown"></i>
                   </div>
                   <div>
-                    <h2 className="text-2xl font-black font-orbitron text-white">HUB CONTROL</h2>
-                    <p className="text-[11px] text-red-500 font-black uppercase tracking-widest">Active Room: {partyCode}</p>
+                    <h2 className="text-2xl font-black font-orbitron text-white">HUB MASTER</h2>
+                    <p className="text-[11px] text-red-500 font-black uppercase tracking-widest">Code: {partyCode}</p>
                   </div>
                 </div>
                 <button onClick={() => setShowHostPanel(false)} className="text-slate-500 hover:text-white p-2">
@@ -438,26 +438,34 @@ const App: React.FC = () => {
                 </button>
               </div>
 
-              <div className="space-y-8">
+              <div className="space-y-8 pb-20">
+                {/* Connection Debug */}
+                <div className={`p-4 rounded-2xl border flex items-center justify-between ${lastSyncSuccessful ? 'bg-green-500/10 border-green-500/30' : 'bg-red-500/10 border-red-500/30'}`}>
+                   <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Sync Status:</span>
+                   <span className={`text-[10px] font-black uppercase ${lastSyncSuccessful ? 'text-green-500' : 'text-red-500'}`}>
+                     {lastSyncSuccessful ? 'Live & Connected' : 'Connection Error'}
+                   </span>
+                </div>
+
                 {/* Score Controls */}
                 <div className="glass-card p-6 rounded-[2rem] border-white/10">
-                  <h3 className="text-[11px] font-black uppercase text-slate-500 tracking-widest mb-4">Update Room Score</h3>
+                  <h3 className="text-[11px] font-black uppercase text-slate-500 tracking-widest mb-4">Live Score Adjustment</h3>
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-3 text-center">
                       <div className="font-orbitron text-5xl font-black text-white">{gameState.score.home}</div>
                       <div className="flex gap-2">
                         <button onClick={() => updateGameScore('home', -1)} className="flex-1 bg-slate-800 p-4 rounded-xl text-slate-400 font-black text-xl">-</button>
-                        <button onClick={() => updateGameScore('home', 1)} className="flex-1 bg-red-600 p-4 rounded-xl text-white font-black text-xl shadow-lg shadow-red-600/20">+</button>
+                        <button onClick={() => updateGameScore('home', 1)} className="flex-1 bg-red-600 p-4 rounded-xl text-white font-black text-xl">+</button>
                       </div>
-                      <div className="text-[10px] font-black text-slate-500 uppercase">Home Team</div>
+                      <div className="text-[10px] font-black text-slate-500 uppercase">Home</div>
                     </div>
                     <div className="space-y-3 text-center">
                       <div className="font-orbitron text-5xl font-black text-white">{gameState.score.away}</div>
                       <div className="flex gap-2">
                         <button onClick={() => updateGameScore('away', -1)} className="flex-1 bg-slate-800 p-4 rounded-xl text-slate-400 font-black text-xl">-</button>
-                        <button onClick={() => updateGameScore('away', 1)} className="flex-1 bg-red-600 p-4 rounded-xl text-white font-black text-xl shadow-lg shadow-red-600/20">+</button>
+                        <button onClick={() => updateGameScore('away', 1)} className="flex-1 bg-red-600 p-4 rounded-xl text-white font-black text-xl">+</button>
                       </div>
-                      <div className="text-[10px] font-black text-slate-500 uppercase">Away Team</div>
+                      <div className="text-[10px] font-black text-slate-500 uppercase">Away</div>
                     </div>
                   </div>
                 </div>
@@ -466,37 +474,35 @@ const App: React.FC = () => {
                 <div className="glass-card p-6 rounded-[2rem] border-red-900/40 bg-red-950/20">
                   <h3 className="text-[11px] font-black uppercase text-red-500 tracking-widest mb-4 flex items-center gap-2">
                     <i className="fas fa-bomb"></i>
-                    Global Reset Tools
+                    Room Management
                   </h3>
                   <div className="space-y-5">
                     <div className="p-4 bg-slate-900/80 rounded-2xl border border-white/5">
-                      <div className="text-[10px] font-bold text-slate-500 mb-1 uppercase">Direct Join Link</div>
+                      <div className="text-[10px] font-bold text-slate-500 mb-1 uppercase">Share Hub Link</div>
                       <div className="flex items-center gap-2">
-                        <span className="text-[11px] font-bold text-slate-400 truncate flex-1">{window.location.origin}/?room={partyCode}</span>
-                        <button onClick={handleCopyLink} className="bg-blue-600 px-4 py-2 rounded-xl text-white text-[10px] font-black uppercase transition-all active:scale-90">{copied ? 'COPIED' : 'COPY'}</button>
+                        <span className="text-[11px] font-bold text-slate-400 truncate flex-1">{partyCode}</span>
+                        <button onClick={handleCopyLink} className="bg-blue-600 px-4 py-2 rounded-xl text-white text-[10px] font-black uppercase">{copied ? 'COPIED' : 'COPY'}</button>
                       </div>
                     </div>
                     
                     <button 
                       onClick={nukeRoom} 
-                      className="w-full py-6 bg-red-600 border-2 border-red-400 text-white rounded-2xl font-black uppercase tracking-widest text-sm hover:scale-[1.02] active:scale-95 transition-all shadow-[0_0_30px_rgba(220,38,38,0.5)] flex flex-col items-center justify-center"
+                      className="w-full py-6 bg-red-600 border-2 border-red-400 text-white rounded-2xl font-black uppercase tracking-widest text-sm hover:scale-[1.02] active:scale-95 transition-all shadow-[0_0_30px_rgba(220,38,38,0.5)]"
                     >
-                      <span className="text-lg">CLEAR EVERYTHING</span>
-                      <span className="text-[9px] text-red-100 font-bold">Wipes chat and players for all 20 devices</span>
+                      CLEAR HUB & RESET GUESTS
                     </button>
-                    <p className="text-[10px] text-slate-500 text-center font-bold px-4 leading-relaxed">
-                      Use this if the room gets messy. All connected devices will instantly see a clean chat and leaderboard.
+                    <p className="text-[10px] text-slate-500 text-center font-bold px-4 leading-relaxed uppercase">
+                      Forces a "New Game" state for all 20+ devices. Use this if points or chat get out of sync.
                     </p>
                   </div>
                 </div>
 
                 <div className="pt-8 border-t border-white/5 flex flex-col gap-4">
-                  <button onClick={() => { localStorage.clear(); window.location.reload(); }} className="w-full py-5 bg-slate-800 text-white rounded-2xl font-black uppercase tracking-widest text-xs border border-slate-700 active:scale-95 transition-all">
-                    LOG OUT / CHANGE AVATAR
+                  <button onClick={() => { localStorage.clear(); window.location.reload(); }} className="w-full py-5 bg-slate-800 text-white rounded-2xl font-black uppercase tracking-widest text-xs border border-slate-700">
+                    SIGN OUT / CHANGE MASCOT
                   </button>
                 </div>
               </div>
-              <div className="h-20"></div>
             </div>
           </div>
         )}
