@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { User, PropBet, UserBet, ChatMessage, GameState, BetStatus } from './types';
 import { INITIAL_PROP_BETS, AVATARS } from './constants';
@@ -58,16 +57,25 @@ const App: React.FC = () => {
   const mergeState = useCallback((cloudData: any) => {
     if (!cloudData) return;
 
+    // Detect a hard reset from cloud (empty arrays but newer timestamp)
+    const isHardReset = cloudData.updatedAt > lastSyncedAtRef.current && 
+                        (!cloudData.messages || cloudData.messages.length === 0) &&
+                        (!cloudData.users || cloudData.users.length <= 1);
+
     setMessages(prev => {
+      if (isHardReset) return [];
       const msgMap = new Map(prev.map(m => [m.id, m]));
       (cloudData.messages || []).forEach((m: ChatMessage) => msgMap.set(m.id, m));
-      // Fix: Explicitly type the sort arguments to resolve 'unknown' property access errors
       return Array.from(msgMap.values())
         .sort((a: ChatMessage, b: ChatMessage) => a.timestamp - b.timestamp)
         .slice(-100);
     });
 
     setUsers(prev => {
+      if (isHardReset) {
+        // Keep current user but clear others
+        return currentUser ? [currentUser] : [];
+      }
       const userMap = new Map(prev.map(u => [u.id, u]));
       (cloudData.users || []).forEach((u: User) => {
         const existing = userMap.get(u.id);
@@ -81,6 +89,7 @@ const App: React.FC = () => {
     if (cloudData.updatedAt > lastSyncedAtRef.current) {
       if (cloudData.userBets) {
         setUserBets(prev => {
+          if (isHardReset) return [];
           const betMap = new Map(prev.map(b => [b.id, b]));
           cloudData.userBets.forEach((b: UserBet) => betMap.set(b.id, b));
           return Array.from(betMap.values());
@@ -89,20 +98,18 @@ const App: React.FC = () => {
       if (cloudData.gameState) setGameState(cloudData.gameState);
       lastSyncedAtRef.current = cloudData.updatedAt;
     }
-  }, []);
+  }, [currentUser]);
 
   const syncWithCloud = useCallback(async (isPush: boolean = false) => {
     const code = stateRef.current.partyCode;
     if (!code || code === 'LOCAL') return;
     
-    // We use a specific, unique key for KeyValue.xyz to avoid clashing with others
     const syncKey = `sblix_party_v2_${code.toLowerCase().trim()}`;
     const url = `https://api.keyvalue.xyz/${syncKey}`;
     
     try {
       setIsSyncing(true);
       
-      // 1. ALWAYS FETCH FIRST (to avoid overwriting other people's data)
       const response = await fetch(url);
       let remoteData: any = null;
       
@@ -111,21 +118,16 @@ const App: React.FC = () => {
         try {
           remoteData = JSON.parse(text);
           mergeState(remoteData);
-        } catch (e) {
-          // New room or corrupted data
-        }
+        } catch (e) {}
       }
 
-      // 2. IF WE NEED TO PUSH (e.g. after a message or bet)
       if (isPush) {
-        // Build the payload by merging current local state into the freshest remote data
         const payload = {
-          users: Array.from(new Map([...(remoteData?.users || []).map(u => [u.id, u]), ...stateRef.current.users.map(u => [u.id, u])]).values()),
-          // Fix: Explicitly type the sort arguments to resolve 'unknown' property access errors
-          messages: Array.from(new Map([...(remoteData?.messages || []).map(m => [m.id, m]), ...stateRef.current.messages.map(m => [m.id, m])]).values())
-            .sort((a: ChatMessage, b: ChatMessage) => a.timestamp - b.timestamp)
+          users: Array.from(new Map([...(remoteData?.users || []).map((u: any) => [u.id, u]), ...stateRef.current.users.map(u => [u.id, u])]).values()),
+          messages: Array.from(new Map([...(remoteData?.messages || []).map((m: any) => [m.id, m]), ...stateRef.current.messages.map(m => [m.id, m])]).values())
+            .sort((a: any, b: any) => a.timestamp - b.timestamp)
             .slice(-60),
-          userBets: Array.from(new Map([...(remoteData?.userBets || []).map(b => [b.id, b]), ...stateRef.current.userBets.map(b => [b.id, b])]).values()),
+          userBets: Array.from(new Map([...(remoteData?.userBets || []).map((b: any) => [b.id, b]), ...stateRef.current.userBets.map(b => [b.id, b])]).values()),
           gameState: stateRef.current.gameState,
           updatedAt: Date.now()
         };
@@ -143,8 +145,48 @@ const App: React.FC = () => {
     }
   }, [mergeState]);
 
+  const resetRoom = async () => {
+    if (!partyCode || partyCode === 'LOCAL') return;
+    if (!confirm("⚠️ RESET HUB? This will clear all messages, bets, and players for EVERYONE in this room. This cannot be undone.")) return;
+
+    try {
+      setIsSyncing(true);
+      const syncKey = `sblix_party_v2_${partyCode.toLowerCase().trim()}`;
+      const url = `https://api.keyvalue.xyz/${syncKey}`;
+      
+      // Local Clear
+      setMessages([]);
+      setUserBets([]);
+      if (currentUser) {
+        const resetUser = { ...currentUser, credits: 0 };
+        setCurrentUser(resetUser);
+        setUsers([resetUser]);
+      }
+
+      // Cloud Wipe Payload
+      const payload = {
+        users: currentUser ? [{ ...currentUser, credits: 0 }] : [],
+        messages: [],
+        userBets: [],
+        gameState: { quarter: 1, timeRemaining: "15:00", score: { home: 0, away: 0 }, possession: 'home' },
+        updatedAt: Date.now()
+      };
+
+      await fetch(url, { 
+        method: 'POST', 
+        body: JSON.stringify(payload),
+        headers: { 'Content-Type': 'application/json' }
+      });
+      
+      alert("Room has been reset. Fresh start!");
+    } catch (e) {
+      alert("Failed to reset room. Check connection.");
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   useEffect(() => {
-    // Session Restoration
     const params = new URLSearchParams(window.location.search);
     const roomFromUrl = params.get('room');
     const savedCode = localStorage.getItem('sb_party_code');
@@ -163,7 +205,6 @@ const App: React.FC = () => {
       } catch (e) {}
     }
 
-    // Faster polling for better "live" feel (2 seconds instead of 4)
     const interval = setInterval(() => syncWithCloud(false), 2000);
     return () => clearInterval(interval);
   }, [syncWithCloud]);
@@ -186,13 +227,11 @@ const App: React.FC = () => {
     setUsers(prev => [...prev, newUser]);
     setCurrentUser(newUser);
     
-    // Update URL without refreshing to allow easy sharing
     if (code !== 'LOCAL') {
       const newUrl = window.location.protocol + "//" + window.location.host + window.location.pathname + '?room=' + code;
       window.history.pushState({ path: newUrl }, '', newUrl);
     }
     
-    // Immediate sync to register presence
     setTimeout(() => syncWithCloud(true), 100);
   };
 
@@ -290,9 +329,14 @@ const App: React.FC = () => {
               <span className="text-slate-400 font-bold">{gameState.score.home}-{gameState.score.away}</span>
             </div>
             {partyCode && partyCode !== 'LOCAL' && (
-              <div className={`flex items-center gap-1 px-2 py-0.5 rounded-md border text-[8px] font-black uppercase transition-all ${isSyncing ? 'bg-blue-600/20 border-blue-500 text-blue-400' : 'bg-green-600/10 border-green-500/20 text-green-500'}`}>
-                <div className={`w-1 h-1 rounded-full ${isSyncing ? 'bg-blue-400 animate-pulse' : 'bg-green-500'}`}></div>
-                {partyCode}
+              <div className="flex items-center gap-1 bg-slate-950 border border-slate-800 rounded-md overflow-hidden">
+                <div className={`flex items-center gap-1 px-2 py-0.5 text-[8px] font-black uppercase transition-all ${isSyncing ? 'text-blue-400' : 'text-green-500'}`}>
+                  <div className={`w-1 h-1 rounded-full ${isSyncing ? 'bg-blue-400 animate-pulse' : 'bg-green-500'}`}></div>
+                  {partyCode}
+                </div>
+                <button onClick={resetRoom} className="px-2 py-0.5 border-l border-slate-800 text-[8px] text-slate-600 hover:text-red-500 transition-colors bg-slate-900" title="Reset Room for Everyone">
+                  <i className="fas fa-trash-alt"></i>
+                </button>
               </div>
             )}
           </div>
