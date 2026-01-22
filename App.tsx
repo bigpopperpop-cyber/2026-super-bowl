@@ -12,13 +12,10 @@ type TabType = 'bets' | 'halftime' | 'chat' | 'leaderboard' | 'command';
 
 const generateId = () => Math.random().toString(36).substring(2, 15) + Date.now().toString(36);
 
-// Using a dedicated token to ensure everyone "links up" on the same backend service
-const SYNC_TOKEN = "80c43666"; 
-
 const App: React.FC = () => {
   const [mode, setMode] = useState<AppMode>('LANDING');
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
-    const saved = localStorage.getItem('sb_user_v8');
+    const saved = localStorage.getItem('sb_user_v10');
     return saved ? JSON.parse(saved) : null;
   });
   const [users, setUsers] = useState<User[]>([]);
@@ -28,7 +25,8 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabType>('chat');
   const [partyCode, setPartyCode] = useState<string>(() => {
     const params = new URLSearchParams(window.location.search);
-    return params.get('room')?.toUpperCase() || 'SBLIX_HUB';
+    // Ensure room code is consistent and doesn't default to something different for host vs guest
+    return params.get('room')?.toUpperCase() || 'SBLIX_PARTY_2026';
   });
   const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'error'>('idle');
   const [globalResetActive, setGlobalResetActive] = useState(false);
@@ -38,8 +36,9 @@ const App: React.FC = () => {
   const [isHostAuthenticated, setIsHostAuthenticated] = useState(localStorage.getItem('sb_is_host') === 'true');
 
   const lastSyncedAtRef = useRef<number>(0);
-  const resetEpochRef = useRef<number>(parseInt(localStorage.getItem('sb_reset_epoch_v8') || '0'));
+  const resetEpochRef = useRef<number>(parseInt(localStorage.getItem('sb_reset_epoch_v10') || '0'));
   const ignorePushesUntilRef = useRef<number>(0);
+  const hasPerformedInitialPull = useRef<boolean>(false);
 
   const [gameState, setGameState] = useState<GameState>({
     quarter: 1,
@@ -52,7 +51,7 @@ const App: React.FC = () => {
   useEffect(() => {
     stateRef.current = { users, userBets, messages, propBets, gameState, partyCode, currentUser };
     if (currentUser) {
-      localStorage.setItem('sb_user_v8', JSON.stringify(currentUser));
+      localStorage.setItem('sb_user_v10', JSON.stringify(currentUser));
       if (mode === 'LANDING') setMode('GAME');
     }
   }, [users, userBets, messages, propBets, gameState, partyCode, currentUser, mode]);
@@ -67,32 +66,33 @@ const App: React.FC = () => {
       setUserBets([]);
       setPropBets(INITIAL_PROP_BETS.map(pb => ({ ...pb, resolved: false, outcome: undefined })));
       resetEpochRef.current = cloudResetEpoch;
-      localStorage.setItem('sb_reset_epoch_v8', cloudResetEpoch.toString());
+      localStorage.setItem('sb_reset_epoch_v10', cloudResetEpoch.toString());
       lastSyncedAtRef.current = cloudData.updatedAt || Date.now();
       setTimeout(() => setGlobalResetActive(false), 3000);
       return;
     }
 
-    // Merging Users - Ensure local self is always included and cloud others are added
+    // CRITICAL: Merge users properly to ensure roster is unified
     setUsers(prev => {
       const userMap = new Map<string, User>();
-      // First, add everyone from the cloud
+      // First, take existing local state (so we don't blink)
+      prev.forEach(u => userMap.set(u.id, u));
+      // Then, overlay cloud state
       (cloudData.users || []).forEach((u: User) => userMap.set(u.id, u));
-      // Then, make sure local self is there (overwrites if cloud version is stale)
+      // Finally, ensure self is in there with latest local credits/data
       if (stateRef.current.currentUser) {
         userMap.set(stateRef.current.currentUser.id, stateRef.current.currentUser);
       }
       return Array.from(userMap.values());
     });
 
-    // Merging Messages
+    // Merge Messages
     setMessages(prev => {
       const msgMap = new Map<string, ChatMessage>(prev.map(m => [m.id, m]));
       (cloudData.messages || []).forEach((m: ChatMessage) => msgMap.set(m.id, m));
       return Array.from(msgMap.values()).sort((a, b) => a.timestamp - b.timestamp).slice(-100);
     });
 
-    // Handle updates for game-wide states
     if (cloudData.updatedAt > lastSyncedAtRef.current) {
       if (cloudData.userBets) {
         setUserBets(prev => {
@@ -105,16 +105,18 @@ const App: React.FC = () => {
       if (cloudData.propBets) setPropBets(cloudData.propBets);
       lastSyncedAtRef.current = cloudData.updatedAt;
     }
+    
+    hasPerformedInitialPull.current = true;
   }, [currentUser]);
 
   const syncWithCloud = useCallback(async (isPush: boolean = false) => {
     const code = stateRef.current.partyCode;
     if (!code) return;
-    
-    // Safety check: if we just nuked, don't pull back old stale data immediately
     if (!isPush && Date.now() < ignorePushesUntilRef.current) return;
 
-    const url = `https://api.keyvalue.xyz/${SYNC_TOKEN}/${code.toLowerCase().trim()}`;
+    // Correct URL format: flat key, no slashes after the initial endpoint
+    const cloudKey = `sblix_v10_${code.toLowerCase().trim()}`;
+    const url = `https://api.keyvalue.xyz/${cloudKey}`;
     
     try {
       setSyncStatus('syncing');
@@ -128,9 +130,10 @@ const App: React.FC = () => {
         }
       }
 
-      // Logic: Push if we sent a message/bet, OR if we aren't in the remote roster yet
-      const amIInRoster = remoteData?.users?.some((u: User) => u.id === stateRef.current.currentUser?.id);
-      const shouldPush = isPush || isHostAuthenticated || (stateRef.current.currentUser && !amIInRoster);
+      // Logic: Only push if we have successfully pulled once (to avoid wiping existing data)
+      // or if we are forced to push (e.g., after an action)
+      const isMeInCloud = remoteData?.users?.some((u: User) => u.id === stateRef.current.currentUser?.id);
+      const shouldPush = isPush || (hasPerformedInitialPull.current && !isMeInCloud && stateRef.current.currentUser);
 
       if (shouldPush) {
         const payload = {
@@ -143,24 +146,23 @@ const App: React.FC = () => {
           propBets: stateRef.current.propBets,
           updatedAt: Date.now()
         };
+        
         await fetch(url, { 
           method: 'POST', 
           body: JSON.stringify(payload), 
-          headers: { 'Content-Type': 'text/plain' },
-          mode: 'cors'
+          headers: { 'Content-Type': 'text/plain' }
         });
       }
       setSyncStatus('idle');
     } catch (e) {
-      console.warn("Cloud Sync Error", e);
+      console.warn("Sync Error:", e);
       setSyncStatus('error');
     }
-  }, [mergeState, isHostAuthenticated]);
+  }, [mergeState]);
 
   useEffect(() => {
-    // Immediate initial sync
     syncWithCloud(false);
-    const interval = setInterval(() => syncWithCloud(false), 4000);
+    const interval = setInterval(() => syncWithCloud(false), 3500);
     return () => clearInterval(interval);
   }, [syncWithCloud]);
 
@@ -169,32 +171,34 @@ const App: React.FC = () => {
     if (hostKeyInput === 'SB2026') { 
       setIsHostAuthenticated(true);
       localStorage.setItem('sb_is_host', 'true');
-      alert("Host Mode Activated");
+      alert("Host Commissioner Access Granted");
     } else {
-      alert("Invalid Host Key");
+      alert("Invalid Access Key");
     }
   };
 
   const handleIdentityLogin = (e: React.FormEvent, handle: string, realName: string, avatar: string) => {
     e.preventDefault();
     const newUser: User = { 
-      id: generateId(), // Every user gets a unique ID to prevent roster collisions
+      id: currentUser?.id || generateId(), 
       username: handle, 
       realName, 
       avatar, 
-      credits: 0 
+      credits: currentUser?.credits || 0 
     };
     setCurrentUser(newUser);
     setUsers(prev => [...prev.filter(u => u.id !== newUser.id), newUser]);
     setMode('GAME');
-    setTimeout(() => syncWithCloud(true), 200);
+    // Force a push immediately to join the roster
+    setTimeout(() => syncWithCloud(true), 500);
   };
 
   const nukeRoom = async () => {
-    if (!confirm("☢️ ERASE HUB? All players and chat will be cleared.")) return;
+    if (!confirm("☢️ RESET HUB? This clears chat and scores for ALL players.")) return;
     ignorePushesUntilRef.current = Date.now() + 8000;
     const newEpoch = Date.now();
-    const url = `https://api.keyvalue.xyz/${SYNC_TOKEN}/${partyCode.toLowerCase().trim()}`;
+    const cloudKey = `sblix_v10_${partyCode.toLowerCase().trim()}`;
+    const url = `https://api.keyvalue.xyz/${cloudKey}`;
     const payload = {
       resetEpoch: newEpoch,
       users: [],
@@ -206,25 +210,23 @@ const App: React.FC = () => {
     };
     await fetch(url, { method: 'POST', body: JSON.stringify(payload), headers: { 'Content-Type': 'text/plain' } });
     resetEpochRef.current = newEpoch;
-    localStorage.setItem('sb_reset_epoch_v8', newEpoch.toString());
+    localStorage.setItem('sb_reset_epoch_v10', newEpoch.toString());
     setMessages([]);
     setUserBets([]);
     setUsers([]);
     setPropBets(INITIAL_PROP_BETS);
-    alert("Hub Reset.");
+    alert("Hub Cleared.");
   };
 
   const resolveBet = (betId: string, outcome: string) => {
     const updatedProps = propBets.map(pb => pb.id === betId ? { ...pb, resolved: true, outcome } : pb);
     setPropBets(updatedProps);
     
-    // Update credits locally for everyone based on current bets
     setUsers(uList => uList.map(u => {
       const b = userBets.find(ub => ub.betId === betId && ub.userId === u.id);
       if (b) {
         const isWin = b.selection === outcome;
         const newCredits = (u.credits || 0) + (isWin ? 10 : -3);
-        // If it's me, update the currentUser state too
         if (u.id === currentUser?.id) {
           setCurrentUser(prev => prev ? { ...prev, credits: newCredits } : null);
         }
@@ -237,7 +239,6 @@ const App: React.FC = () => {
     setTimeout(() => syncWithCloud(true), 100);
   };
 
-  // Fix: Added handleCopyLink to resolve the missing function error
   const handleCopyLink = () => {
     const link = `${window.location.origin}${window.location.pathname}?room=${partyCode}`;
     navigator.clipboard.writeText(link).then(() => {
@@ -256,7 +257,7 @@ const App: React.FC = () => {
           <h1 className="text-3xl font-black font-orbitron mb-2 tracking-tighter">SBLIX HUB</h1>
           <div className="mb-8 flex flex-col gap-1">
             <p className="text-slate-400 font-bold uppercase text-[9px] tracking-[0.3em]">
-              {isHostAuthenticated ? 'Commissioner Access' : 'Guest Check-in'}
+              {isHostAuthenticated ? 'Commissioner Access' : 'Super Bowl LIX Guest'}
             </p>
             <div className="bg-slate-900/50 py-1 px-3 rounded-full border border-white/10 w-fit mx-auto text-[8px] font-black uppercase text-slate-500 tracking-widest">
               ROOM: {partyCode}
@@ -293,7 +294,7 @@ const App: React.FC = () => {
         <div className="fixed inset-0 z-[100] bg-red-600 flex items-center justify-center">
            <div className="text-center p-12 bg-black/80 backdrop-blur-3xl rounded-3xl border-4 border-white">
              <i className="fas fa-sync text-6xl text-white mb-6 animate-spin"></i>
-             <h2 className="text-3xl font-black font-orbitron text-white uppercase">Hub Resyncing</h2>
+             <h2 className="text-3xl font-black font-orbitron text-white uppercase tracking-tighter">Hub Resyncing</h2>
            </div>
         </div>
       )}
@@ -322,6 +323,26 @@ const App: React.FC = () => {
 
       <main className="flex-1 overflow-hidden">
         <div className="h-full container mx-auto flex flex-col">
+           {activeTab === 'chat' && (
+             <ChatRoom 
+               user={currentUser} 
+               messages={messages} 
+               onSendMessage={(text) => {
+                 const newMsg: ChatMessage = { id: generateId(), userId: currentUser.id, username: currentUser.username, text, timestamp: Date.now() };
+                 setMessages(prev => [...prev, newMsg]);
+                 syncWithCloud(true);
+                 if (Math.random() > 0.8) {
+                    setTimeout(async () => {
+                      const commentary = await getAICommentary(stateRef.current.messages, stateRef.current.gameState, [...stateRef.current.users].sort((a,b) => b.credits - a.credits));
+                      const aiMsg: ChatMessage = { id: generateId(), userId: 'ai', username: 'Gerry Bot', text: commentary, timestamp: Date.now(), isAI: true };
+                      setMessages(p => [...p, aiMsg]);
+                      syncWithCloud(true);
+                    }, 2000);
+                 }
+               }} 
+               users={users} 
+             />
+           )}
            {activeTab === 'bets' && (
              <BettingPanel 
                propBets={propBets.filter(b => b.category !== 'Halftime')} 
@@ -354,32 +375,12 @@ const App: React.FC = () => {
                />
              </div>
            )}
-           {activeTab === 'chat' && (
-             <ChatRoom 
-               user={currentUser} 
-               messages={messages} 
-               onSendMessage={(text) => {
-                 const newMsg: ChatMessage = { id: generateId(), userId: currentUser.id, username: currentUser.username, text, timestamp: Date.now() };
-                 setMessages(prev => [...prev, newMsg]);
-                 syncWithCloud(true);
-                 if (Math.random() > 0.8) {
-                    setTimeout(async () => {
-                      const commentary = await getAICommentary(stateRef.current.messages, stateRef.current.gameState, [...stateRef.current.users].sort((a,b) => b.credits - a.credits));
-                      const aiMsg: ChatMessage = { id: generateId(), userId: 'ai', username: 'Gerry Bot', text: commentary, timestamp: Date.now(), isAI: true };
-                      setMessages(p => [...p, aiMsg]);
-                      syncWithCloud(true);
-                    }, 2000);
-                 }
-               }} 
-               users={users} 
-             />
-           )}
            {activeTab === 'leaderboard' && <Leaderboard users={users} currentUser={currentUser} propBets={propBets} userBets={userBets} />}
            
            {activeTab === 'command' && isHostAuthenticated && (
              <div className="flex-1 overflow-y-auto p-6 space-y-8 bg-slate-950">
                 <div className="glass-card p-6 rounded-[2rem] border-blue-900/20 bg-blue-950/5 text-center">
-                  <h2 className="text-[10px] font-black text-blue-500 uppercase tracking-widest mb-4">Invite Guests (Room: {partyCode})</h2>
+                  <h2 className="text-[10px] font-black text-blue-500 uppercase tracking-widest mb-4">Invite 20+ Guests (Room: {partyCode})</h2>
                   <div className="flex flex-col items-center gap-4">
                     <div className="bg-white p-3 rounded-2xl shadow-xl">
                       <img src={qrCodeUrl} alt="QR" className="w-40 h-40" />
@@ -387,7 +388,7 @@ const App: React.FC = () => {
                     <button onClick={handleCopyLink} className="w-full py-4 bg-blue-600 text-white rounded-xl font-black uppercase text-[11px]">
                       {copied ? 'LINK COPIED' : 'COPY INVITE LINK'}
                     </button>
-                    <p className="text-[9px] text-slate-600 uppercase font-black">Share with up to 20 guests</p>
+                    <p className="text-[9px] text-slate-600 uppercase font-black">Scanning this puts guests in your room.</p>
                   </div>
                 </div>
 
@@ -426,10 +427,10 @@ const App: React.FC = () => {
       <nav className="bg-slate-900 border-t border-slate-800 pb-safe">
         <div className="container mx-auto flex">
           {[
-            { id: 'bets', icon: 'fa-ticket-alt', label: 'Props' },
-            { id: 'halftime', icon: 'fa-stopwatch', label: 'Halftime' },
             { id: 'chat', icon: 'fa-comments', label: 'Chat' },
-            { id: 'leaderboard', icon: 'fa-trophy', label: 'Ranking' },
+            { id: 'bets', icon: 'fa-ticket-alt', label: 'Props' },
+            { id: 'halftime', icon: 'fa-stopwatch', label: 'Half' },
+            { id: 'leaderboard', icon: 'fa-trophy', label: 'Rank' },
             ...(isHostAuthenticated ? [{ id: 'command', icon: 'fa-cog', label: 'Host' }] : [])
           ].map((tab) => (
             <button key={tab.id} onClick={() => setActiveTab(tab.id as TabType)} className={`flex-1 py-4 text-[8px] font-black uppercase tracking-widest transition-all flex flex-col items-center gap-1.5 ${activeTab === tab.id ? 'text-red-500 bg-red-500/5' : 'text-slate-500'}`}>
