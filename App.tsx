@@ -28,9 +28,12 @@ const App: React.FC = () => {
   const [partyCode, setPartyCode] = useState<string>('');
   const [isSyncing, setIsSyncing] = useState(false);
   const [showHostPanel, setShowHostPanel] = useState(false);
-  const lastSyncedAtRef = useRef<number>(0);
-  const sessionIdRef = useRef<string | null>(null);
+  const [globalResetActive, setGlobalResetActive] = useState(false);
   
+  const lastSyncedAtRef = useRef<number>(0);
+  const sessionIdRef = useRef<string | null>(localStorage.getItem('sb_session_id'));
+  const ignorePushesUntilRef = useRef<number>(0);
+
   const [gameState, setGameState] = useState<GameState>({
     quarter: 1,
     timeRemaining: "15:00",
@@ -52,30 +55,45 @@ const App: React.FC = () => {
   useEffect(() => {
     if (currentUser) localStorage.setItem('sb_current_user', JSON.stringify(currentUser));
     if (partyCode) localStorage.setItem('sb_party_code', partyCode);
+    if (sessionIdRef.current) localStorage.setItem('sb_session_id', sessionIdRef.current);
   }, [currentUser, partyCode]);
 
   const mergeState = useCallback((cloudData: any) => {
     if (!cloudData) return;
 
-    // Check for a new session (Global Nuke detected)
+    // DETECT GLOBAL NUKE: Session ID has changed in the cloud
     const cloudSessionId = cloudData.sessionId || null;
     if (cloudSessionId && sessionIdRef.current && cloudSessionId !== sessionIdRef.current) {
-      console.log("Global reset detected. Wiping local state...");
+      console.log("!!! GLOBAL NUKE DETECTED !!! Wiping everything.");
+      setGlobalResetActive(true);
+      
+      // Hard wipe local state
       setMessages([]);
       setUserBets([]);
       setPropBets(INITIAL_PROP_BETS.map(pb => ({ ...pb, resolved: false, outcome: undefined })));
-      // Keep current user but reset their credits
+      
       if (currentUser) {
-        setCurrentUser(prev => prev ? { ...prev, credits: 0 } : null);
-        setUsers([currentUser]);
+        const resetUser = { ...currentUser, credits: 0 };
+        setCurrentUser(resetUser);
+        setUsers([resetUser]);
       }
+
       sessionIdRef.current = cloudSessionId;
+      localStorage.setItem('sb_session_id', cloudSessionId);
       lastSyncedAtRef.current = cloudData.updatedAt;
+
+      // Show reset message for 3 seconds
+      setTimeout(() => setGlobalResetActive(false), 3000);
       return;
     }
     
-    if (!sessionIdRef.current) sessionIdRef.current = cloudSessionId;
+    // First time joining a session
+    if (!sessionIdRef.current && cloudSessionId) {
+      sessionIdRef.current = cloudSessionId;
+      localStorage.setItem('sb_session_id', cloudSessionId);
+    }
 
+    // Normal Merge Logic
     setMessages(prev => {
       const msgMap = new Map(prev.map(m => [m.id, m]));
       (cloudData.messages || []).forEach((m: ChatMessage) => msgMap.set(m.id, m));
@@ -112,7 +130,13 @@ const App: React.FC = () => {
     const code = stateRef.current.partyCode;
     if (!code || code === 'LOCAL') return;
     
-    const syncKey = `sblix_party_v2_${code.toLowerCase().trim()}`;
+    // Safety: If we are in a "Cool down" period after a nuke, don't push anything
+    if (isPush && Date.now() < ignorePushesUntilRef.current) {
+       console.log("Post-nuke silence active. Push suppressed.");
+       return;
+    }
+
+    const syncKey = `sblix_party_v3_${code.toLowerCase().trim()}`;
     const url = `https://api.keyvalue.xyz/${syncKey}`;
     
     try {
@@ -155,16 +179,16 @@ const App: React.FC = () => {
 
   const nukeRoom = async () => {
     if (!partyCode || partyCode === 'LOCAL') return;
-    if (!confirm("☢️ NUKE HUB? This wipes EVERY guest's chat and credits. Guests will see a clean room within 2 seconds.")) return;
+    if (!confirm("☢️ NUKE ROOM?\n\nThis will clear all players, credits, and chat for EVERYONE in room " + partyCode + ".\n\nTHIS CANNOT BE UNDONE.")) return;
 
     try {
       setIsSyncing(true);
-      const syncKey = `sblix_party_v2_${partyCode.toLowerCase().trim()}`;
+      const syncKey = `sblix_party_v3_${partyCode.toLowerCase().trim()}`;
       const url = `https://api.keyvalue.xyz/${syncKey}`;
       
       const newSessionId = generateId();
       
-      // Wipe cloud first
+      // Aggressive Wipe Payload - 0 users except host, 0 messages, 0 bets
       const payload = {
         sessionId: newSessionId,
         users: currentUser ? [{ ...currentUser, credits: 0 }] : [],
@@ -174,16 +198,31 @@ const App: React.FC = () => {
         updatedAt: Date.now()
       };
 
-      const res = await fetch(url, { 
-        method: 'POST', 
-        body: JSON.stringify(payload),
-        headers: { 'Content-Type': 'application/json' }
-      });
+      // Try up to 3 times to ensure the cloud is nuked
+      let success = false;
+      for (let i = 0; i < 3; i++) {
+        const res = await fetch(url, { 
+          method: 'POST', 
+          body: JSON.stringify(payload),
+          headers: { 'Content-Type': 'application/json' }
+        });
+        if (res.ok) {
+          success = true;
+          break;
+        }
+        await new Promise(r => setTimeout(r, 500));
+      }
 
-      if (!res.ok) throw new Error("Cloud reset failed");
+      if (!success) throw new Error("Could not reach cloud storage to clear room.");
       
-      // Update local state
+      // SILENCE GUESTS: For 5 seconds, don't let anyone push data back. 
+      // This allows the "Nuke" state to propagate to everyone's devices.
+      ignorePushesUntilRef.current = Date.now() + 5000;
+
+      // Reset local state immediately
       sessionIdRef.current = newSessionId;
+      localStorage.setItem('sb_session_id', newSessionId);
+      
       setMessages([]);
       setUserBets([]);
       if (currentUser) {
@@ -193,9 +232,10 @@ const App: React.FC = () => {
       }
       setPropBets(INITIAL_PROP_BETS.map(pb => ({ ...pb, resolved: false, outcome: undefined })));
       setShowHostPanel(false);
-      alert("Hub Nuked! All guests have been cleared.");
+      
+      alert("💥 ROOM NUKED! Everyone has been cleared out.");
     } catch (e) {
-      alert("Nuke failed. Check internet and try again.");
+      alert("❌ FAILED TO NUKE ROOM.\n\nError: " + (e instanceof Error ? e.message : "Unknown Connection Error"));
     } finally {
       setIsSyncing(false);
     }
@@ -341,6 +381,17 @@ const App: React.FC = () => {
 
   return (
     <div className="fixed inset-0 bg-slate-950 flex flex-col overflow-hidden">
+      {/* GLOBAL RESET OVERLAY */}
+      {globalResetActive && (
+        <div className="fixed inset-0 z-[100] bg-red-600 flex items-center justify-center animate-pulse">
+          <div className="text-center p-12 bg-black/50 backdrop-blur-xl rounded-full border-4 border-white shadow-2xl">
+            <i className="fas fa-radiation text-6xl text-white mb-4"></i>
+            <h2 className="text-3xl font-black font-orbitron text-white">HUB RESETTING...</h2>
+            <p className="text-white/70 font-bold uppercase tracking-widest mt-2">The host has cleared the room</p>
+          </div>
+        </div>
+      )}
+
       <header className="bg-slate-900 border-b border-slate-800 p-3 shrink-0 z-40 shadow-xl">
         <div className="container mx-auto flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -352,17 +403,14 @@ const App: React.FC = () => {
           </div>
           <div className="flex items-center gap-3">
              {partyCode && partyCode !== 'LOCAL' && (
-              <button onClick={() => setShowHostPanel(true)} className="flex items-center gap-1.5 bg-red-600 text-white border border-red-500 rounded-full px-3 py-1 animate-pulse shadow-[0_0_15px_rgba(220,38,38,0.3)]">
+              <button onClick={() => setShowHostPanel(true)} className="flex items-center gap-1.5 bg-red-600 text-white border border-red-500 rounded-full px-3 py-1 animate-pulse shadow-[0_0_15px_rgba(220,38,38,0.3)] hover:scale-105 transition-transform">
                 <i className="fas fa-crown text-[10px]"></i>
-                <span className="text-[10px] font-black uppercase tracking-tighter">HOST</span>
+                <span className="text-[10px] font-black uppercase tracking-tighter">HOST PANEL</span>
               </button>
             )}
             <div className={`text-[11px] font-orbitron font-black px-2 py-1 rounded-md bg-slate-950 border border-slate-800 ${(currentUser?.credits || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
               {(currentUser?.credits || 0)} PTS
             </div>
-            <button onClick={() => setShowHostPanel(true)} className="w-8 h-8 flex items-center justify-center bg-slate-800 rounded-lg border border-slate-700 text-lg hover:bg-slate-700 transition-colors">
-              {currentUser?.avatar}
-            </button>
           </div>
         </div>
       </header>
@@ -391,7 +439,15 @@ const App: React.FC = () => {
           <div className="absolute inset-0 z-50 bg-black/95 backdrop-blur-2xl animate-in fade-in slide-in-from-right duration-300">
             <div className="h-full flex flex-col p-6 max-w-lg mx-auto overflow-y-auto custom-scrollbar">
               <div className="flex justify-between items-center mb-8 shrink-0">
-                <h2 className="text-2xl font-black font-orbitron text-white">ROOM SETTINGS</h2>
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-red-600 rounded-xl flex items-center justify-center text-white">
+                    <i className="fas fa-crown"></i>
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-black font-orbitron text-white">HOST TOOLS</h2>
+                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Managing Room: {partyCode}</p>
+                  </div>
+                </div>
                 <button onClick={() => setShowHostPanel(false)} className="text-slate-500 hover:text-white p-2">
                   <i className="fas fa-times text-2xl"></i>
                 </button>
@@ -400,57 +456,61 @@ const App: React.FC = () => {
               <div className="space-y-8">
                 {/* Score Controls */}
                 <div className="glass-card p-6 rounded-3xl border-white/10">
-                  <h3 className="text-[10px] font-black uppercase text-slate-500 tracking-widest mb-4">Update Game State</h3>
+                  <h3 className="text-[10px] font-black uppercase text-slate-500 tracking-widest mb-4">Live Scoreboard</h3>
                   <div className="grid grid-cols-2 gap-4 mb-4">
                     <div className="space-y-2">
                       <div className="text-center font-orbitron text-4xl font-black text-white">{gameState.score.home}</div>
                       <div className="flex gap-2">
-                        <button onClick={() => updateGameScore('home', -1)} className="flex-1 bg-slate-800 p-3 rounded-xl text-slate-400">-</button>
-                        <button onClick={() => updateGameScore('home', 1)} className="flex-1 bg-red-600 p-3 rounded-xl text-white">+</button>
+                        <button onClick={() => updateGameScore('home', -1)} className="flex-1 bg-slate-800 p-3 rounded-xl text-slate-400 hover:bg-slate-700 transition-colors">-</button>
+                        <button onClick={() => updateGameScore('home', 1)} className="flex-1 bg-red-600 p-3 rounded-xl text-white hover:bg-red-500 transition-colors shadow-lg shadow-red-600/20">+</button>
                       </div>
-                      <div className="text-center text-[9px] font-black text-slate-600 uppercase">Home Score</div>
+                      <div className="text-center text-[9px] font-black text-slate-600 uppercase">Home</div>
                     </div>
                     <div className="space-y-2">
                       <div className="text-center font-orbitron text-4xl font-black text-white">{gameState.score.away}</div>
                       <div className="flex gap-2">
-                        <button onClick={() => updateGameScore('away', -1)} className="flex-1 bg-slate-800 p-3 rounded-xl text-slate-400">-</button>
-                        <button onClick={() => updateGameScore('away', 1)} className="flex-1 bg-red-600 p-3 rounded-xl text-white">+</button>
+                        <button onClick={() => updateGameScore('away', -1)} className="flex-1 bg-slate-800 p-3 rounded-xl text-slate-400 hover:bg-slate-700 transition-colors">-</button>
+                        <button onClick={() => updateGameScore('away', 1)} className="flex-1 bg-red-600 p-3 rounded-xl text-white hover:bg-red-500 transition-colors shadow-lg shadow-red-600/20">+</button>
                       </div>
-                      <div className="text-center text-[9px] font-black text-slate-600 uppercase">Away Score</div>
+                      <div className="text-center text-[9px] font-black text-slate-600 uppercase">Away</div>
                     </div>
                   </div>
                 </div>
 
                 {/* Session Management */}
-                <div className="glass-card p-6 rounded-3xl border-red-900/30 bg-red-900/5">
+                <div className="glass-card p-6 rounded-3xl border-red-900/40 bg-red-950/20">
                   <h3 className="text-[10px] font-black uppercase text-red-500 tracking-widest mb-4 flex items-center gap-2">
                     <i className="fas fa-exclamation-triangle"></i>
-                    Danger Zone
+                    CRITICAL CONTROLS
                   </h3>
                   <div className="space-y-4">
-                    <div className="p-4 bg-slate-900/50 rounded-2xl border border-white/5">
-                      <div className="text-[10px] font-bold text-slate-500 mb-1 uppercase">Hub Invite Code</div>
+                    <div className="p-4 bg-slate-900/80 rounded-2xl border border-white/5">
+                      <div className="text-[10px] font-bold text-slate-500 mb-1 uppercase">Invitation Link</div>
                       <div className="flex items-center gap-2">
-                        <span className="text-lg font-black text-white flex-1 font-orbitron tracking-widest">{partyCode}</span>
-                        <button onClick={handleCopyLink} className="bg-blue-600 px-3 py-2 rounded-lg text-white text-[10px] font-black uppercase">{copied ? 'COPIED' : 'COPY'}</button>
+                        <span className="text-xs font-bold text-slate-400 truncate flex-1">{window.location.origin}/?room={partyCode}</span>
+                        <button onClick={handleCopyLink} className="bg-blue-600 px-3 py-2 rounded-lg text-white text-[10px] font-black uppercase transition-all active:scale-95">{copied ? 'COPIED' : 'COPY'}</button>
                       </div>
                     </div>
                     
-                    <button onClick={nukeRoom} className="w-full py-6 bg-red-600 border border-red-400 text-white rounded-2xl font-black uppercase tracking-widest text-sm hover:scale-[1.02] active:scale-95 transition-all shadow-[0_0_20px_rgba(220,38,38,0.4)]">
-                      ☢️ NUKE ROOM & CLEAR GUESTS
+                    <button 
+                      onClick={nukeRoom} 
+                      className="w-full py-6 bg-red-600 border-2 border-red-400 text-white rounded-2xl font-black uppercase tracking-widest text-sm hover:scale-[1.02] active:scale-95 transition-all shadow-[0_0_30px_rgba(220,38,38,0.5)] flex flex-col items-center justify-center gap-1"
+                    >
+                      <span className="flex items-center gap-2 text-lg">
+                        <i className="fas fa-bomb"></i>
+                        NUKE ROOM & CLEAR GUESTS
+                      </span>
+                      <span className="text-[9px] text-red-100 opacity-80">Clears players, chats, and points globally</span>
                     </button>
-                    <p className="text-[10px] text-slate-500 text-center uppercase font-black leading-tight">
-                      Instantly wipes all chat, credits, and player lists for everyone connected to room "{partyCode}".
-                    </p>
                   </div>
                 </div>
 
                 <div className="pt-8 border-t border-white/5 flex flex-col gap-3">
-                   <button onClick={() => { localStorage.removeItem('sb_current_user'); window.location.reload(); }} className="w-full py-4 bg-slate-800 text-white rounded-2xl font-black uppercase tracking-widest text-[10px]">
-                    Switch Profile
+                   <button onClick={() => { localStorage.removeItem('sb_current_user'); window.location.reload(); }} className="w-full py-4 bg-slate-800 text-white rounded-2xl font-black uppercase tracking-widest text-[10px] border border-slate-700">
+                    Switch Your Avatar
                   </button>
                   <button onClick={resetAllLocal} className="w-full py-4 text-slate-600 text-[10px] font-black uppercase tracking-widest hover:text-white transition-colors">
-                    Reset My Local Data
+                    Reset My Local Browser App
                   </button>
                 </div>
               </div>
