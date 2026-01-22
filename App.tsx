@@ -19,7 +19,10 @@ const App: React.FC = () => {
   const [userBets, setUserBets] = useState<UserBet[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [activeTab, setActiveTab] = useState<TabType>('chat');
-  const [partyCode, setPartyCode] = useState<string>('');
+  const [partyCode, setPartyCode] = useState<string>(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('room')?.toUpperCase() || 'SBLIX_HUB';
+  });
   const [isSyncing, setIsSyncing] = useState(false);
   const [globalResetActive, setGlobalResetActive] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -64,12 +67,19 @@ const App: React.FC = () => {
       return;
     }
 
+    // Always merge users to keep the roster unified
     setUsers(prev => {
       const userMap = new Map<string, User>(prev.map(u => [u.id, u]));
       (cloudData.users || []).forEach((u: User) => {
         const existing = userMap.get(u.id);
-        if (!existing || u.credits !== existing.credits) userMap.set(u.id, u);
+        if (!existing || u.credits !== existing.credits) {
+          userMap.set(u.id, u);
+        }
       });
+      // If we are logged in, ensure we are in the list
+      if (stateRef.current.currentUser) {
+        userMap.set(stateRef.current.currentUser.id, stateRef.current.currentUser);
+      }
       return Array.from(userMap.values());
     });
 
@@ -88,6 +98,12 @@ const App: React.FC = () => {
         });
       }
       if (cloudData.gameState) setGameState(cloudData.gameState);
+      
+      // Sync Prop Bet Resolutions (Host is source of truth)
+      if (cloudData.propBets) {
+        setPropBets(cloudData.propBets);
+      }
+
       lastSyncedAtRef.current = cloudData.updatedAt;
     }
   }, [currentUser]);
@@ -112,7 +128,10 @@ const App: React.FC = () => {
         }
       }
 
-      if (isPush || (!remoteData && isHostAuthenticated)) {
+      // We push if explicitly asked, OR if we are the host, OR if we are a new user joining the roster
+      const shouldPush = isPush || isHostAuthenticated || (currentUser && !remoteData?.users?.find((u: any) => u.id === currentUser.id));
+
+      if (shouldPush) {
         const payload = {
           resetEpoch: Math.max(resetEpochRef.current, remoteData?.resetEpoch || 0),
           users: Array.from(new Map([...(remoteData?.users || []), ...stateRef.current.users].map(u => [u.id, u])).values()),
@@ -120,6 +139,7 @@ const App: React.FC = () => {
             .sort((a: any, b: any) => a.timestamp - b.timestamp).slice(-60),
           userBets: Array.from(new Map([...(remoteData?.userBets || []), ...stateRef.current.userBets].map(b => [b.id, b])).values()),
           gameState: stateRef.current.gameState,
+          propBets: stateRef.current.propBets, // Sync resolutions
           updatedAt: Date.now()
         };
         await fetch(url, { method: 'POST', body: JSON.stringify(payload), headers: { 'Content-Type': 'application/json' } });
@@ -129,16 +149,9 @@ const App: React.FC = () => {
     } finally {
       setIsSyncing(false);
     }
-  }, [mergeState, isHostAuthenticated]);
+  }, [mergeState, isHostAuthenticated, currentUser]);
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const roomFromUrl = params.get('room');
-    
-    if (roomFromUrl) {
-      setPartyCode(roomFromUrl.toUpperCase());
-    }
-
     const interval = setInterval(() => syncWithCloud(false), 3000);
     return () => clearInterval(interval);
   }, [syncWithCloud]);
@@ -148,7 +161,7 @@ const App: React.FC = () => {
     if (hostKeyInput === 'SB2026') { 
       setIsHostAuthenticated(true);
       localStorage.setItem('sb_is_host', 'true');
-      setPartyCode('LIX_ROOM');
+      // Keep existing partyCode so host joins the guest's room if arriving via link
     } else {
       alert("Invalid Master Host Key");
     }
@@ -157,7 +170,7 @@ const App: React.FC = () => {
   const handleIdentityLogin = (e: React.FormEvent, handle: string, realName: string, avatar: string) => {
     e.preventDefault();
     const newUser: User = { 
-      id: isHostAuthenticated ? 'host-user-id' : generateId(), 
+      id: isHostAuthenticated ? `host-${partyCode}` : generateId(), 
       username: handle, 
       realName, 
       avatar, 
@@ -166,6 +179,7 @@ const App: React.FC = () => {
     setCurrentUser(newUser);
     setUsers(prev => [...prev.filter(u => u.id !== newUser.id), newUser]);
     setMode('GAME');
+    // Ensure immediate sync to join the cloud roster
     setTimeout(() => syncWithCloud(true), 300);
   };
 
@@ -180,6 +194,7 @@ const App: React.FC = () => {
       users: [],
       messages: [],
       userBets: [],
+      propBets: INITIAL_PROP_BETS,
       gameState: { quarter: 1, timeRemaining: "15:00", score: { home: 0, away: 0 }, possession: 'home' },
       updatedAt: Date.now()
     };
@@ -189,6 +204,7 @@ const App: React.FC = () => {
     setMessages([]);
     setUserBets([]);
     setUsers([]);
+    setPropBets(INITIAL_PROP_BETS);
     alert("Hub Reset Successfully.");
   };
 
@@ -226,9 +242,14 @@ const App: React.FC = () => {
             <i className="fas fa-football-ball text-red-600 text-4xl"></i>
           </div>
           <h1 className="text-3xl font-black font-orbitron mb-2 tracking-tighter">SBLIX HUB</h1>
-          <p className="text-slate-400 font-bold uppercase text-[9px] tracking-[0.3em] mb-8">
-            {isHostAuthenticated ? 'Welcome back, Commissioner' : '2026 Season Hub'}
-          </p>
+          <div className="mb-8 flex flex-col gap-1">
+            <p className="text-slate-400 font-bold uppercase text-[9px] tracking-[0.3em]">
+              {isHostAuthenticated ? 'Commissioner Mode' : 'Guest Portal'}
+            </p>
+            <div className="bg-slate-900/50 py-1 px-3 rounded-full border border-white/10 w-fit mx-auto text-[8px] font-black uppercase text-slate-500 tracking-widest">
+              Room: {partyCode}
+            </div>
+          </div>
 
           <PlayerLogin 
             onLogin={handleIdentityLogin} 
@@ -479,16 +500,11 @@ const PlayerLogin: React.FC<{ onLogin: (e: React.FormEvent, h: string, r: string
 
   return (
     <div className="w-full space-y-6">
-      <div className="bg-slate-900/80 p-4 rounded-2xl border border-red-500/30 text-center">
-        <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Room Code</p>
-        <p className="text-xl font-black font-orbitron text-red-500 tracking-widest">{roomCode || 'SBLIX_HUB'}</p>
-      </div>
-
       <form onSubmit={e => onLogin(e, handle, realName, avatar)} className="space-y-5">
         <div>
           <label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Pick an Icon</label>
           <div className="flex justify-center gap-2 overflow-x-auto py-2 no-scrollbar">
-            {AVATARS.slice(0, 10).map(a => (
+            {AVATARS.map(a => (
               <button type="button" key={a} onClick={() => setAvatar(a)} className={`w-10 h-10 text-xl flex-shrink-0 flex items-center justify-center rounded-xl transition-all ${avatar === a ? 'bg-red-600 scale-110 shadow-lg border-2 border-white' : 'bg-slate-800 border border-slate-700'}`}>{a}</button>
             ))}
           </div>
