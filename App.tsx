@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { User, PropBet, UserBet, ChatMessage, GameState, BetStatus } from './types';
 import { INITIAL_PROP_BETS, AVATARS } from './constants';
@@ -31,7 +32,7 @@ const App: React.FC = () => {
   const [globalResetActive, setGlobalResetActive] = useState(false);
   
   const lastSyncedAtRef = useRef<number>(0);
-  const sessionIdRef = useRef<string | null>(localStorage.getItem('sb_session_id'));
+  const resetEpochRef = useRef<number>(parseInt(localStorage.getItem('sb_reset_epoch') || '0'));
   const ignorePushesUntilRef = useRef<number>(0);
 
   const [gameState, setGameState] = useState<GameState>({
@@ -46,64 +47,48 @@ const App: React.FC = () => {
   const [loginPartyCode, setLoginPartyCode] = useState('');
   const [selectedAvatar, setSelectedAvatar] = useState(AVATARS[0]);
 
-  const stateRef = useRef({ users, userBets, messages, propBets, gameState, partyCode });
+  const stateRef = useRef({ users, userBets, messages, propBets, gameState, partyCode, currentUser });
 
   useEffect(() => {
-    stateRef.current = { users, userBets, messages, propBets, gameState, partyCode };
-  }, [users, userBets, messages, propBets, gameState, partyCode]);
+    stateRef.current = { users, userBets, messages, propBets, gameState, partyCode, currentUser };
+  }, [users, userBets, messages, propBets, gameState, partyCode, currentUser]);
 
   useEffect(() => {
     if (currentUser) localStorage.setItem('sb_current_user', JSON.stringify(currentUser));
     if (partyCode) localStorage.setItem('sb_party_code', partyCode);
-    if (sessionIdRef.current) localStorage.setItem('sb_session_id', sessionIdRef.current);
+    localStorage.setItem('sb_reset_epoch', resetEpochRef.current.toString());
   }, [currentUser, partyCode]);
 
   const mergeState = useCallback((cloudData: any) => {
     if (!cloudData) return;
 
-    // DETECT GLOBAL NUKE: Session ID has changed in the cloud
-    const cloudSessionId = cloudData.sessionId || null;
-    if (cloudSessionId && sessionIdRef.current && cloudSessionId !== sessionIdRef.current) {
-      console.log("!!! GLOBAL NUKE DETECTED !!! Wiping everything.");
+    // 1. HARD RESET CHECK: Use an Epoch (Timestamp) instead of SessionID for better reliability
+    const cloudResetEpoch = cloudData.resetEpoch || 0;
+    if (cloudResetEpoch > resetEpochRef.current) {
+      console.log("!!! SYSTEM REFRESH DETECTED !!!");
       setGlobalResetActive(true);
       
-      // Hard wipe local state
       setMessages([]);
       setUserBets([]);
       setPropBets(INITIAL_PROP_BETS.map(pb => ({ ...pb, resolved: false, outcome: undefined })));
       
       if (currentUser) {
-        const resetUser = { ...currentUser, credits: 0 };
-        setCurrentUser(resetUser);
-        setUsers([resetUser]);
+        setCurrentUser(prev => prev ? { ...prev, credits: 0 } : null);
+        setUsers(prev => prev.length > 0 ? [{ ...prev[0], credits: 0 }] : []);
       }
 
-      sessionIdRef.current = cloudSessionId;
-      localStorage.setItem('sb_session_id', cloudSessionId);
-      lastSyncedAtRef.current = cloudData.updatedAt;
-
-      // Show reset message for 3 seconds
+      resetEpochRef.current = cloudResetEpoch;
+      localStorage.setItem('sb_reset_epoch', cloudResetEpoch.toString());
+      lastSyncedAtRef.current = cloudData.updatedAt || Date.now();
+      
       setTimeout(() => setGlobalResetActive(false), 3000);
       return;
     }
-    
-    // First time joining a session
-    if (!sessionIdRef.current && cloudSessionId) {
-      sessionIdRef.current = cloudSessionId;
-      localStorage.setItem('sb_session_id', cloudSessionId);
-    }
 
-    // Normal Merge Logic
-    setMessages(prev => {
-      const msgMap = new Map(prev.map(m => [m.id, m]));
-      (cloudData.messages || []).forEach((m: ChatMessage) => msgMap.set(m.id, m));
-      return Array.from(msgMap.values())
-        .sort((a: ChatMessage, b: ChatMessage) => a.timestamp - b.timestamp)
-        .slice(-100);
-    });
-
+    // 2. USER SYNC: Deduplicate and update credits
     setUsers(prev => {
-      const userMap = new Map(prev.map(u => [u.id, u]));
+      // Fix: Explicitly type the userMap to avoid 'unknown' property access errors.
+      const userMap = new Map<string, User>(prev.map(u => [u.id, u]));
       (cloudData.users || []).forEach((u: User) => {
         const existing = userMap.get(u.id);
         if (!existing || u.credits !== existing.credits) {
@@ -113,6 +98,17 @@ const App: React.FC = () => {
       return Array.from(userMap.values());
     });
 
+    // 3. CHAT SYNC: Deduplicate by ID
+    setMessages(prev => {
+      // Fix: Explicitly type the msgMap and sort parameters to avoid 'unknown' property access errors.
+      const msgMap = new Map<string, ChatMessage>(prev.map(m => [m.id, m]));
+      (cloudData.messages || []).forEach((m: ChatMessage) => msgMap.set(m.id, m));
+      return Array.from(msgMap.values())
+        .sort((a: ChatMessage, b: ChatMessage) => a.timestamp - b.timestamp)
+        .slice(-80);
+    });
+
+    // 4. GAME & BET SYNC: Only if cloud data is newer
     if (cloudData.updatedAt > lastSyncedAtRef.current) {
       if (cloudData.userBets) {
         setUserBets(prev => {
@@ -130,13 +126,11 @@ const App: React.FC = () => {
     const code = stateRef.current.partyCode;
     if (!code || code === 'LOCAL') return;
     
-    // Safety: If we are in a "Cool down" period after a nuke, don't push anything
-    if (isPush && Date.now() < ignorePushesUntilRef.current) {
-       console.log("Post-nuke silence active. Push suppressed.");
-       return;
-    }
+    // Silence during/after nuke to let it propagate
+    if (isPush && Date.now() < ignorePushesUntilRef.current) return;
 
-    const syncKey = `sblix_party_v3_${code.toLowerCase().trim()}`;
+    // Unique Room Key - V4 for clean start
+    const syncKey = `sblix_party_v4_${code.toLowerCase().trim()}`;
     const url = `https://api.keyvalue.xyz/${syncKey}`;
     
     try {
@@ -146,20 +140,23 @@ const App: React.FC = () => {
       
       if (response.ok) {
         const text = await response.text();
-        try {
-          remoteData = JSON.parse(text);
-          mergeState(remoteData);
-        } catch (e) {}
+        if (text && text.trim() !== "") {
+          try {
+            remoteData = JSON.parse(text);
+            mergeState(remoteData);
+          } catch (e) {}
+        }
       }
 
-      if (isPush) {
+      if (isPush || !remoteData) {
+        // If we are pushing OR the room is brand new
         const payload = {
-          sessionId: sessionIdRef.current || generateId(),
-          users: Array.from(new Map([...(remoteData?.users || []).map((u: any) => [u.id, u]), ...stateRef.current.users.map(u => [u.id, u])]).values()),
-          messages: Array.from(new Map([...(remoteData?.messages || []).map((m: any) => [m.id, m]), ...stateRef.current.messages.map(m => [m.id, m])]).values())
+          resetEpoch: Math.max(resetEpochRef.current, remoteData?.resetEpoch || 0),
+          users: Array.from(new Map([...(remoteData?.users || []), ...stateRef.current.users].map(u => [u.id, u])).values()),
+          messages: Array.from(new Map([...(remoteData?.messages || []), ...stateRef.current.messages].map(m => [m.id, m])).values())
             .sort((a: any, b: any) => a.timestamp - b.timestamp)
             .slice(-60),
-          userBets: Array.from(new Map([...(remoteData?.userBets || []).map((b: any) => [b.id, b]), ...stateRef.current.userBets.map(b => [b.id, b])]).values()),
+          userBets: Array.from(new Map([...(remoteData?.userBets || []), ...stateRef.current.userBets].map(b => [b.id, b])).values()),
           gameState: stateRef.current.gameState,
           updatedAt: Date.now()
         };
@@ -171,7 +168,7 @@ const App: React.FC = () => {
         });
       }
     } catch (e) {
-      console.warn("Sync error:", e);
+      console.warn("Sync failed:", e);
     } finally {
       setIsSyncing(false);
     }
@@ -179,18 +176,17 @@ const App: React.FC = () => {
 
   const nukeRoom = async () => {
     if (!partyCode || partyCode === 'LOCAL') return;
-    if (!confirm("☢️ NUKE ROOM?\n\nThis will clear all players, credits, and chat for EVERYONE in room " + partyCode + ".\n\nTHIS CANNOT BE UNDONE.")) return;
+    if (!confirm(`☢️ NUKE ROOM "${partyCode}"?\n\nThis wipes all 20+ guests, scores, and chat immediately.`)) return;
 
     try {
       setIsSyncing(true);
-      const syncKey = `sblix_party_v3_${partyCode.toLowerCase().trim()}`;
+      const syncKey = `sblix_party_v4_${partyCode.toLowerCase().trim()}`;
       const url = `https://api.keyvalue.xyz/${syncKey}`;
       
-      const newSessionId = generateId();
+      const newEpoch = Date.now();
       
-      // Aggressive Wipe Payload - 0 users except host, 0 messages, 0 bets
       const payload = {
-        sessionId: newSessionId,
+        resetEpoch: newEpoch,
         users: currentUser ? [{ ...currentUser, credits: 0 }] : [],
         messages: [],
         userBets: [],
@@ -198,30 +194,18 @@ const App: React.FC = () => {
         updatedAt: Date.now()
       };
 
-      // Try up to 3 times to ensure the cloud is nuked
-      let success = false;
-      for (let i = 0; i < 3; i++) {
-        const res = await fetch(url, { 
-          method: 'POST', 
-          body: JSON.stringify(payload),
-          headers: { 'Content-Type': 'application/json' }
-        });
-        if (res.ok) {
-          success = true;
-          break;
-        }
-        await new Promise(r => setTimeout(r, 500));
-      }
+      // Atomic wipe attempt
+      const res = await fetch(url, { 
+        method: 'POST', 
+        body: JSON.stringify(payload),
+        headers: { 'Content-Type': 'application/json' }
+      });
 
-      if (!success) throw new Error("Could not reach cloud storage to clear room.");
+      if (!res.ok) throw new Error("Could not reach cloud server.");
       
-      // SILENCE GUESTS: For 5 seconds, don't let anyone push data back. 
-      // This allows the "Nuke" state to propagate to everyone's devices.
-      ignorePushesUntilRef.current = Date.now() + 5000;
-
-      // Reset local state immediately
-      sessionIdRef.current = newSessionId;
-      localStorage.setItem('sb_session_id', newSessionId);
+      ignorePushesUntilRef.current = Date.now() + 3000;
+      resetEpochRef.current = newEpoch;
+      localStorage.setItem('sb_reset_epoch', newEpoch.toString());
       
       setMessages([]);
       setUserBets([]);
@@ -233,9 +217,9 @@ const App: React.FC = () => {
       setPropBets(INITIAL_PROP_BETS.map(pb => ({ ...pb, resolved: false, outcome: undefined })));
       setShowHostPanel(false);
       
-      alert("💥 ROOM NUKED! Everyone has been cleared out.");
+      alert("✅ Hub reset. It's now a clean field!");
     } catch (e) {
-      alert("❌ FAILED TO NUKE ROOM.\n\nError: " + (e instanceof Error ? e.message : "Unknown Connection Error"));
+      alert("❌ Reset failed. Please check your connection.");
     } finally {
       setIsSyncing(false);
     }
@@ -254,8 +238,10 @@ const App: React.FC = () => {
 
     if (roomFromUrl) {
       setPartyCode(roomFromUrl.toUpperCase());
+      setLoginPartyCode(roomFromUrl.toUpperCase());
     } else if (savedCode) {
       setPartyCode(savedCode);
+      setLoginPartyCode(savedCode);
     }
 
     if (savedUser) {
@@ -265,15 +251,20 @@ const App: React.FC = () => {
       } catch (e) {}
     }
 
-    const interval = setInterval(() => syncWithCloud(false), 2000);
+    // Jittered polling to prevent synchronized "herd" requests from 20 devices
+    const jitter = Math.random() * 800;
+    const interval = setInterval(() => syncWithCloud(false), 2000 + jitter);
     return () => clearInterval(interval);
   }, [syncWithCloud]);
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!loginUsername.trim() || !loginRealName.trim()) return;
+    if (!loginUsername.trim() || !loginRealName.trim() || !loginPartyCode.trim()) {
+      alert("Please enter a username, real name, and Room Code!");
+      return;
+    }
     
-    const code = loginPartyCode.trim().toUpperCase() || 'LOCAL';
+    const code = loginPartyCode.trim().toUpperCase();
     setPartyCode(code);
     
     const newUser: User = { 
@@ -284,15 +275,14 @@ const App: React.FC = () => {
       credits: 0 
     };
     
-    setUsers(prev => [...prev, newUser]);
+    setUsers([newUser]);
     setCurrentUser(newUser);
     
-    if (code !== 'LOCAL') {
-      const newUrl = window.location.protocol + "//" + window.location.host + window.location.pathname + '?room=' + code;
-      window.history.pushState({ path: newUrl }, '', newUrl);
-    }
+    const newUrl = window.location.protocol + "//" + window.location.host + window.location.pathname + '?room=' + code;
+    window.history.pushState({ path: newUrl }, '', newUrl);
     
-    setTimeout(() => syncWithCloud(true), 100);
+    // Immediate push to claim/join room
+    setTimeout(() => syncWithCloud(true), 300);
   };
 
   const sendMessage = (text: string) => {
@@ -307,11 +297,11 @@ const App: React.FC = () => {
     setMessages(prev => [...prev, newMsg]);
     syncWithCloud(true);
     
-    if (Math.random() > 0.7) setTimeout(() => triggerAICommentary(), 2000);
+    if (Math.random() > 0.75) setTimeout(() => triggerAICommentary(), 1500);
   };
 
   const triggerAICommentary = async () => {
-    const sortedUsers = [...stateRef.current.users].sort((a: User, b: User) => (b.credits || 0) - (a.credits || 0));
+    const sortedUsers = [...stateRef.current.users].sort((a, b) => (b.credits || 0) - (a.credits || 0));
     const commentary = await getAICommentary(stateRef.current.messages, stateRef.current.gameState, sortedUsers);
     const aiMsg: ChatMessage = { 
       id: generateId(), 
@@ -326,18 +316,11 @@ const App: React.FC = () => {
   };
 
   const handleCopyLink = () => {
-    const shareUrl = partyCode ? `${window.location.origin}${window.location.pathname}?room=${partyCode}` : window.location.href;
+    const shareUrl = `${window.location.origin}${window.location.pathname}?room=${partyCode}`;
     navigator.clipboard.writeText(shareUrl);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
-
-  const resetAllLocal = () => {
-    if(confirm("Wipe your local data? This won't affect others, but will let you log in fresh.")) {
-      localStorage.clear();
-      window.location.href = window.location.pathname;
-    }
-  }
 
   if (!currentUser) {
     return (
@@ -354,25 +337,25 @@ const App: React.FC = () => {
 
           <form onSubmit={handleLogin} className="space-y-5">
             <div>
-              <label className="text-[10px] font-black uppercase text-slate-500 mb-2 block ml-1">Mascot</label>
-              <div className="flex flex-wrap gap-2 justify-center max-h-32 overflow-y-auto p-4 rounded-2xl bg-black/40 border border-white/5 custom-scrollbar shadow-inner">
+              <label className="text-[10px] font-black uppercase text-slate-500 mb-2 block ml-1">Choose Mascot</label>
+              <div className="flex flex-wrap gap-2 justify-center p-3 rounded-2xl bg-black/40 border border-white/5 shadow-inner">
                 {AVATARS.map(a => (
-                  <button key={a} type="button" onClick={() => setSelectedAvatar(a)} className={`w-11 h-11 text-2xl flex items-center justify-center rounded-xl transition-all ${selectedAvatar === a ? 'bg-red-600 scale-110 shadow-lg border-2 border-white' : 'bg-slate-800'}`}>{a}</button>
+                  <button key={a} type="button" onClick={() => setSelectedAvatar(a)} className={`w-10 h-10 text-xl flex items-center justify-center rounded-xl transition-all ${selectedAvatar === a ? 'bg-red-600 scale-110 shadow-lg border-2 border-white' : 'bg-slate-800'}`}>{a}</button>
                 ))}
               </div>
             </div>
-            <div className="space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <input type="text" placeholder="Handle" value={loginUsername} onChange={(e) => setLoginUsername(e.target.value)} className="w-full bg-slate-900/80 border border-slate-700 rounded-2xl px-4 py-4 text-white text-sm outline-none text-center font-bold" />
-                <input type="text" placeholder="Room Code" maxLength={10} value={loginPartyCode} onChange={(e) => setLoginPartyCode(e.target.value)} className="w-full bg-slate-900/80 border border-slate-700 rounded-2xl px-4 py-4 text-white text-sm outline-none text-center font-bold" />
+            <div className="space-y-4">
+              <input type="text" placeholder="Your Handle (e.g. TurboTom)" value={loginUsername} onChange={(e) => setLoginUsername(e.target.value)} className="w-full bg-slate-900/80 border border-slate-700 rounded-2xl px-4 py-4 text-white text-base outline-none font-bold" />
+              <input type="text" placeholder="Real Name (e.g. John D.)" value={loginRealName} onChange={(e) => setLoginRealName(e.target.value)} className="w-full bg-slate-900/80 border border-slate-700 rounded-2xl px-4 py-4 text-white text-base outline-none font-bold" />
+              <div className="pt-2">
+                <label className="text-[10px] font-black uppercase text-red-500 mb-1 block ml-1">Room Code (Required to join friends)</label>
+                <input type="text" placeholder="E.G. SUPERBOWL2025" maxLength={15} value={loginPartyCode} onChange={(e) => setLoginPartyCode(e.target.value)} className="w-full bg-slate-950 border-2 border-red-900/50 rounded-2xl px-4 py-4 text-white text-xl outline-none text-center font-black font-orbitron tracking-widest uppercase" />
               </div>
-              <input type="text" placeholder="Real Name (e.g. John D.)" value={loginRealName} onChange={(e) => setLoginRealName(e.target.value)} className="w-full bg-slate-900/80 border border-slate-700 rounded-2xl px-4 py-4 text-white text-sm outline-none text-center font-bold" />
-              <button type="submit" disabled={!loginUsername.trim() || !loginRealName.trim()} className="w-full py-5 bg-white text-slate-950 rounded-[1.5rem] font-black font-orbitron shadow-2xl uppercase tracking-widest text-sm disabled:opacity-30">ENTER HUB</button>
+              <button type="submit" disabled={!loginUsername.trim() || !loginRealName.trim() || !loginPartyCode.trim()} className="w-full py-5 bg-white text-slate-950 rounded-[1.5rem] font-black font-orbitron shadow-2xl uppercase tracking-widest text-sm disabled:opacity-30 active:scale-95 transition-all">ENTER PARTY</button>
             </div>
           </form>
-          <div className="mt-8 flex flex-col gap-2 text-center">
-            <p className="text-slate-500 text-[10px] italic">Hosting 20+ guests? Use the same Room Code.</p>
-            <button onClick={resetAllLocal} className="text-[9px] text-slate-600 uppercase font-black hover:text-white transition-colors">Reset My Local App</button>
+          <div className="mt-8 text-center">
+            <p className="text-slate-500 text-[11px] font-bold">ALL 20 GUESTS MUST USE THE SAME ROOM CODE</p>
           </div>
         </div>
       </div>
@@ -383,11 +366,11 @@ const App: React.FC = () => {
     <div className="fixed inset-0 bg-slate-950 flex flex-col overflow-hidden">
       {/* GLOBAL RESET OVERLAY */}
       {globalResetActive && (
-        <div className="fixed inset-0 z-[100] bg-red-600 flex items-center justify-center animate-pulse">
-          <div className="text-center p-12 bg-black/50 backdrop-blur-xl rounded-full border-4 border-white shadow-2xl">
-            <i className="fas fa-radiation text-6xl text-white mb-4"></i>
-            <h2 className="text-3xl font-black font-orbitron text-white">HUB RESETTING...</h2>
-            <p className="text-white/70 font-bold uppercase tracking-widest mt-2">The host has cleared the room</p>
+        <div className="fixed inset-0 z-[100] bg-red-600 flex items-center justify-center">
+          <div className="text-center p-12 bg-black/60 backdrop-blur-2xl rounded-3xl border-4 border-white shadow-2xl animate-pulse">
+            <i className="fas fa-sync-alt text-6xl text-white mb-6 animate-spin"></i>
+            <h2 className="text-3xl font-black font-orbitron text-white">SYSTEM REFRESH</h2>
+            <p className="text-white/80 font-bold uppercase tracking-widest mt-4">Host has cleared the game...</p>
           </div>
         </div>
       )}
@@ -400,17 +383,19 @@ const App: React.FC = () => {
               <span className="font-orbitron font-bold text-slate-200 uppercase">Q{gameState.quarter}</span>
               <span className="text-slate-400 font-bold">{gameState.score.home}-{gameState.score.away}</span>
             </div>
+            <div className="flex items-center gap-1 bg-slate-950/50 px-2 py-1 rounded-md">
+              <div className={`w-1.5 h-1.5 rounded-full ${isSyncing ? 'bg-blue-400 animate-pulse' : 'bg-green-500'}`}></div>
+              <span className="text-[9px] font-black text-slate-600 uppercase">{users.length} ON</span>
+            </div>
           </div>
-          <div className="flex items-center gap-3">
-             {partyCode && partyCode !== 'LOCAL' && (
-              <button onClick={() => setShowHostPanel(true)} className="flex items-center gap-1.5 bg-red-600 text-white border border-red-500 rounded-full px-3 py-1 animate-pulse shadow-[0_0_15px_rgba(220,38,38,0.3)] hover:scale-105 transition-transform">
-                <i className="fas fa-crown text-[10px]"></i>
-                <span className="text-[10px] font-black uppercase tracking-tighter">HOST PANEL</span>
-              </button>
-            )}
+          <div className="flex items-center gap-2">
             <div className={`text-[11px] font-orbitron font-black px-2 py-1 rounded-md bg-slate-950 border border-slate-800 ${(currentUser?.credits || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
               {(currentUser?.credits || 0)} PTS
             </div>
+            <button onClick={() => setShowHostPanel(true)} className="flex items-center gap-1.5 bg-red-600 text-white border border-red-500 rounded-lg px-3 py-1.5 shadow-lg active:scale-95 transition-all">
+              <i className="fas fa-crown text-[10px]"></i>
+              <span className="text-[10px] font-black uppercase tracking-tighter">HOST</span>
+            </button>
           </div>
         </div>
       </header>
@@ -436,81 +421,78 @@ const App: React.FC = () => {
         </div>
 
         {showHostPanel && (
-          <div className="absolute inset-0 z-50 bg-black/95 backdrop-blur-2xl animate-in fade-in slide-in-from-right duration-300">
-            <div className="h-full flex flex-col p-6 max-w-lg mx-auto overflow-y-auto custom-scrollbar">
+          <div className="absolute inset-0 z-50 bg-black/95 backdrop-blur-3xl animate-in fade-in slide-in-from-right duration-300">
+            <div className="h-full flex flex-col p-6 max-w-lg mx-auto overflow-y-auto">
               <div className="flex justify-between items-center mb-8 shrink-0">
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-red-600 rounded-xl flex items-center justify-center text-white">
+                  <div className="w-12 h-12 bg-red-600 rounded-2xl flex items-center justify-center text-white text-xl shadow-xl shadow-red-600/20">
                     <i className="fas fa-crown"></i>
                   </div>
                   <div>
-                    <h2 className="text-xl font-black font-orbitron text-white">HOST TOOLS</h2>
-                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Managing Room: {partyCode}</p>
+                    <h2 className="text-2xl font-black font-orbitron text-white">HUB CONTROL</h2>
+                    <p className="text-[11px] text-red-500 font-black uppercase tracking-widest">Active Room: {partyCode}</p>
                   </div>
                 </div>
                 <button onClick={() => setShowHostPanel(false)} className="text-slate-500 hover:text-white p-2">
-                  <i className="fas fa-times text-2xl"></i>
+                  <i className="fas fa-times text-3xl"></i>
                 </button>
               </div>
 
               <div className="space-y-8">
                 {/* Score Controls */}
-                <div className="glass-card p-6 rounded-3xl border-white/10">
-                  <h3 className="text-[10px] font-black uppercase text-slate-500 tracking-widest mb-4">Live Scoreboard</h3>
-                  <div className="grid grid-cols-2 gap-4 mb-4">
-                    <div className="space-y-2">
-                      <div className="text-center font-orbitron text-4xl font-black text-white">{gameState.score.home}</div>
+                <div className="glass-card p-6 rounded-[2rem] border-white/10">
+                  <h3 className="text-[11px] font-black uppercase text-slate-500 tracking-widest mb-4">Update Room Score</h3>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-3 text-center">
+                      <div className="font-orbitron text-5xl font-black text-white">{gameState.score.home}</div>
                       <div className="flex gap-2">
-                        <button onClick={() => updateGameScore('home', -1)} className="flex-1 bg-slate-800 p-3 rounded-xl text-slate-400 hover:bg-slate-700 transition-colors">-</button>
-                        <button onClick={() => updateGameScore('home', 1)} className="flex-1 bg-red-600 p-3 rounded-xl text-white hover:bg-red-500 transition-colors shadow-lg shadow-red-600/20">+</button>
+                        <button onClick={() => updateGameScore('home', -1)} className="flex-1 bg-slate-800 p-4 rounded-xl text-slate-400 font-black text-xl">-</button>
+                        <button onClick={() => updateGameScore('home', 1)} className="flex-1 bg-red-600 p-4 rounded-xl text-white font-black text-xl shadow-lg shadow-red-600/20">+</button>
                       </div>
-                      <div className="text-center text-[9px] font-black text-slate-600 uppercase">Home</div>
+                      <div className="text-[10px] font-black text-slate-500 uppercase">Home Team</div>
                     </div>
-                    <div className="space-y-2">
-                      <div className="text-center font-orbitron text-4xl font-black text-white">{gameState.score.away}</div>
+                    <div className="space-y-3 text-center">
+                      <div className="font-orbitron text-5xl font-black text-white">{gameState.score.away}</div>
                       <div className="flex gap-2">
-                        <button onClick={() => updateGameScore('away', -1)} className="flex-1 bg-slate-800 p-3 rounded-xl text-slate-400 hover:bg-slate-700 transition-colors">-</button>
-                        <button onClick={() => updateGameScore('away', 1)} className="flex-1 bg-red-600 p-3 rounded-xl text-white hover:bg-red-500 transition-colors shadow-lg shadow-red-600/20">+</button>
+                        <button onClick={() => updateGameScore('away', -1)} className="flex-1 bg-slate-800 p-4 rounded-xl text-slate-400 font-black text-xl">-</button>
+                        <button onClick={() => updateGameScore('away', 1)} className="flex-1 bg-red-600 p-4 rounded-xl text-white font-black text-xl shadow-lg shadow-red-600/20">+</button>
                       </div>
-                      <div className="text-center text-[9px] font-black text-slate-600 uppercase">Away</div>
+                      <div className="text-[10px] font-black text-slate-500 uppercase">Away Team</div>
                     </div>
                   </div>
                 </div>
 
-                {/* Session Management */}
-                <div className="glass-card p-6 rounded-3xl border-red-900/40 bg-red-950/20">
-                  <h3 className="text-[10px] font-black uppercase text-red-500 tracking-widest mb-4 flex items-center gap-2">
-                    <i className="fas fa-exclamation-triangle"></i>
-                    CRITICAL CONTROLS
+                {/* Session Reset */}
+                <div className="glass-card p-6 rounded-[2rem] border-red-900/40 bg-red-950/20">
+                  <h3 className="text-[11px] font-black uppercase text-red-500 tracking-widest mb-4 flex items-center gap-2">
+                    <i className="fas fa-bomb"></i>
+                    Global Reset Tools
                   </h3>
-                  <div className="space-y-4">
+                  <div className="space-y-5">
                     <div className="p-4 bg-slate-900/80 rounded-2xl border border-white/5">
-                      <div className="text-[10px] font-bold text-slate-500 mb-1 uppercase">Invitation Link</div>
+                      <div className="text-[10px] font-bold text-slate-500 mb-1 uppercase">Direct Join Link</div>
                       <div className="flex items-center gap-2">
-                        <span className="text-xs font-bold text-slate-400 truncate flex-1">{window.location.origin}/?room={partyCode}</span>
-                        <button onClick={handleCopyLink} className="bg-blue-600 px-3 py-2 rounded-lg text-white text-[10px] font-black uppercase transition-all active:scale-95">{copied ? 'COPIED' : 'COPY'}</button>
+                        <span className="text-[11px] font-bold text-slate-400 truncate flex-1">{window.location.origin}/?room={partyCode}</span>
+                        <button onClick={handleCopyLink} className="bg-blue-600 px-4 py-2 rounded-xl text-white text-[10px] font-black uppercase transition-all active:scale-90">{copied ? 'COPIED' : 'COPY'}</button>
                       </div>
                     </div>
                     
                     <button 
                       onClick={nukeRoom} 
-                      className="w-full py-6 bg-red-600 border-2 border-red-400 text-white rounded-2xl font-black uppercase tracking-widest text-sm hover:scale-[1.02] active:scale-95 transition-all shadow-[0_0_30px_rgba(220,38,38,0.5)] flex flex-col items-center justify-center gap-1"
+                      className="w-full py-6 bg-red-600 border-2 border-red-400 text-white rounded-2xl font-black uppercase tracking-widest text-sm hover:scale-[1.02] active:scale-95 transition-all shadow-[0_0_30px_rgba(220,38,38,0.5)] flex flex-col items-center justify-center"
                     >
-                      <span className="flex items-center gap-2 text-lg">
-                        <i className="fas fa-bomb"></i>
-                        NUKE ROOM & CLEAR GUESTS
-                      </span>
-                      <span className="text-[9px] text-red-100 opacity-80">Clears players, chats, and points globally</span>
+                      <span className="text-lg">CLEAR EVERYTHING</span>
+                      <span className="text-[9px] text-red-100 font-bold">Wipes chat and players for all 20 devices</span>
                     </button>
+                    <p className="text-[10px] text-slate-500 text-center font-bold px-4 leading-relaxed">
+                      Use this if the room gets messy. All connected devices will instantly see a clean chat and leaderboard.
+                    </p>
                   </div>
                 </div>
 
-                <div className="pt-8 border-t border-white/5 flex flex-col gap-3">
-                   <button onClick={() => { localStorage.removeItem('sb_current_user'); window.location.reload(); }} className="w-full py-4 bg-slate-800 text-white rounded-2xl font-black uppercase tracking-widest text-[10px] border border-slate-700">
-                    Switch Your Avatar
-                  </button>
-                  <button onClick={resetAllLocal} className="w-full py-4 text-slate-600 text-[10px] font-black uppercase tracking-widest hover:text-white transition-colors">
-                    Reset My Local Browser App
+                <div className="pt-8 border-t border-white/5 flex flex-col gap-4">
+                  <button onClick={() => { localStorage.clear(); window.location.reload(); }} className="w-full py-5 bg-slate-800 text-white rounded-2xl font-black uppercase tracking-widest text-xs border border-slate-700 active:scale-95 transition-all">
+                    LOG OUT / CHANGE AVATAR
                   </button>
                 </div>
               </div>
