@@ -6,8 +6,8 @@ import BettingPanel from './components/BettingPanel';
 import ChatRoom from './components/ChatRoom';
 import Leaderboard from './components/Leaderboard';
 
-type AppMode = 'LANDING' | 'HOST' | 'PLAYER';
-type TabType = 'bets' | 'chat' | 'leaderboard';
+type AppMode = 'LANDING' | 'GAME';
+type TabType = 'bets' | 'chat' | 'leaderboard' | 'command';
 
 const generateId = () => Math.random().toString(36).substring(2, 15) + Date.now().toString(36);
 
@@ -18,7 +18,7 @@ const App: React.FC = () => {
   const [propBets, setPropBets] = useState<PropBet[]>(INITIAL_PROP_BETS);
   const [userBets, setUserBets] = useState<UserBet[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [activeTab, setActiveTab] = useState<TabType>('bets');
+  const [activeTab, setActiveTab] = useState<TabType>('chat');
   const [partyCode, setPartyCode] = useState<string>('');
   const [isSyncing, setIsSyncing] = useState(false);
   const [globalResetActive, setGlobalResetActive] = useState(false);
@@ -112,7 +112,7 @@ const App: React.FC = () => {
         }
       }
 
-      if (isPush || (!remoteData && mode === 'HOST')) {
+      if (isPush || (!remoteData && isHostAuthenticated)) {
         const payload = {
           resetEpoch: Math.max(resetEpochRef.current, remoteData?.resetEpoch || 0),
           users: Array.from(new Map([...(remoteData?.users || []), ...stateRef.current.users].map(u => [u.id, u])).values()),
@@ -129,43 +129,43 @@ const App: React.FC = () => {
     } finally {
       setIsSyncing(false);
     }
-  }, [mergeState, mode]);
+  }, [mergeState, isHostAuthenticated]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const roomFromUrl = params.get('room');
-    const roleFromUrl = params.get('role');
-
-    if (roleFromUrl === 'host' && isHostAuthenticated) {
-      setMode('HOST');
-      const savedCode = localStorage.getItem('sb_party_code');
-      if (savedCode) setPartyCode(savedCode);
-    } else if (roomFromUrl) {
+    
+    if (roomFromUrl) {
       setPartyCode(roomFromUrl.toUpperCase());
-      setMode('PLAYER');
     }
 
     const interval = setInterval(() => syncWithCloud(false), 3000);
     return () => clearInterval(interval);
-  }, [syncWithCloud, isHostAuthenticated]);
+  }, [syncWithCloud]);
 
   const handleHostLogin = (e: React.FormEvent) => {
     e.preventDefault();
-    if (hostKeyInput === 'SB2026') { // Simple secret key
+    if (hostKeyInput === 'SB2026') { 
       setIsHostAuthenticated(true);
       localStorage.setItem('sb_is_host', 'true');
-      setMode('HOST');
       setPartyCode('LIX_ROOM');
     } else {
       alert("Invalid Master Host Key");
     }
   };
 
-  const handlePlayerLogin = (e: React.FormEvent, handle: string, realName: string, avatar: string) => {
+  const handleIdentityLogin = (e: React.FormEvent, handle: string, realName: string, avatar: string) => {
     e.preventDefault();
-    const newUser: User = { id: generateId(), username: handle, realName, avatar, credits: 0 };
+    const newUser: User = { 
+      id: isHostAuthenticated ? 'host-user-id' : generateId(), 
+      username: handle, 
+      realName, 
+      avatar, 
+      credits: 0 
+    };
     setCurrentUser(newUser);
-    setUsers([newUser]);
+    setUsers(prev => [...prev.filter(u => u.id !== newUser.id), newUser]);
+    setMode('GAME');
     setTimeout(() => syncWithCloud(true), 300);
   };
 
@@ -204,152 +204,56 @@ const App: React.FC = () => {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  // --- RENDERING ---
+  const resolveBet = (betId: string, outcome: string) => {
+    setPropBets(p => p.map(pb => pb.id === betId ? { ...pb, resolved: true, outcome } : pb));
+    setUsers(uList => uList.map(u => {
+      const b = userBets.find(ub => ub.betId === betId && ub.userId === u.id);
+      if (b) return { ...u, credits: (u.credits || 0) + (b.selection === outcome ? 10 : -3) };
+      return u;
+    }));
+    setTimeout(() => syncWithCloud(true), 100);
+  };
 
-  if (mode === 'LANDING') {
+  if (mode === 'LANDING' || !currentUser) {
     return (
-      <div className="fixed inset-0 nfl-gradient flex items-center justify-center p-6">
-        <div className="max-w-md w-full glass-card p-10 rounded-[3rem] text-center">
-          <div className="w-24 h-24 bg-white rounded-3xl mx-auto flex items-center justify-center mb-6 shadow-2xl rotate-6 border-4 border-red-600">
-            <i className="fas fa-football-ball text-red-600 text-5xl"></i>
+      <div className="fixed inset-0 nfl-gradient flex items-center justify-center p-6 overflow-y-auto">
+        <div className="max-w-md w-full glass-card p-8 sm:p-10 rounded-[3rem] text-center my-auto shadow-2xl animate-in zoom-in duration-500">
+          <div className="w-20 h-20 bg-white rounded-3xl mx-auto flex items-center justify-center mb-6 shadow-2xl rotate-6 border-4 border-red-600">
+            <i className="fas fa-football-ball text-red-600 text-4xl"></i>
           </div>
-          <h1 className="text-4xl font-black font-orbitron mb-2 tracking-tighter">SBLIX HUB</h1>
-          <p className="text-slate-400 font-bold uppercase text-[10px] tracking-[0.3em] mb-10">2026 Season Control</p>
-          
-          <div className="space-y-4">
-            <form onSubmit={handleHostLogin} className="space-y-3">
-              <input 
-                type="password" 
-                placeholder="Master Host Key" 
-                value={hostKeyInput} 
-                onChange={e => setHostKeyInput(e.target.value)}
-                className="w-full bg-black/40 border border-slate-700 rounded-2xl px-5 py-4 text-center font-bold outline-none focus:border-red-500 transition-colors"
-              />
-              <button type="submit" className="w-full py-5 bg-red-600 text-white rounded-2xl font-black uppercase tracking-widest text-sm shadow-xl shadow-red-600/30">
-                ENTER COMMAND CENTER
-              </button>
-            </form>
-            <div className="py-4 flex items-center gap-4">
-              <div className="flex-1 h-px bg-slate-800"></div>
-              <span className="text-[10px] font-black text-slate-600">GUESTS MUST USE ROOM LINK</span>
-              <div className="flex-1 h-px bg-slate-800"></div>
+          <h1 className="text-3xl font-black font-orbitron mb-2 tracking-tighter">SBLIX HUB</h1>
+          <p className="text-slate-400 font-bold uppercase text-[9px] tracking-[0.3em] mb-8">
+            {isHostAuthenticated ? 'Welcome back, Commissioner' : '2026 Season Hub'}
+          </p>
+
+          <PlayerLogin 
+            onLogin={handleIdentityLogin} 
+            roomCode={partyCode} 
+            isHost={isHostAuthenticated} 
+          />
+
+          {!isHostAuthenticated && (
+            <div className="mt-8 pt-8 border-t border-white/5">
+              <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-4">Host Access Only</p>
+              <form onSubmit={handleHostLogin} className="flex gap-2">
+                <input 
+                  type="password" 
+                  placeholder="Key" 
+                  value={hostKeyInput} 
+                  onChange={e => setHostKeyInput(e.target.value)}
+                  className="flex-1 bg-black/40 border border-slate-700 rounded-xl px-4 py-2 text-sm font-bold outline-none focus:border-red-500"
+                />
+                <button type="submit" className="bg-slate-800 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase">Verify</button>
+              </form>
             </div>
-          </div>
+          )}
         </div>
       </div>
     );
   }
 
-  if (mode === 'HOST') {
-    const playerLink = `${window.location.origin}${window.location.pathname}?room=${partyCode}`;
-    const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(playerLink)}`;
-
-    return (
-      <div className="fixed inset-0 bg-slate-950 flex flex-col overflow-hidden font-orbitron">
-        <header className="p-6 bg-slate-900 border-b border-slate-800 flex justify-between items-center">
-          <div className="flex items-center gap-4">
-            <div className="w-10 h-10 bg-red-600 rounded-xl flex items-center justify-center text-white"><i className="fas fa-crown"></i></div>
-            <div>
-              <h1 className="text-lg font-black text-white">HOST CONTROL</h1>
-              <p className="text-[9px] text-red-500 font-black tracking-widest uppercase">Room: {partyCode}</p>
-            </div>
-          </div>
-          <button onClick={() => { localStorage.clear(); window.location.reload(); }} className="text-slate-500 text-[10px] font-black uppercase">Logout</button>
-        </header>
-
-        <main className="flex-1 p-6 overflow-y-auto space-y-8 max-w-2xl mx-auto w-full">
-          <div className="glass-card p-8 rounded-[2rem] border-white/5">
-            <h2 className="text-[11px] font-black text-slate-500 uppercase tracking-widest mb-6">Scoreboard Control</h2>
-            <div className="grid grid-cols-2 gap-8">
-              <div className="text-center space-y-4">
-                <div className="text-6xl font-black text-white">{gameState.score.home}</div>
-                <div className="flex gap-2">
-                  <button onClick={() => updateScore('home', -1)} className="flex-1 bg-slate-800 py-4 rounded-xl font-black">-</button>
-                  <button onClick={() => updateScore('home', 1)} className="flex-1 bg-red-600 py-4 rounded-xl font-black">+</button>
-                </div>
-                <div className="text-[10px] font-black text-slate-600 uppercase">Home Team</div>
-              </div>
-              <div className="text-center space-y-4">
-                <div className="text-6xl font-black text-white">{gameState.score.away}</div>
-                <div className="flex gap-2">
-                  <button onClick={() => updateScore('away', -1)} className="flex-1 bg-slate-800 py-4 rounded-xl font-black">-</button>
-                  <button onClick={() => updateScore('away', 1)} className="flex-1 bg-red-600 py-4 rounded-xl font-black">+</button>
-                </div>
-                <div className="text-[10px] font-black text-slate-600 uppercase">Away Team</div>
-              </div>
-            </div>
-          </div>
-
-          <div className="glass-card p-8 rounded-[2rem] border-blue-900/20 bg-blue-950/5 text-center">
-            <h2 className="text-[11px] font-black text-blue-500 uppercase tracking-widest mb-6">Guest Invitation</h2>
-            
-            <div className="flex flex-col items-center gap-6">
-              <div className="bg-white p-4 rounded-3xl shadow-2xl border-4 border-blue-500/20">
-                <img 
-                  src={qrCodeUrl} 
-                  alt="Player Invite QR Code" 
-                  className="w-[200px] h-[200px]"
-                />
-              </div>
-              
-              <div className="w-full space-y-4">
-                <div className="p-4 bg-black rounded-xl border border-slate-800 text-[11px] text-slate-400 font-bold truncate">
-                  {playerLink}
-                </div>
-                <button onClick={handleCopyLink} className="w-full py-4 bg-blue-600 text-white rounded-xl font-black uppercase tracking-widest text-xs shadow-lg shadow-blue-600/20 active:scale-95 transition-all">
-                  {copied ? 'COPIED!' : 'COPY PLAYER LINK'}
-                </button>
-                <p className="text-[9px] text-slate-500 uppercase font-black">Scan to join the Hub instantly</p>
-              </div>
-            </div>
-          </div>
-
-          <div className="glass-card p-8 rounded-[2rem] border-red-900/40 bg-red-950/10">
-            <h2 className="text-[11px] font-black text-red-500 uppercase tracking-widest mb-4">Emergency Controls</h2>
-            <button onClick={nukeRoom} className="w-full py-6 bg-red-600 border-2 border-red-400 text-white rounded-2xl font-black uppercase tracking-widest text-sm shadow-2xl shadow-red-600/30 active:scale-95 transition-all">
-              NUKE ROOM & CLEAR GUESTS
-            </button>
-          </div>
-          
-          <div className="p-8">
-            <h2 className="text-[11px] font-black text-slate-500 uppercase tracking-widest mb-6">Settlement View</h2>
-            <div className="space-y-3">
-              {propBets.map(bet => (
-                <div key={bet.id} className="p-4 bg-slate-900 rounded-xl border border-slate-800 flex justify-between items-center">
-                  <span className="text-[11px] font-bold text-slate-300">{bet.question}</span>
-                  <div className="flex gap-2">
-                    {bet.options.map(opt => (
-                      <button 
-                        key={opt} 
-                        onClick={() => {
-                          setPropBets(p => p.map(pb => pb.id === bet.id ? { ...pb, resolved: true, outcome: opt } : pb));
-                          // Update all users' credits based on this resolution
-                          setUsers(uList => uList.map(u => {
-                            const b = userBets.find(ub => ub.betId === bet.id && ub.userId === u.id);
-                            if (b) return { ...u, credits: (u.credits || 0) + (b.selection === opt ? 10 : -3) };
-                            return u;
-                          }));
-                          setTimeout(() => syncWithCloud(true), 100);
-                        }}
-                        className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase ${bet.outcome === opt ? 'bg-green-600 text-white' : 'bg-slate-800 text-slate-400'}`}
-                      >
-                        {opt}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </main>
-      </div>
-    );
-  }
-
-  // --- PLAYER VIEW ---
-  if (mode === 'PLAYER' && !currentUser) {
-    return <PlayerLogin onLogin={handlePlayerLogin} roomCode={partyCode} />;
-  }
+  const playerLink = `${window.location.origin}${window.location.pathname}?room=${partyCode}`;
+  const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(playerLink)}`;
 
   return (
     <div className="fixed inset-0 bg-slate-950 flex flex-col overflow-hidden">
@@ -376,6 +280,11 @@ const App: React.FC = () => {
             <div className={`text-[11px] font-orbitron font-black px-2 py-1 rounded-md bg-slate-950 border border-slate-800 ${(currentUser?.credits || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
               {(currentUser?.credits || 0)} PTS
             </div>
+            {isHostAuthenticated && (
+              <div className="bg-red-600 text-white text-[8px] font-black px-1.5 py-1 rounded-md uppercase tracking-tighter flex items-center gap-1">
+                <i className="fas fa-crown"></i> HOST
+              </div>
+            )}
             <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center border border-slate-700 text-lg">
               {currentUser?.avatar}
             </div>
@@ -384,26 +293,106 @@ const App: React.FC = () => {
       </header>
 
       <main className="flex-1 overflow-hidden relative">
-        <div className="h-full container mx-auto">
-           {activeTab === 'bets' && <BettingPanel propBets={propBets} user={currentUser!} onPlaceBet={(bid, amt, sel) => {
-              const nb: UserBet = { id: generateId(), userId: currentUser!.id, betId: bid, amount: 0, selection: sel, status: BetStatus.PENDING, placedAt: Date.now() };
-              setUserBets(p => [...p, nb]);
-              setTimeout(() => syncWithCloud(true), 100);
-           }} allBets={userBets} />}
-           {activeTab === 'chat' && <ChatRoom user={currentUser!} messages={messages} onSendMessage={(text) => {
-              const newMsg: ChatMessage = { id: generateId(), userId: currentUser!.id, username: currentUser!.username, text, timestamp: Date.now() };
-              setMessages(prev => [...prev, newMsg]);
-              syncWithCloud(true);
-              if (Math.random() > 0.8) {
-                setTimeout(async () => {
-                  const commentary = await getAICommentary(stateRef.current.messages, stateRef.current.gameState, [...stateRef.current.users].sort((a,b) => b.credits - a.credits));
-                  const aiMsg: ChatMessage = { id: generateId(), userId: 'ai', username: 'Gerry Bot', text: commentary, timestamp: Date.now(), isAI: true };
-                  setMessages(p => [...p, aiMsg]);
-                  syncWithCloud(true);
-                }, 1500);
-              }
-           }} users={users} />}
-           {activeTab === 'leaderboard' && <Leaderboard users={users} currentUser={currentUser!} propBets={propBets} userBets={userBets} />}
+        <div className="h-full container mx-auto flex flex-col">
+           {activeTab === 'bets' && (
+             <BettingPanel 
+               propBets={propBets} 
+               user={currentUser} 
+               onPlaceBet={(bid, amt, sel) => {
+                 const nb: UserBet = { id: generateId(), userId: currentUser.id, betId: bid, amount: 0, selection: sel, status: BetStatus.PENDING, placedAt: Date.now() };
+                 setUserBets(p => [...p, nb]);
+                 setTimeout(() => syncWithCloud(true), 100);
+               }} 
+               allBets={userBets} 
+             />
+           )}
+           {activeTab === 'chat' && (
+             <ChatRoom 
+               user={currentUser} 
+               messages={messages} 
+               onSendMessage={(text) => {
+                 const newMsg: ChatMessage = { id: generateId(), userId: currentUser.id, username: currentUser.username, text, timestamp: Date.now() };
+                 setMessages(prev => [...prev, newMsg]);
+                 syncWithCloud(true);
+                 if (Math.random() > 0.8) {
+                   setTimeout(async () => {
+                     const commentary = await getAICommentary(stateRef.current.messages, stateRef.current.gameState, [...stateRef.current.users].sort((a,b) => b.credits - a.credits));
+                     const aiMsg: ChatMessage = { id: generateId(), userId: 'ai', username: 'Gerry Bot', text: commentary, timestamp: Date.now(), isAI: true };
+                     setMessages(p => [...p, aiMsg]);
+                     syncWithCloud(true);
+                   }, 1500);
+                 }
+               }} 
+               users={users} 
+             />
+           )}
+           {activeTab === 'leaderboard' && <Leaderboard users={users} currentUser={currentUser} propBets={propBets} userBets={userBets} />}
+           
+           {activeTab === 'command' && isHostAuthenticated && (
+             <div className="flex-1 overflow-y-auto p-6 space-y-8 bg-slate-950 font-orbitron">
+                <div className="glass-card p-6 rounded-[2rem] border-white/5">
+                  <h2 className="text-[11px] font-black text-slate-500 uppercase tracking-widest mb-4">Real-time Score</h2>
+                  <div className="grid grid-cols-2 gap-6">
+                    <div className="text-center space-y-2">
+                      <div className="text-5xl font-black text-white">{gameState.score.home}</div>
+                      <div className="flex gap-2">
+                        <button onClick={() => updateScore('home', -1)} className="flex-1 bg-slate-800 py-3 rounded-xl font-black">-</button>
+                        <button onClick={() => updateScore('home', 1)} className="flex-1 bg-red-600 py-3 rounded-xl font-black">+</button>
+                      </div>
+                      <div className="text-[9px] font-black text-slate-600 uppercase">Home</div>
+                    </div>
+                    <div className="text-center space-y-2">
+                      <div className="text-5xl font-black text-white">{gameState.score.away}</div>
+                      <div className="flex gap-2">
+                        <button onClick={() => updateScore('away', -1)} className="flex-1 bg-slate-800 py-3 rounded-xl font-black">-</button>
+                        <button onClick={() => updateScore('away', 1)} className="flex-1 bg-red-600 py-3 rounded-xl font-black">+</button>
+                      </div>
+                      <div className="text-[9px] font-black text-slate-600 uppercase">Away</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="glass-card p-6 rounded-[2rem] border-blue-900/20 bg-blue-950/5 text-center">
+                  <h2 className="text-[11px] font-black text-blue-500 uppercase tracking-widest mb-4">Invite Guests</h2>
+                  <div className="flex flex-col items-center gap-4">
+                    <div className="bg-white p-2 rounded-2xl shadow-xl">
+                      <img src={qrCodeUrl} alt="Invite QR" className="w-32 h-32" />
+                    </div>
+                    <button onClick={handleCopyLink} className="w-full py-3 bg-blue-600 text-white rounded-xl font-black uppercase tracking-widest text-[10px]">
+                      {copied ? 'COPIED!' : 'COPY PLAYER LINK'}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="glass-card p-6 rounded-[2rem] border-red-900/40 bg-red-950/10">
+                  <h2 className="text-[11px] font-black text-red-500 uppercase tracking-widest mb-4">Prop Resolutions</h2>
+                  <div className="space-y-3">
+                    {propBets.map(bet => (
+                      <div key={bet.id} className="p-3 bg-slate-900 rounded-xl border border-slate-800 flex flex-col gap-2">
+                        <span className="text-[10px] font-bold text-slate-300 leading-tight">{bet.question}</span>
+                        <div className="flex gap-2">
+                          {bet.options.map(opt => (
+                            <button 
+                              key={opt} 
+                              onClick={() => resolveBet(bet.id, opt)}
+                              className={`flex-1 py-1.5 rounded-lg text-[9px] font-black uppercase ${bet.outcome === opt ? 'bg-green-600 text-white' : 'bg-slate-800 text-slate-400'}`}
+                            >
+                              {opt}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="pt-4 border-t border-white/5">
+                  <button onClick={nukeRoom} className="w-full py-5 bg-red-600/20 border border-red-500/30 text-red-500 rounded-2xl font-black uppercase tracking-widest text-[10px] active:scale-95 transition-all">
+                    NUKE ROOM & CLEAR GUESTS
+                  </button>
+                </div>
+             </div>
+           )}
         </div>
       </main>
 
@@ -412,12 +401,13 @@ const App: React.FC = () => {
           {[
             { id: 'bets', icon: 'fa-ticket-alt', label: 'Props' },
             { id: 'chat', icon: 'fa-comments', label: 'Chat' },
-            { id: 'leaderboard', icon: 'fa-trophy', label: 'Rankings' }
+            { id: 'leaderboard', icon: 'fa-trophy', label: 'Rankings' },
+            ...(isHostAuthenticated ? [{ id: 'command', icon: 'fa-crown', label: 'COMMAND' }] : [])
           ].map((tab) => (
-            <button key={tab.id} onClick={() => setActiveTab(tab.id as TabType)} className={`flex-1 py-4 text-[9px] font-black uppercase tracking-widest transition-all flex flex-col items-center gap-1.5 ${activeTab === tab.id ? 'text-red-500 bg-red-500/5' : 'text-slate-500'}`}>
+            <button key={tab.id} onClick={() => setActiveTab(tab.id as TabType)} className={`flex-1 py-4 text-[9px] font-black uppercase tracking-widest transition-all flex flex-col items-center gap-1.5 ${activeTab === tab.id ? (tab.id === 'command' ? 'text-yellow-400 bg-yellow-400/5' : 'text-red-500 bg-red-500/5') : 'text-slate-500'}`}>
               <i className={`fas ${tab.icon} text-lg`}></i>
               {tab.label}
-              {activeTab === tab.id && <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"></div>}
+              {activeTab === tab.id && <div className={`w-1.5 h-1.5 rounded-full animate-pulse ${tab.id === 'command' ? 'bg-yellow-400' : 'bg-red-500'}`}></div>}
             </button>
           ))}
         </div>
@@ -426,32 +416,35 @@ const App: React.FC = () => {
   );
 };
 
-const PlayerLogin: React.FC<{ onLogin: (e: React.FormEvent, h: string, r: string, a: string) => void, roomCode: string }> = ({ onLogin, roomCode }) => {
+const PlayerLogin: React.FC<{ onLogin: (e: React.FormEvent, h: string, r: string, a: string) => void, roomCode: string, isHost: boolean }> = ({ onLogin, roomCode, isHost }) => {
   const [handle, setHandle] = useState('');
   const [realName, setRealName] = useState('');
   const [avatar, setAvatar] = useState(AVATARS[0]);
 
   return (
-    <div className="fixed inset-0 flex items-center justify-center p-4 nfl-gradient">
-      <div className="max-w-md w-full glass-card p-10 rounded-[3rem] shadow-2xl animate-in zoom-in duration-500">
-        <h2 className="text-3xl font-black font-orbitron text-center mb-8 uppercase tracking-tighter">JOIN HUB</h2>
-        <div className="flex justify-center mb-8">
-          <div className="bg-slate-900/80 p-4 rounded-2xl border border-red-500/30 text-center">
-            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Room Code</p>
-            <p className="text-xl font-black font-orbitron text-red-500 tracking-widest">{roomCode}</p>
+    <div className="w-full space-y-6">
+      <div className="bg-slate-900/80 p-4 rounded-2xl border border-red-500/30 text-center">
+        <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Room Code</p>
+        <p className="text-xl font-black font-orbitron text-red-500 tracking-widest">{roomCode || 'SBLIX_HUB'}</p>
+      </div>
+
+      <form onSubmit={e => onLogin(e, handle, realName, avatar)} className="space-y-5">
+        <div>
+          <label className="text-[10px] font-black text-slate-500 uppercase block mb-2">Pick an Icon</label>
+          <div className="flex justify-center gap-2 overflow-x-auto py-2 no-scrollbar">
+            {AVATARS.slice(0, 10).map(a => (
+              <button type="button" key={a} onClick={() => setAvatar(a)} className={`w-10 h-10 text-xl flex-shrink-0 flex items-center justify-center rounded-xl transition-all ${avatar === a ? 'bg-red-600 scale-110 shadow-lg border-2 border-white' : 'bg-slate-800 border border-slate-700'}`}>{a}</button>
+            ))}
           </div>
         </div>
-        <form onSubmit={e => onLogin(e, handle, realName, avatar)} className="space-y-5">
-           <div className="flex justify-center gap-2 overflow-x-auto py-2 no-scrollbar">
-             {AVATARS.slice(0, 8).map(a => (
-               <button type="button" key={a} onClick={() => setAvatar(a)} className={`w-10 h-10 text-xl flex items-center justify-center rounded-xl ${avatar === a ? 'bg-red-600 scale-110 shadow-lg' : 'bg-slate-800'}`}>{a}</button>
-             ))}
-           </div>
-           <input type="text" placeholder="Handle (e.g. Blitz)" required value={handle} onChange={e => setHandle(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-2xl p-4 text-white font-bold outline-none" />
-           <input type="text" placeholder="Real Name (John D.)" required value={realName} onChange={e => setRealName(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-2xl p-4 text-white font-bold outline-none" />
-           <button type="submit" className="w-full py-5 bg-white text-black rounded-2xl font-black uppercase tracking-widest text-sm shadow-xl active:scale-95 transition-all">START PLAYING</button>
-        </form>
-      </div>
+        <div className="space-y-4">
+          <input type="text" placeholder="Handle (e.g. Blitz)" required value={handle} onChange={e => setHandle(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-2xl p-4 text-white font-bold outline-none focus:border-red-500 transition-colors" />
+          <input type="text" placeholder="Real Name (John D.)" required value={realName} onChange={e => setRealName(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-2xl p-4 text-white font-bold outline-none focus:border-red-500 transition-colors" />
+          <button type="submit" className="w-full py-5 bg-white text-black rounded-2xl font-black uppercase tracking-widest text-sm shadow-xl active:scale-95 transition-all">
+            {isHost ? 'ENTER AS COMMISSIONER' : 'JOIN THE PARTY'}
+          </button>
+        </div>
+      </form>
     </div>
   );
 };
