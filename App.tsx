@@ -16,13 +16,15 @@ type AppMode = 'LANDING' | 'GAME';
 type TabType = 'chat' | 'bets' | 'leaderboard' | 'command';
 type ConnStatus = 'CONNECTING' | 'SYNCED' | 'HYBRID_ACTIVE' | 'OFFLINE';
 
-const APP_VERSION = 'v25.02.13'; // Visible version to verify update
+const APP_VERSION = 'v25.02.13-FIXED'; 
 const STORAGE_KEY = 'sblix_user_v25';
 const HOST_KEY = 'sblix_host_v25';
 
 const generateId = () => Math.random().toString(36).substring(2, 9);
 
 const App: React.FC = () => {
+  console.log(`[SBLIX] Booting version ${APP_VERSION}`);
+  
   const [mode, setMode] = useState<AppMode>(() => {
     try {
       return localStorage.getItem(STORAGE_KEY) ? 'GAME' : 'LANDING';

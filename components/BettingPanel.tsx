@@ -1,5 +1,6 @@
+
 import React, { useState, useMemo } from 'react';
-import { PropBet, User, UserBet, BetStatus } from '../types';
+import { PropBet, User, UserBet, BetStatus } from '../types.ts';
 
 interface BettingPanelProps {
   propBets: PropBet[];

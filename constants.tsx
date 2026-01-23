@@ -1,5 +1,5 @@
 
-import { PropBet } from './types';
+import { PropBet } from './types.ts';
 
 export interface NFLTeam {
   id: string;
