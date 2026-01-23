@@ -12,14 +12,14 @@ type TabType = 'chat' | 'bets' | 'halftime' | 'leaderboard' | 'command';
 
 const generateId = () => Math.random().toString(36).substring(2, 15) + Date.now().toString(36);
 
-// Fresh key for v21 to reset any corrupted states
-const SYNC_KEY = "sblix_party_v21_master";
-const SYNC_TOKEN = "80c43666"; 
+// NEW HIGH-CAPACITY SYNC TOKEN FOR SBLIX
+const SYNC_TOKEN = "7ea3047a"; 
+const SYNC_VERSION = "v22";
 
 const App: React.FC = () => {
   const [mode, setMode] = useState<AppMode>('LANDING');
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
-    const saved = localStorage.getItem('sblix_user_v21');
+    const saved = localStorage.getItem(`sblix_user_${SYNC_VERSION}`);
     return saved ? JSON.parse(saved) : null;
   });
   
@@ -28,18 +28,19 @@ const App: React.FC = () => {
   const [userBets, setUserBets] = useState<UserBet[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [activeTab, setActiveTab] = useState<TabType>('chat');
+  
   const [partyCode] = useState<string>(() => {
     const params = new URLSearchParams(window.location.search);
     const room = params.get('room') || params.get('code');
-    return (room || 'SUPERBOWL').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    return (room || 'SBLIX').toUpperCase().replace(/[^A-Z0-9]/g, '');
   });
 
   const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'error' | 'connected'>('idle');
-  const [isHostAuthenticated, setIsHostAuthenticated] = useState(localStorage.getItem('sblix_is_host_v21') === 'true');
+  const [isHostAuthenticated, setIsHostAuthenticated] = useState(localStorage.getItem(`sblix_is_host_${SYNC_VERSION}`) === 'true');
   const [hostKeyInput, setHostKeyInput] = useState('');
   const [copied, setCopied] = useState(false);
 
-  // Refs are critical to avoid stale closures in the high-frequency sync loop
+  // Persistence Refs to prevent state-clobbering during async cycles
   const stateRef = useRef({ users, userBets, messages, propBets, partyCode, currentUser, isHostAuthenticated });
   const [gameState, setGameState] = useState<GameState>({
     quarter: 1, timeRemaining: "15:00", score: { home: 0, away: 0 }, possession: 'home'
@@ -50,52 +51,51 @@ const App: React.FC = () => {
     stateRef.current = { users, userBets, messages, propBets, partyCode, currentUser, isHostAuthenticated };
     gameStateRef.current = gameState;
     if (currentUser) {
-      localStorage.setItem('sblix_user_v21', JSON.stringify(currentUser));
+      localStorage.setItem(`sblix_user_${SYNC_VERSION}`, JSON.stringify(currentUser));
       if (mode === 'LANDING') setMode('GAME');
     }
-    localStorage.setItem('sblix_is_host_v21', isHostAuthenticated.toString());
+    localStorage.setItem(`sblix_is_host_${SYNC_VERSION}`, isHostAuthenticated.toString());
   }, [users, userBets, messages, propBets, partyCode, currentUser, isHostAuthenticated, mode, gameState]);
 
-  // ATOMIC SYNC: This is the heart of the 20-guest connection logic
-  const performSync = useCallback(async (urgent: boolean = false) => {
-    const url = `https://api.keyvalue.xyz/${SYNC_TOKEN}/${SYNC_KEY}_${stateRef.current.partyCode.toLowerCase()}`;
+  // ATOMIC SYNC ENGINE
+  const sync = useCallback(async (urgent: boolean = false) => {
+    // Generate a unique key per party
+    const syncKey = `sblix_${SYNC_VERSION}_${stateRef.current.partyCode.toLowerCase()}`;
+    const url = `https://api.keyvalue.xyz/${SYNC_TOKEN}/${syncKey}`;
     
     try {
       setSyncStatus('syncing');
 
-      // 1. PULL: Get the current global state
-      const response = await fetch(url, { mode: 'cors', cache: 'no-store' });
+      // 1. PULL - Fetch Global State
+      const resp = await fetch(url, { mode: 'cors', cache: 'no-store' });
       let cloud: any = null;
-      if (response.ok) {
-        const text = await response.text();
-        if (text && text !== "null" && text.length > 5) cloud = JSON.parse(text);
+      if (resp.ok) {
+        const text = await resp.text();
+        if (text && text.length > 10 && text !== "null") cloud = JSON.parse(text);
       }
 
-      // 2. ATOMIC MERGE: Calculate the new state immediately (don't wait for React)
+      // 2. MERGE - Combine Local & Cloud
+      // Users: Union merge to ensure everyone shows up
       const mergedUsers = [...(stateRef.current.users)];
       if (cloud?.users) {
         cloud.users.forEach((u: User) => {
           if (!mergedUsers.find(mu => mu.id === u.id)) mergedUsers.push(u);
         });
       }
-      // Ensure "Self" is always present
-      if (stateRef.current.currentUser && !mergedUsers.find(u => u.id === stateRef.current.currentUser?.id)) {
-        mergedUsers.push(stateRef.current.currentUser);
-      }
-
+      // Messages: Unique ID merge
       const mergedMessages = [...(stateRef.current.messages)];
       if (cloud?.messages) {
         cloud.messages.forEach((m: ChatMessage) => {
           if (!mergedMessages.find(mm => mm.id === m.id)) mergedMessages.push(m);
         });
       }
-      const finalMessages = mergedMessages.sort((a,b) => a.timestamp - b.timestamp).slice(-60);
+      const finalMessages = mergedMessages.sort((a,b) => a.timestamp - b.timestamp).slice(-50);
 
-      // 3. APPLY TO LOCAL REACT STATE
+      // 3. APPLY - Set React State
       setUsers(mergedUsers);
       setMessages(finalMessages);
       
-      // Game State and Bets: Cloud wins unless we are the Host
+      // Game State / Prop Bets: Commish is the absolute source of truth
       if (cloud) {
         if (!stateRef.current.isHostAuthenticated) {
           if (cloud.propBets) setPropBets(cloud.propBets);
@@ -110,14 +110,16 @@ const App: React.FC = () => {
         }
       }
 
-      // 4. PUSH: If we have updates (or if we are the Host maintaining order)
-      const shouldPush = urgent || stateRef.current.isHostAuthenticated || (stateRef.current.currentUser && !cloud?.users?.find((u:any) => u.id === stateRef.current.currentUser?.id));
+      // 4. PUSH - Broadcast Updates
+      // We push if: we are the host, we have a local change (urgent), or we are not yet in the cloud list
+      const amIInCloud = cloud?.users?.some((u: User) => u.id === stateRef.current.currentUser?.id);
+      const needsPush = urgent || stateRef.current.isHostAuthenticated || (stateRef.current.currentUser && !amIInCloud);
 
-      if (shouldPush) {
+      if (needsPush) {
         const payload = {
           users: mergedUsers,
           messages: finalMessages,
-          userBets: stateRef.current.userBets, // Local user bets
+          userBets: stateRef.current.userBets,
           propBets: stateRef.current.isHostAuthenticated ? stateRef.current.propBets : (cloud?.propBets || stateRef.current.propBets),
           gameState: stateRef.current.isHostAuthenticated ? gameStateRef.current : (cloud?.gameState || gameStateRef.current),
           updatedAt: Date.now()
@@ -133,17 +135,17 @@ const App: React.FC = () => {
 
       setSyncStatus('connected');
     } catch (e) {
-      console.warn("Sync Race:", e);
+      console.warn("Sync Glitch (Retrying):", e);
       setSyncStatus('error');
     }
   }, []);
 
-  // Poll frequently (every 3 seconds) for responsive chat with 20 guests
+  // Poll aggressively for a live feel (every 3 seconds)
   useEffect(() => {
-    performSync(true);
-    const itv = setInterval(() => performSync(false), 3000);
+    sync(true);
+    const itv = setInterval(() => sync(false), 3500);
     return () => clearInterval(itv);
-  }, [performSync]);
+  }, [sync]);
 
   const handleHostAuth = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -152,7 +154,7 @@ const App: React.FC = () => {
       setHostKeyInput('');
       setActiveTab('command');
     } else {
-      alert("Invalid Access Key");
+      alert("Commish Key Rejected");
     }
   };
 
@@ -163,13 +165,14 @@ const App: React.FC = () => {
     setCurrentUser(newUser);
     setUsers(prev => [...prev.filter(u => u.id !== id), newUser]);
     setMode('GAME');
-    setTimeout(() => performSync(true), 200);
+    // Force immediate broadcast to show on the Roster
+    setTimeout(() => sync(true), 200);
   };
 
   const resolveBet = (betId: string, outcome: string) => {
-    const updatedProps = propBets.map(pb => pb.id === betId ? { ...pb, resolved: true, outcome } : pb);
-    setPropBets(updatedProps);
+    setPropBets(p => p.map(pb => pb.id === betId ? { ...pb, resolved: true, outcome } : pb));
     
+    // Distribute points locally for immediate feedback
     setUsers(uList => uList.map(u => {
       const myBet = userBets.find(ub => ub.betId === betId && ub.userId === u.id);
       if (myBet) {
@@ -180,21 +183,20 @@ const App: React.FC = () => {
       }
       return u;
     }));
+
     setUserBets(prev => prev.map(b => b.betId === betId ? { ...b, status: b.selection === outcome ? BetStatus.WON : BetStatus.LOST } : b));
-    setTimeout(() => performSync(true), 100);
+    setTimeout(() => sync(true), 100);
   };
 
   if (mode === 'LANDING' || !currentUser) {
     return (
       <div className="fixed inset-0 nfl-gradient flex items-center justify-center p-6 overflow-hidden">
-        <div className="max-w-md w-full glass-card p-8 rounded-[3rem] text-center shadow-2xl animate-in zoom-in duration-500">
+        <div className="max-w-md w-full glass-card p-8 rounded-[3rem] text-center shadow-2xl">
           <div className="w-20 h-20 bg-white rounded-3xl mx-auto flex items-center justify-center mb-6 shadow-2xl rotate-6 border-4 border-red-600">
             <i className="fas fa-football-ball text-red-600 text-4xl"></i>
           </div>
-          <h1 className="text-3xl font-black font-orbitron mb-2 tracking-tighter">SBLIX LIX</h1>
-          <div className="bg-slate-900/50 py-1 px-4 rounded-full border border-white/10 w-fit mx-auto text-[10px] font-black uppercase text-slate-400 tracking-widest mb-8">
-            PARTY CODE: {partyCode}
-          </div>
+          <h1 className="text-3xl font-black font-orbitron mb-2 tracking-tighter uppercase">SBLIX LIX</h1>
+          <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest mb-8">Party Room: {partyCode}</p>
 
           <GuestLogin onLogin={onJoin} isHost={isHostAuthenticated} />
 
@@ -203,12 +205,12 @@ const App: React.FC = () => {
               <form onSubmit={handleHostAuth} className="flex gap-2">
                 <input 
                   type="password" 
-                  placeholder="Commish Passkey" 
+                  placeholder="Commish Access" 
                   value={hostKeyInput} 
                   onChange={e => setHostKeyInput(e.target.value)}
                   className="flex-1 bg-black/40 border border-slate-700 rounded-xl px-4 py-2 text-xs font-bold outline-none text-white focus:border-red-500"
                 />
-                <button type="submit" className="bg-slate-800 text-slate-500 px-4 py-2 rounded-xl text-[9px] font-black uppercase">Auth</button>
+                <button type="submit" className="bg-slate-800 text-slate-500 px-4 py-2 rounded-xl text-[9px] font-black uppercase">Verify</button>
               </form>
             </div>
           )}
@@ -226,9 +228,9 @@ const App: React.FC = () => {
           <div className="flex items-center gap-2">
             <h1 className="text-lg font-black font-orbitron text-red-600">SBLIX</h1>
             <div className="flex items-center gap-1.5 bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-[9px]">
-              <span className="font-orbitron font-black text-slate-200">Q{gameState.quarter}</span>
+              <span className="font-orbitron font-black text-slate-200 uppercase">Q{gameState.quarter}</span>
               <span className="text-slate-400 font-bold">{gameState.score.home}-{gameState.score.away}</span>
-              <div className={`w-1.5 h-1.5 rounded-full ${syncStatus === 'syncing' ? 'bg-blue-500 animate-pulse' : syncStatus === 'error' ? 'bg-red-500' : 'bg-green-500'}`}></div>
+              <div className={`w-1.5 h-1.5 rounded-full ${syncStatus === 'syncing' ? 'bg-blue-500 animate-pulse' : syncStatus === 'error' ? 'bg-red-500' : 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.5)]'}`}></div>
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -253,13 +255,13 @@ const App: React.FC = () => {
               onSendMessage={(text) => {
                 const msg: ChatMessage = { id: generateId(), userId: currentUser.id, username: currentUser.username, text, timestamp: Date.now() };
                 setMessages(prev => [...prev, msg]);
-                setTimeout(() => performSync(true), 50);
+                setTimeout(() => sync(true), 50);
                 if (Math.random() > 0.8) {
                    setTimeout(async () => {
                      const talk = await getAICommentary(stateRef.current.messages, gameStateRef.current, [...stateRef.current.users].sort((a,b) => b.credits - a.credits));
                      const ai: ChatMessage = { id: generateId(), userId: 'ai', username: 'Gerry Bot', text: talk, timestamp: Date.now(), isAI: true };
                      setMessages(p => [...p, ai]);
-                     performSync(true);
+                     sync(true);
                    }, 3000);
                 }
               }} 
@@ -273,7 +275,7 @@ const App: React.FC = () => {
               onPlaceBet={(bid, amt, sel) => {
                 const bet: UserBet = { id: generateId(), userId: currentUser.id, betId: bid, amount: 0, selection: sel, status: BetStatus.PENDING, placedAt: Date.now() };
                 setUserBets(p => [...p, bet]);
-                setTimeout(() => performSync(true), 100);
+                setTimeout(() => sync(true), 100);
               }}
             />
           )}
@@ -298,8 +300,8 @@ const App: React.FC = () => {
                   </div>
                 ) : (
                   <div className="text-center py-2">
-                     <p className="text-[9px] font-black text-green-500 uppercase tracking-[0.2em] animate-pulse">COMMANDER MODE ACTIVE</p>
-                     <button onClick={() => setActiveTab('command')} className="text-[8px] text-slate-400 underline uppercase mt-1 font-black">Open Control Panel</button>
+                     <p className="text-[9px] font-black text-green-500 uppercase tracking-[0.2em] animate-pulse">COMMISSIONER HUB ACTIVE</p>
+                     <button onClick={() => setActiveTab('command')} className="text-[8px] text-slate-400 underline uppercase mt-1 font-black">Open Controls</button>
                   </div>
                 )}
               </div>
@@ -308,7 +310,7 @@ const App: React.FC = () => {
           {activeTab === 'command' && isHostAuthenticated && (
             <div className="flex-1 overflow-y-auto p-6 space-y-6 pb-24 custom-scrollbar">
               <div className="glass-card p-6 rounded-[2rem] text-center border-blue-500/20 bg-blue-600/5 shadow-2xl">
-                <h2 className="text-xs font-black text-blue-400 uppercase tracking-widest mb-4">Host Guest Command (Room: {partyCode})</h2>
+                <h2 className="text-xs font-black text-blue-400 uppercase tracking-widest mb-4">Guest Hub: {partyCode}</h2>
                 <div className="bg-white p-4 rounded-2xl w-fit mx-auto shadow-2xl mb-4">
                    <img src={qrUrl} alt="QR" className="w-48 h-48" />
                 </div>
@@ -324,10 +326,13 @@ const App: React.FC = () => {
                 >
                   {copied ? 'LINK COPIED' : 'COPY PARTY LINK'}
                 </button>
+                <div className="mt-4 p-2 bg-black/40 rounded-lg">
+                   <p className="text-[7px] text-slate-500 uppercase font-black">Sync Endpoint: {SYNC_VERSION}_{partyCode.toLowerCase()}</p>
+                </div>
               </div>
 
               <div className="space-y-4">
-                <h3 className="text-center text-[10px] font-black text-slate-600 uppercase tracking-[0.2em]">Settle Party Props</h3>
+                <h3 className="text-center text-[10px] font-black text-slate-600 uppercase tracking-[0.2em]">Settle Props for Guests</h3>
                 {propBets.map(bet => (
                   <div key={bet.id} className="p-4 bg-slate-900 border border-slate-800 rounded-2xl flex flex-col gap-3 shadow-md">
                     <span className="text-[11px] font-bold text-slate-300 leading-tight">{bet.question}</span>
@@ -391,7 +396,7 @@ const GuestLogin: React.FC<{ onLogin: (e: React.FormEvent, h: string, r: string,
         <input type="text" placeholder="Pick a Handle" required value={handle} onChange={e => setHandle(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-2xl p-4 text-white font-bold outline-none focus:border-red-500 text-sm" />
         <input type="text" placeholder="Real Name (John D.)" required value={real} onChange={e => setReal(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-2xl p-4 text-white font-bold outline-none focus:border-red-500 text-sm" />
         <button type="submit" onClick={e => onLogin(e, handle, real, av)} className="w-full py-5 bg-white text-black rounded-2xl font-black uppercase tracking-widest text-sm shadow-xl active:scale-95 transition-all hover:bg-slate-100">
-          {isHost ? 'ENTER COMMISSIONER HUB' : 'JOIN THE PARTY'}
+          {isHost ? 'ENTER COMMISSIONER SUITE' : 'JOIN SUPER BOWL PARTY'}
         </button>
       </div>
     </div>
