@@ -3,11 +3,14 @@ import { GoogleGenAI } from "@google/genai";
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 export const getAICommentary = async (
   messages: any[],
   gameState: any,
-  leaderboard: any[]
-) => {
+  leaderboard: any[],
+  retries = 2
+): Promise<string> => {
   try {
     const standings = leaderboard
       .slice(0, 5)
@@ -25,9 +28,21 @@ export const getAICommentary = async (
       Provide a sharp 1-2 sentence reaction. Talk like a sports betting pro. If standings exist, mention a leader. Use bold energy.`,
     });
 
-    return response.text?.trim() || "The atmosphere is electric! Keep those picks locked in!";
-  } catch (error) {
-    console.warn("[GeminiService] AI commentary failed, falling back.", error);
-    return "Someone's making a move on the leaderboards! Don't look now!";
+    const text = response.text?.trim();
+    if (!text) throw new Error("Empty AI response");
+    return text;
+
+  } catch (error: any) {
+    if (retries > 0) {
+      console.warn(`[SBLIX] AI call failed, retrying in 1s... (${retries} left)`, error.message);
+      await sleep(1000);
+      return getAICommentary(messages, gameState, leaderboard, retries - 1);
+    }
+    
+    console.error("[SBLIX] Gemini Service Error:", error.message);
+    if (error.message?.includes('fetch')) {
+      return "Network signal is weak, but the action is heating up! Keep those picks coming!";
+    }
+    return "Someone's making a massive play for the lead! Don't look now!";
   }
 };

@@ -71,6 +71,12 @@
         background: #1e293b;
         border-radius: 1.25rem 1.25rem 1.25rem 0.25rem;
       }
+      
+      /* New: Connection Strength Meter */
+      .connection-bar {
+        height: 2px;
+        transition: width 0.3s ease;
+      }
     </style>
   <script type="importmap">
 {
@@ -81,6 +87,7 @@
     "@google/genai": "https://esm.sh/@google/genai@^1.38.0",
     "yjs": "https://esm.sh/yjs@13.6.10",
     "y-webrtc": "https://esm.sh/y-webrtc@10.2.5?deps=yjs@13.6.10",
+    "y-websocket": "https://esm.sh/y-websocket@1.5.4?deps=yjs@13.6.10",
     "y-indexeddb": "https://esm.sh/y-indexeddb@9.0.12?deps=yjs@13.6.10",
     "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
     "react/": "https://esm.sh/react@^19.2.3/",

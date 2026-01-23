@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import * as Y from 'yjs';
 import { WebrtcProvider } from 'y-webrtc';
+import { WebsocketProvider } from 'y-websocket';
 import { IndexeddbPersistence } from 'y-indexeddb';
 import { User, PropBet, UserBet, ChatMessage, GameState, BetStatus } from './types';
 import { INITIAL_PROP_BETS, NFL_TEAMS } from './constants';
@@ -13,14 +14,14 @@ import TeamHelmet from './components/TeamHelmet';
 
 type AppMode = 'LANDING' | 'GAME';
 type TabType = 'chat' | 'bets' | 'leaderboard' | 'command';
-type ConnStatus = 'CONNECTING' | 'CONNECTED' | 'OFFLINE';
+type ConnStatus = 'CONNECTING' | 'SYNCED' | 'HYBRID_ACTIVE' | 'OFFLINE';
 
 const generateId = () => Math.random().toString(36).substring(2, 9);
 
 const App: React.FC = () => {
-  const [mode, setMode] = useState<AppMode>(() => localStorage.getItem('sblix_user_v22') ? 'GAME' : 'LANDING');
+  const [mode, setMode] = useState<AppMode>(() => localStorage.getItem('sblix_user_v24') ? 'GAME' : 'LANDING');
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
-    const saved = localStorage.getItem('sblix_user_v22');
+    const saved = localStorage.getItem('sblix_user_v24');
     return saved ? JSON.parse(saved) : null;
   });
 
@@ -30,13 +31,13 @@ const App: React.FC = () => {
     quarter: 1, timeRemaining: "15:00", score: { home: 0, away: 0 }, possession: 'home'
   });
   const [propBets, setPropBets] = useState<PropBet[]>(INITIAL_PROP_BETS);
-  const [userBets, setUserBets] = useState<UserBet[]>([]);
+  const [allUserBets, setAllUserBets] = useState<UserBet[]>([]);
   const [connectedPeers, setConnectedPeers] = useState(0);
   const [connStatus, setConnStatus] = useState<ConnStatus>('CONNECTING');
 
   const [activeTab, setActiveTab] = useState<TabType>('chat');
   const [isAiLoading, setIsAiLoading] = useState(false);
-  const [isHost, setIsHost] = useState(localStorage.getItem('sblix_host_v22') === 'true');
+  const [isHost, setIsHost] = useState(localStorage.getItem('sblix_host_v24') === 'true');
   const [hostKeyInput, setHostKeyInput] = useState('');
 
   const partyCode = useMemo(() => {
@@ -44,59 +45,61 @@ const App: React.FC = () => {
     return (params.get('room') || 'SBLIX').toUpperCase();
   }, []);
 
-  // Y.js Shared Document Setup
-  const { doc, sharedGame, sharedMessages, sharedProps, sharedUsers } = useMemo(() => {
+  // Y.js Document State Initialization
+  const { doc, sharedGame, sharedMessages, sharedProps, sharedUsers, sharedUserBets } = useMemo(() => {
     const d = new Y.Doc();
     return {
       doc: d,
       sharedGame: d.getMap('gameState'),
       sharedMessages: d.getArray<ChatMessage>('messages'),
       sharedProps: d.getMap('props'),
-      sharedUsers: d.getMap('users')
+      sharedUsers: d.getMap('users'),
+      sharedUserBets: d.getArray<UserBet>('userBets')
     };
   }, []);
 
   useEffect(() => {
     if (!currentUser) return;
 
-    // Room Name Versioning to avoid schema conflicts
-    const roomName = `sblix-v22-mesh-${partyCode}`;
-
-    // 1. Setup Local Persistence (IndexedDB)
+    const roomName = `sblix-v24-mesh-${partyCode}`;
+    
+    // 1. Persistence Layer (IndexedDB)
     const persistence = new IndexeddbPersistence(roomName, doc);
-    persistence.on('synced', () => {
-      console.log('[GridMesh] Local DB synced');
-    });
-
-    // 2. Setup Multi-Server Signaling with STUN
-    const provider = new WebrtcProvider(roomName, doc, {
+    
+    // 2. Hybrid Delivery Layer
+    const webrtcProvider = new WebrtcProvider(roomName, doc, {
       signaling: [
         'wss://signaling.yjs.dev',
-        'wss://y-webrtc-signaling-eu.herokuapp.com',
         'wss://y-webrtc-signaling-us.herokuapp.com',
+        'wss://y-webrtc-signaling-eu.herokuapp.com'
       ],
       peerOpts: {
         config: {
           iceServers: [
             { urls: 'stun:stun.l.google.com:19302' },
-            { urls: 'stun:stun1.l.google.com:19302' },
-            { urls: 'stun:stun2.l.google.com:19302' }
+            { urls: 'stun:stun1.l.google.com:19302' }
           ]
         }
       }
     });
 
-    provider.on('status', (event: any) => {
-      if (event.status === 'connected') {
-        setConnStatus('CONNECTED');
-      } else {
-        setConnStatus('CONNECTING');
-      }
-      setConnectedPeers(provider.room.webrtcConns.size + 1);
-    });
+    const wsProvider = new WebsocketProvider('wss://demos.yjs.dev', roomName, doc);
+
+    const updateStatus = () => {
+      const isWsConnected = wsProvider.wsconnected;
+      const peerCount = webrtcProvider.room.webrtcConns.size;
+      setConnectedPeers(peerCount + (isWsConnected ? 1 : 0));
+      
+      if (isWsConnected && peerCount > 0) setConnStatus('HYBRID_ACTIVE');
+      else if (isWsConnected || peerCount > 0) setConnStatus('SYNCED');
+      else setConnStatus('CONNECTING');
+    };
+
+    webrtcProvider.on('status', updateStatus);
+    wsProvider.on('status', updateStatus);
 
     // Sync Handlers
-    const updateLocalGame = () => {
+    const syncGame = () => {
       const data = sharedGame.toJSON();
       if (Object.keys(data).length > 0) {
         setGameState({
@@ -107,68 +110,81 @@ const App: React.FC = () => {
         });
       }
     };
-    sharedGame.observe(updateLocalGame);
+    sharedGame.observe(syncGame);
 
-    const updateLocalMessages = () => {
-      // Ensure we sort and deduplicate messages by ID to prevent ghosting
-      // Fix: Cast to ChatMessage[] to resolve unknown type errors
+    const syncMessages = () => {
       const raw = sharedMessages.toArray() as ChatMessage[];
       const unique = Array.from(new Map(raw.map(m => [m.id, m])).values());
       setMessages(unique.sort((a, b) => a.timestamp - b.timestamp).slice(-60));
     };
-    sharedMessages.observe(updateLocalMessages);
+    sharedMessages.observe(syncMessages);
 
-    const updateLocalUsers = () => {
+    const syncUserBets = () => {
+      setAllUserBets(sharedUserBets.toArray());
+    };
+    sharedUserBets.observe(syncUserBets);
+
+    const syncUsers = () => {
       const userMap = sharedUsers.toJSON();
       const now = Date.now();
-      const activeUsers = Object.values(userMap)
+      const active = Object.values(userMap)
         .filter((u: any) => now - (u.lastPing || 0) < 60000) as User[];
-      setUsers(activeUsers);
+      setUsers(active);
     };
-    sharedUsers.observe(updateLocalUsers);
+    sharedUsers.observe(syncUsers);
 
-    const updateLocalProps = () => {
+    const syncProps = () => {
       const pMap = sharedProps.toJSON();
       setPropBets(prev => prev.map(p => pMap[p.id] ? { ...p, ...pMap[p.id] } : p));
     };
-    sharedProps.observe(updateLocalProps);
+    sharedProps.observe(syncProps);
 
     // Heartbeat for User Awareness
     const heartbeat = setInterval(() => {
       sharedUsers.set(currentUser.id, { ...currentUser, lastPing: Date.now() });
-      setConnectedPeers(provider.room.webrtcConns.size + 1);
+      updateStatus();
     }, 10000);
 
-    // Initial Registration
+    // Initial Registration & Sync
     sharedUsers.set(currentUser.id, { ...currentUser, lastPing: Date.now() });
-    updateLocalGame();
-    updateLocalMessages();
-    updateLocalUsers();
-    updateLocalProps();
+    syncGame(); syncMessages(); syncUsers(); syncProps(); syncUserBets();
 
     return () => {
-      provider.destroy();
+      webrtcProvider.destroy();
+      wsProvider.destroy();
       persistence.destroy();
       clearInterval(heartbeat);
     };
-  }, [currentUser, doc, partyCode, sharedGame, sharedMessages, sharedUsers, sharedProps]);
+  }, [currentUser, doc, partyCode, sharedGame, sharedMessages, sharedUsers, sharedProps, sharedUserBets]);
 
   const onSendMessage = (text: string) => {
     if (!currentUser) return;
-    try {
-      const msg: ChatMessage = { 
-        id: generateId(), 
-        userId: currentUser.id, 
-        username: currentUser.username, 
-        text, 
-        timestamp: Date.now() 
-      };
-      doc.transact(() => {
-        sharedMessages.push([msg]);
-      });
-    } catch (err) {
-      console.error("[GridMesh] Send Failed:", err);
-    }
+    const msg: ChatMessage = { 
+      id: generateId(), 
+      userId: currentUser.id, 
+      username: currentUser.username, 
+      text, 
+      timestamp: Date.now() 
+    };
+    doc.transact(() => {
+      sharedMessages.push([msg]);
+    }, 'local-origin');
+  };
+
+  const onPlaceBet = (betId: string, amount: number, selection: string) => {
+    if (!currentUser) return;
+    const newBet: UserBet = {
+      id: generateId(),
+      userId: currentUser.id,
+      betId,
+      amount,
+      selection,
+      status: BetStatus.PENDING,
+      placedAt: Date.now()
+    };
+    doc.transact(() => {
+      sharedUserBets.push([newBet]);
+    });
   };
 
   const updateGame = (updates: any) => {
@@ -179,6 +195,13 @@ const App: React.FC = () => {
       if (updates.scoreHome !== undefined) sharedGame.set('scoreHome', updates.scoreHome);
       if (updates.scoreAway !== undefined) sharedGame.set('scoreAway', updates.scoreAway);
       if (updates.possession !== undefined) sharedGame.set('possession', updates.possession);
+    });
+  };
+
+  const resolveProp = (betId: string, outcome: string) => {
+    if (!isHost) return;
+    doc.transact(() => {
+      sharedProps.set(betId, { resolved: true, outcome });
     });
   };
 
@@ -193,7 +216,7 @@ const App: React.FC = () => {
       };
       sharedMessages.push([msg]);
     } catch (err) {
-      console.error("[GridMesh] AI Commentary Failed:", err);
+      console.error("[SBLIX] Gerry failed:", err);
     } finally { setIsAiLoading(false); }
   };
 
@@ -205,19 +228,14 @@ const App: React.FC = () => {
             <i className="fas fa-satellite-dish text-blue-600 text-4xl animate-pulse"></i>
           </div>
           <h1 className="text-3xl font-black font-orbitron mb-2 tracking-tighter">SBLIX GRID-MESH</h1>
-          <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest mb-8">PEER-PERSISTED PARTY HUB</p>
+          <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest mb-8 text-center">2025 HYPER-MESH SYNC</p>
           <GuestLogin onLogin={(e, h, r, t) => {
             e.preventDefault();
             const newUser = { id: generateId(), username: h, realName: r, avatar: t, credits: 0 };
             setCurrentUser(newUser);
-            localStorage.setItem('sblix_user_v22', JSON.stringify(newUser));
+            localStorage.setItem('sblix_user_v24', JSON.stringify(newUser));
             setMode('GAME');
           }} isHost={isHost} />
-          {!isHost && (
-            <div className="mt-8 pt-6 border-t border-white/5 text-center">
-              <button onClick={() => { if (prompt("PIN:") === 'SB2026') { setIsHost(true); localStorage.setItem('sblix_host_v22', 'true'); } }} className="text-[10px] font-black text-slate-600 uppercase tracking-widest hover:text-slate-400">Host Access</button>
-            </div>
-          )}
         </div>
       </div>
     );
@@ -225,21 +243,24 @@ const App: React.FC = () => {
 
   return (
     <div className="fixed inset-0 bg-slate-950 flex flex-col overflow-hidden">
+      <div className="h-1 w-full bg-slate-900 flex overflow-hidden">
+        <div className={`h-full transition-all duration-1000 ${connStatus === 'HYBRID_ACTIVE' ? 'bg-blue-500 w-full shadow-[0_0_10px_rgba(59,130,246,0.8)]' : connStatus === 'SYNCED' ? 'bg-green-500 w-2/3 shadow-[0_0_10px_rgba(34,197,94,0.8)]' : 'bg-yellow-500 w-1/3 animate-pulse'}`} />
+      </div>
+
       <header className="bg-slate-900 border-b border-slate-800 p-3 shrink-0 z-40">
         <div className="container mx-auto flex items-center justify-between">
           <div className="flex items-center gap-2">
             <h1 className="text-lg font-black font-orbitron text-blue-500">SBLIX</h1>
             <div className="flex items-center gap-1.5 bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-[9px]">
-              <span className="font-orbitron font-black text-slate-200">Q{gameState.quarter}</span>
-              <span className="text-slate-400 font-bold">{gameState.score.home}-{gameState.score.away}</span>
-              <div className={`w-1.5 h-1.5 rounded-full ${connStatus === 'CONNECTED' ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.5)]' : 'bg-yellow-500 animate-pulse'}`}></div>
+              <span className="font-orbitron font-black text-slate-200 uppercase">Q{gameState.quarter}</span>
+              <span className="text-slate-400 font-bold tabular-nums">{gameState.score.home}-{gameState.score.away}</span>
             </div>
           </div>
           <div className="flex items-center gap-3">
              <div className="text-[7px] font-black text-slate-500 uppercase tracking-tighter text-right leading-tight">
-                {connStatus === 'CONNECTED' ? `${connectedPeers} PEERS ACTIVE` : 'SEARCHING MESH...'} <br/>
-                <span className={connStatus === 'CONNECTED' ? 'text-blue-400' : 'text-yellow-500'}>
-                  {connStatus === 'CONNECTED' ? 'GRID-MESH SYNCED' : 'RECONNECTING'}
+                {connectedPeers} MESH NODES <br/>
+                <span className={connStatus === 'HYBRID_ACTIVE' ? 'text-blue-400' : 'text-slate-500'}>
+                  {connStatus.replace('_', ' ')}
                 </span>
              </div>
              <TeamHelmet teamId={currentUser.avatar} size="md" />
@@ -248,40 +269,29 @@ const App: React.FC = () => {
       </header>
 
       <main className="flex-1 overflow-hidden relative">
-        {connStatus !== 'CONNECTED' && connectedPeers === 1 && (
-          <div className="absolute inset-x-0 top-0 bg-yellow-500/20 backdrop-blur-md border-b border-yellow-500/30 text-yellow-500 py-1 text-[8px] font-black uppercase text-center tracking-widest z-50">
-            Mesh Disconnected - Offline Persistence Active
-          </div>
-        )}
-
         {activeTab === 'chat' && <ChatRoom user={currentUser} messages={messages} users={users} onSendMessage={onSendMessage} />}
-        {activeTab === 'bets' && <BettingPanel propBets={propBets} user={currentUser} allBets={userBets} onPlaceBet={(bid, amt, sel) => {
-              setUserBets(p => [...p, { id: generateId(), userId: currentUser.id, betId: bid, amount: 0, selection: sel, status: BetStatus.PENDING, placedAt: Date.now() }]);
-            }} />}
-        {activeTab === 'leaderboard' && <Leaderboard users={users} currentUser={currentUser} propBets={propBets} userBets={userBets} />}
+        {activeTab === 'bets' && <BettingPanel propBets={propBets} user={currentUser} allBets={allUserBets} onPlaceBet={onPlaceBet} />}
+        {activeTab === 'leaderboard' && <Leaderboard users={users} currentUser={currentUser} propBets={propBets} userBets={allUserBets} />}
         
         {activeTab === 'command' && isHost && (
           <div className="flex-1 overflow-y-auto p-6 space-y-8 pb-24 h-full bg-slate-950 custom-scrollbar">
-             <div className="flex items-center justify-between mb-2">
+             <div className="flex items-center justify-between">
                 <div>
-                   <h2 className="text-sm font-black font-orbitron text-white uppercase">War Room Console</h2>
-                   <p className="text-[8px] font-black text-slate-500 uppercase tracking-[0.2em]">PartyID: {partyCode}</p>
+                   <h2 className="text-sm font-black font-orbitron text-white">COMMAND CONSOLE</h2>
+                   <p className="text-[8px] font-black text-slate-500 uppercase tracking-[0.2em]">MESH KEY: {partyCode}</p>
                 </div>
-                <div className="flex items-center gap-1.5 bg-blue-600/10 px-2 py-1 rounded-full border border-blue-600/20 animate-pulse-blue">
-                   <div className="w-1.5 h-1.5 bg-blue-500 rounded-full"></div>
-                   <span className="text-[7px] text-blue-400 font-black uppercase tracking-tighter">Broadcasting Live</span>
-                </div>
+                <button onClick={() => { if (confirm("Sign out Host?")) { setIsHost(false); localStorage.removeItem('sblix_host_v24'); setActiveTab('chat'); }}} className="text-[8px] font-black text-red-500 border border-red-500/30 px-2 py-1 rounded uppercase">Exit</button>
              </div>
 
              <div className="bg-indigo-950/40 border border-indigo-500/30 rounded-[2rem] p-6 shadow-2xl">
                 <button onClick={onTriggerAiCommentary} disabled={isAiLoading} className={`w-full py-4 rounded-xl font-black uppercase text-xs flex items-center justify-center gap-2 transition-all ${isAiLoading ? 'bg-slate-800 text-slate-500' : 'bg-indigo-600 text-white shadow-xl hover:bg-indigo-500 border-b-4 border-indigo-800 active:scale-95'}`}>
                   {isAiLoading ? <i className="fas fa-spinner fa-spin"></i> : <i className="fas fa-bolt"></i>}
-                  {isAiLoading ? 'SYNCING GERRY...' : 'SUMMON GERRY THE GAMBLER'}
+                  {isAiLoading ? 'ANALYZING...' : 'SUMMON GERRY THE GAMBLER'}
                 </button>
              </div>
 
              <div className="bg-slate-900 border border-slate-800 rounded-[2rem] p-6 shadow-2xl">
-                <h3 className="text-center text-[10px] font-black text-blue-400 uppercase tracking-[0.3em] mb-8 font-orbitron">SCOREBOARD OVERRIDE</h3>
+                <h3 className="text-center text-[10px] font-black text-blue-400 uppercase tracking-[0.3em] mb-8 font-orbitron">SCOREBOARD MASTER</h3>
                 <div className="grid grid-cols-2 gap-8 mb-8">
                    <div className="text-center">
                       <p className="text-[10px] font-black text-slate-500 uppercase mb-2">HOME</p>
@@ -329,36 +339,12 @@ const App: React.FC = () => {
                     <p className="text-xs font-black text-slate-200 mb-4">{bet.question}</p>
                     <div className="flex gap-2">
                       {bet.options.map(opt => (
-                        <button key={opt} onClick={() => sharedProps.set(bet.id, { resolved: true, outcome: opt })} 
+                        <button key={opt} onClick={() => resolveProp(bet.id, opt)} 
                           className={`flex-1 py-4 rounded-xl text-[10px] font-black uppercase transition-all ${bet.outcome === opt ? 'bg-green-600 text-white' : 'bg-slate-800 text-slate-500'}`}>{opt}</button>
                       ))}
                     </div>
                   </div>
                 ))}
-             </div>
-
-             <div className="glass-card p-8 rounded-[3rem] text-center border-white/10 shadow-2xl">
-                <h2 className="text-[10px] font-black text-blue-400 uppercase tracking-[0.3em] mb-6 font-orbitron">RECRUIT THE HUDDLE</h2>
-                <div className="bg-white p-4 rounded-3xl w-fit mx-auto shadow-2xl mb-6 transform hover:scale-105 transition-transform">
-                   <img 
-                    src={`https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(window.location.origin + window.location.pathname + '?room=' + partyCode)}`} 
-                    alt="Invite QR Code" 
-                    className="w-44 h-44"
-                   />
-                </div>
-                <div className="space-y-3">
-                   <button 
-                    onClick={() => { 
-                      const link = window.location.origin + window.location.pathname + '?room=' + partyCode;
-                      navigator.clipboard.writeText(link); 
-                      alert("Mesh Invitation Copied!"); 
-                    }} 
-                    className="w-full py-5 bg-blue-600 text-white rounded-2xl font-black uppercase text-xs shadow-xl active:scale-95 border-b-4 border-blue-800"
-                   >
-                    COPY INVITE LINK
-                   </button>
-                   <p className="text-[8px] text-slate-500 uppercase font-black tracking-widest">PEER KEY: {partyCode}</p>
-                </div>
              </div>
           </div>
         )}
@@ -396,12 +382,15 @@ const GuestLogin: React.FC<{ onLogin: (e: React.FormEvent, h: string, r: string,
           </button>
         ))}
       </div>
-      <div className="space-y-4 text-left">
+      <form onSubmit={e => onLogin(e, handle, real, av)} className="space-y-4 text-left">
         <input type="text" placeholder="Huddle Handle" required value={handle} onChange={e => setHandle(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-2xl p-4 text-white font-bold outline-none focus:border-blue-500 text-sm" />
         <input type="text" placeholder="Real Name" required value={real} onChange={e => setReal(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-2xl p-4 text-white font-bold outline-none focus:border-blue-500 text-sm" />
-        <button type="submit" onClick={e => onLogin(e, handle, real, av)} className="w-full py-5 bg-white text-black rounded-2xl font-black uppercase tracking-widest text-sm shadow-xl active:scale-95 border-b-4 border-slate-300">
+        <button type="submit" className="w-full py-5 bg-white text-black rounded-2xl font-black uppercase tracking-widest text-sm shadow-xl active:scale-95 border-b-4 border-slate-300">
           ENTER THE HUDDLE
         </button>
+      </form>
+      <div className="pt-4 border-t border-white/5">
+         <button onClick={() => { if (prompt("PIN:") === 'SB2026') { localStorage.setItem('sblix_host_v24', 'true'); window.location.reload(); }}} className="text-[10px] font-black text-slate-600 uppercase tracking-widest hover:text-white transition-colors">Commissioner Access</button>
       </div>
     </div>
   );
