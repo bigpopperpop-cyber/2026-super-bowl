@@ -8,8 +8,11 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
-    <!-- GUN.JS for P2P Mesh Sync -->
-    <script src="https://cdn.jsdelivr.net/npm/gun/gun.js"></script>
+    
+    <!-- Y.js Real-time Sync Engine -->
+    <script src="https://cdn.jsdelivr.net/npm/yjs@13.6.10/dist/yjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/y-webrtc@10.2.5/dist/y-webrtc.min.js"></script>
+
     <style>
       body {
         font-family: 'Inter', sans-serif;
@@ -46,16 +49,25 @@
         padding-bottom: env(safe-area-inset-bottom);
       }
       
-      @keyframes pulse-soft {
-        0%, 100% { opacity: 1; }
-        50% { opacity: 0.7; }
+      @keyframes pulse-blue {
+        0%, 100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.7); }
+        50% { box-shadow: 0 0 0 10px rgba(59, 130, 246, 0); }
       }
-      .animate-pulse-soft {
-        animation: pulse-soft 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+      .animate-pulse-blue {
+        animation: pulse-blue 2s infinite;
       }
       
       .no-scrollbar::-webkit-scrollbar { display: none; }
       .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+      .chat-bubble-user {
+        background: linear-gradient(to bottom right, #2563eb, #1d4ed8);
+        border-radius: 1.25rem 1.25rem 0.25rem 1.25rem;
+      }
+      .chat-bubble-other {
+        background: #1e293b;
+        border-radius: 1.25rem 1.25rem 1.25rem 0.25rem;
+      }
     </style>
   <script type="importmap">
 {
