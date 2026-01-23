@@ -1,8 +1,11 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import * as Y from 'yjs';
+// @ts-ignore
 import { WebrtcProvider } from 'y-webrtc';
+// @ts-ignore
 import { WebsocketProvider } from 'y-websocket';
+// @ts-ignore
 import { IndexeddbPersistence } from 'y-indexeddb';
 import { User, PropBet, UserBet, ChatMessage, GameState, BetStatus } from './types';
 import { INITIAL_PROP_BETS, NFL_TEAMS } from './constants';

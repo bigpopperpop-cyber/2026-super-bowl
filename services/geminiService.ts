@@ -1,8 +1,6 @@
 
 import { GoogleGenAI } from "@google/genai";
 
-const apiKey = typeof process !== 'undefined' ? process.env.API_KEY : '';
-
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 export const getAICommentary = async (
@@ -11,10 +9,10 @@ export const getAICommentary = async (
   leaderboard: any[],
   retries = 1
 ): Promise<string> => {
-  if (!apiKey) return "Atmosphere is wild! Picks locking in!";
-  
+  // Always initialize with process.env.API_KEY directly as per guidelines.
   try {
-    const ai = new GoogleGenAI({ apiKey });
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+    
     const standings = leaderboard
       .slice(0, 3)
       .map((u, i) => `#${i + 1} ${u.username}`)
@@ -29,6 +27,7 @@ export const getAICommentary = async (
       Give a 1-sentence pro reaction. SNAPPY.`,
     });
 
+    // Directly access .text property as it is a getter, not a method.
     return response.text?.trim() || "The huddle is heated! Keep playing!";
 
   } catch (error: any) {
