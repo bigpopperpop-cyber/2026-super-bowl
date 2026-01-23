@@ -1,5 +1,7 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import * as Y from 'yjs';
+import { WebrtcProvider } from 'y-webrtc';
 import { User, PropBet, UserBet, ChatMessage, GameState, BetStatus } from './types';
 import { INITIAL_PROP_BETS, NFL_TEAMS } from './constants';
 import { getAICommentary } from './services/geminiService';
@@ -7,10 +9,6 @@ import BettingPanel from './components/BettingPanel';
 import ChatRoom from './components/ChatRoom';
 import Leaderboard from './components/Leaderboard';
 import TeamHelmet from './components/TeamHelmet';
-
-// Access Yjs and WebRTC from window (imported via index.html)
-declare const Y: any;
-declare const WebrtcProvider: any;
 
 type AppMode = 'LANDING' | 'GAME';
 type TabType = 'chat' | 'bets' | 'leaderboard' | 'command';
@@ -58,11 +56,16 @@ const App: React.FC = () => {
   useEffect(() => {
     if (!currentUser) return;
 
+    // Fixed: Using imported WebrtcProvider
     const provider = new WebrtcProvider(`sblix-party-${partyCode}-v22`, doc, {
-      signaling: ['wss://signaling.yjs.dev', 'wss://y-webrtc-signaling-eu.herokuapp.com', 'wss://y-webrtc-signaling-us.herokuapp.com']
+      signaling: [
+        'wss://signaling.yjs.dev', 
+        'wss://y-webrtc-signaling-eu.herokuapp.com', 
+        'wss://y-webrtc-signaling-us.herokuapp.com'
+      ]
     });
 
-    provider.on('status', (event: any) => {
+    provider.on('status', () => {
       setConnectedPeers(provider.room.webrtcConns.size + 1);
     });
 
