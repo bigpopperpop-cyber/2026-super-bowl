@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { ChatMessage, User } from '../types.ts';
-import TeamHelmet from './TeamHelmet.tsx';
+import { ChatMessage, User } from '../types';
+import TeamHelmet from './TeamHelmet';
 
 interface ChatRoomProps {
   user: User;

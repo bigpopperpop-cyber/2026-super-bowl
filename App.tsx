@@ -4,13 +4,13 @@ import * as Y from 'yjs';
 import { WebrtcProvider } from 'y-webrtc';
 import { WebsocketProvider } from 'y-websocket';
 import { IndexeddbPersistence } from 'y-indexeddb';
-import { User, PropBet, UserBet, ChatMessage, GameState, BetStatus } from './types.ts';
-import { INITIAL_PROP_BETS, NFL_TEAMS } from './constants.tsx';
-import { getAICommentary } from './services/geminiService.ts';
-import BettingPanel from './components/BettingPanel.tsx';
-import ChatRoom from './components/ChatRoom.tsx';
-import Leaderboard from './components/Leaderboard.tsx';
-import TeamHelmet from './components/TeamHelmet.tsx';
+import { User, PropBet, UserBet, ChatMessage, GameState, BetStatus } from './types';
+import { INITIAL_PROP_BETS, NFL_TEAMS } from './constants';
+import { getAICommentary } from './services/geminiService';
+import BettingPanel from './components/BettingPanel';
+import ChatRoom from './components/ChatRoom';
+import Leaderboard from './components/Leaderboard';
+import TeamHelmet from './components/TeamHelmet';
 
 type AppMode = 'LANDING' | 'GAME';
 type TabType = 'chat' | 'bets' | 'leaderboard' | 'command';
@@ -125,18 +125,18 @@ const App: React.FC = () => {
       }
       
       // Messages
-      const msgArray = sharedMessages.toArray();
-      setMessages(msgArray.sort((a, b) => a.timestamp - b.timestamp).slice(-100));
+      const msgArray = (sharedMessages.toArray() as ChatMessage[]);
+      setMessages([...msgArray].sort((a, b) => a.timestamp - b.timestamp).slice(-100));
       
       // Bets
-      setAllUserBets(sharedUserBets.toArray());
+      setAllUserBets(sharedUserBets.toArray() as UserBet[]);
       
       // Props
-      const pMap = sharedProps.toJSON();
+      const pMap = (sharedProps.toJSON() as Record<string, any>);
       setPropBets(prev => prev.map(p => pMap[p.id] ? { ...p, ...pMap[p.id] } : p));
       
       // Active Users
-      const userMap = sharedUsers.toJSON();
+      const userMap = (sharedUsers.toJSON() as Record<string, any>);
       const now = Date.now();
       const active = Object.values(userMap)
         .filter((u: any) => now - (u.lastPing || 0) < 45000) as User[];
@@ -332,7 +332,6 @@ const App: React.FC = () => {
                       </div>
                    </div>
                 </div>
-                {/* ... other controls ... */}
              </div>
           </div>
         )}

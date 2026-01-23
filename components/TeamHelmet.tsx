@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { NFL_TEAMS } from '../constants.tsx';
+import { NFL_TEAMS } from '../constants';
 
 interface TeamHelmetProps {
   teamId: string;
