@@ -8,12 +8,19 @@ export default defineConfig({
     'process.env.API_KEY': JSON.stringify(process.env.API_KEY || '')
   },
   resolve: {
-    // This is critical for Yjs to ensure only one instance is loaded, 
-    // fixing the "Yjs was already imported" error in bundled builds.
-    dedupe: ['yjs']
+    // Force Vite to deduplicate these packages to avoid "already imported" errors
+    dedupe: ['yjs', 'react', 'react-dom']
   },
   build: {
     outDir: 'dist',
-    sourcemap: false
+    sourcemap: false,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'yjs-vendor': ['yjs', 'y-webrtc', 'y-websocket', 'y-indexeddb'],
+          'react-vendor': ['react', 'react-dom']
+        }
+      }
+    }
   }
 });
