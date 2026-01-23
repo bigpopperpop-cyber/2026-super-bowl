@@ -16,12 +16,16 @@ type AppMode = 'LANDING' | 'GAME';
 type TabType = 'chat' | 'bets' | 'leaderboard' | 'command';
 type ConnStatus = 'CONNECTING' | 'SYNCED' | 'HYBRID_ACTIVE' | 'OFFLINE';
 
+const APP_VERSION = 'v25.02.13'; // Visible version to verify update
+const STORAGE_KEY = 'sblix_user_v25';
+const HOST_KEY = 'sblix_host_v25';
+
 const generateId = () => Math.random().toString(36).substring(2, 9);
 
 const App: React.FC = () => {
   const [mode, setMode] = useState<AppMode>(() => {
     try {
-      return localStorage.getItem('sblix_user_v24') ? 'GAME' : 'LANDING';
+      return localStorage.getItem(STORAGE_KEY) ? 'GAME' : 'LANDING';
     } catch {
       return 'LANDING';
     }
@@ -29,7 +33,7 @@ const App: React.FC = () => {
 
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
     try {
-      const saved = localStorage.getItem('sblix_user_v24');
+      const saved = localStorage.getItem(STORAGE_KEY);
       return saved ? JSON.parse(saved) : null;
     } catch {
       return null;
@@ -50,7 +54,7 @@ const App: React.FC = () => {
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [isHost, setIsHost] = useState(() => {
     try {
-      return localStorage.getItem('sblix_host_v24') === 'true';
+      return localStorage.getItem(HOST_KEY) === 'true';
     } catch {
       return false;
     }
@@ -76,7 +80,7 @@ const App: React.FC = () => {
   useEffect(() => {
     if (!currentUser) return;
 
-    const roomName = `sblix-v24-mesh-${partyCode}`;
+    const roomName = `sblix-v25-mesh-${partyCode}`;
     const persistence = new IndexeddbPersistence(roomName, doc);
     
     const webrtcProvider = new WebrtcProvider(roomName, doc, {
@@ -233,6 +237,7 @@ const App: React.FC = () => {
     return (
       <div className="fixed inset-0 nfl-gradient flex items-center justify-center p-6 overflow-y-auto">
         <div className="max-w-md w-full glass-card p-8 rounded-[3rem] text-center shadow-2xl border-white/20">
+          <div className="absolute top-4 right-4 text-[7px] text-white/30 font-mono">{APP_VERSION}</div>
           <div className="w-20 h-20 bg-white rounded-3xl mx-auto flex items-center justify-center mb-6 shadow-2xl rotate-3 border-4 border-blue-600">
             <i className="fas fa-satellite-dish text-blue-600 text-4xl animate-pulse"></i>
           </div>
@@ -243,7 +248,7 @@ const App: React.FC = () => {
             const newUser = { id: generateId(), username: h, realName: r, avatar: t, credits: 0 };
             setCurrentUser(newUser);
             try {
-              localStorage.setItem('sblix_user_v24', JSON.stringify(newUser));
+              localStorage.setItem(STORAGE_KEY, JSON.stringify(newUser));
             } catch {}
             setMode('GAME');
           }} isHost={isHost} />
@@ -261,7 +266,10 @@ const App: React.FC = () => {
       <header className="bg-slate-900 border-b border-slate-800 p-3 shrink-0 z-40">
         <div className="container mx-auto flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <h1 className="text-lg font-black font-orbitron text-blue-500">SBLIX</h1>
+            <div className="flex flex-col">
+              <h1 className="text-lg font-black font-orbitron text-blue-500 leading-none">SBLIX</h1>
+              <span className="text-[6px] text-slate-500 font-mono mt-0.5">{APP_VERSION}</span>
+            </div>
             <div className="flex items-center gap-1.5 bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-[9px]">
               <span className="font-orbitron font-black text-slate-200 uppercase">Q{gameState.quarter}</span>
               <span className="text-slate-400 font-bold tabular-nums">{gameState.score.home}-{gameState.score.away}</span>
@@ -291,7 +299,7 @@ const App: React.FC = () => {
                    <h2 className="text-sm font-black font-orbitron text-white">COMMAND CONSOLE</h2>
                    <p className="text-[8px] font-black text-slate-500 uppercase tracking-[0.2em]">MESH KEY: {partyCode}</p>
                 </div>
-                <button onClick={() => { if (confirm("Sign out Host?")) { setIsHost(false); localStorage.removeItem('sblix_host_v24'); setActiveTab('chat'); }}} className="text-[8px] font-black text-red-500 border border-red-500/30 px-2 py-1 rounded uppercase">Exit</button>
+                <button onClick={() => { if (confirm("Sign out Host?")) { setIsHost(false); localStorage.removeItem(HOST_KEY); setActiveTab('chat'); }}} className="text-[8px] font-black text-red-500 border border-red-500/30 px-2 py-1 rounded uppercase">Exit</button>
              </div>
 
              <div className="bg-indigo-950/40 border border-indigo-500/30 rounded-[2rem] p-6 shadow-2xl">
@@ -405,7 +413,7 @@ const GuestLogin: React.FC<{ onLogin: (e: React.FormEvent, h: string, r: string,
            const pin = prompt("PIN:");
            if (pin === 'SB2026') { 
              try {
-               localStorage.setItem('sblix_host_v24', 'true'); 
+               localStorage.setItem(HOST_KEY, 'true'); 
                window.location.reload(); 
              } catch {}
            } 
