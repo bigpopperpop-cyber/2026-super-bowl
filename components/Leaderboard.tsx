@@ -1,6 +1,6 @@
 
 import React, { useMemo } from 'react';
-import { User, UserBet, PropBet, BetStatus } from '../types';
+import { User, UserBet, PropBet } from '../types';
 import TeamHelmet from './TeamHelmet';
 
 interface LeaderboardProps {
@@ -19,7 +19,7 @@ const Leaderboard: React.FC<LeaderboardProps> = ({ users, currentUser, propBets,
       myBets.forEach(bet => {
         const prop = propBets.find(p => p.id === bet.betId);
         if (prop?.resolved) {
-          if (prop.outcome === bet.selection) {
+          if (prop.winner === bet.selection) {
             credits += 10; 
           } else {
             credits -= 5;
@@ -71,15 +71,15 @@ const Leaderboard: React.FC<LeaderboardProps> = ({ users, currentUser, propBets,
                     {idx + 1}
                   </span>
                   <div className="relative">
-                    <TeamHelmet teamId={user.avatar} size="lg" />
+                    <TeamHelmet teamId={user.team} size="lg" />
                     <div className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-green-500 border-2 border-slate-950"></div>
                   </div>
                   <div>
                     <div className="text-sm font-black flex items-center gap-1.5 text-white">
-                      {user.username}
+                      {user.handle}
                       {isMe && <span className="text-[7px] bg-blue-600 text-white px-1.5 py-0.5 rounded uppercase font-black tracking-tighter">You</span>}
                     </div>
-                    <div className="text-[9px] text-slate-500 font-bold uppercase tracking-tight">{user.realName}</div>
+                    <div className="text-[9px] text-slate-500 font-bold uppercase tracking-tight">{user.name}</div>
                   </div>
                 </div>
                 <div className="text-right">

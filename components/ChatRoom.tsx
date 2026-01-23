@@ -44,7 +44,7 @@ const ChatRoom: React.FC<ChatRoomProps> = ({ user, messages, onSendMessage, user
         <div className="flex -space-x-2">
           {users.slice(0, 5).map(u => (
             <div key={u.id} className="w-6 h-6 rounded-full border-2 border-slate-900 bg-slate-800 overflow-hidden flex items-center justify-center">
-               <TeamHelmet teamId={u.avatar} size="sm" />
+               <TeamHelmet teamId={u.team} size="sm" />
             </div>
           ))}
           {users.length > 5 && (
@@ -73,7 +73,7 @@ const ChatRoom: React.FC<ChatRoomProps> = ({ user, messages, onSendMessage, user
             <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} animate-in fade-in slide-in-from-bottom-2 duration-300`}>
               {showName && !isAI && (
                 <div className="flex items-center gap-1.5 mb-1 px-1">
-                  {!isMe && <span className="text-[8px] font-black uppercase text-blue-500">{msg.username}</span>}
+                  {!isMe && <span className="text-[8px] font-black uppercase text-blue-500">{msg.userName}</span>}
                   {isMe && <span className="text-[8px] font-black uppercase text-slate-500">YOU</span>}
                 </div>
               )}
@@ -111,8 +111,8 @@ const ChatRoom: React.FC<ChatRoomProps> = ({ user, messages, onSendMessage, user
         )}
 
         <form onSubmit={handleSubmit} className="p-3 flex gap-2 pb-safe items-center">
-          <button type="button" onClick={() => setShowEmojiPicker(!showEmojiPicker)} className={`w-10 h-10 flex items-center justify-center rounded-xl bg-slate-800 text-slate-400 border border-slate-700 transition-colors ${showEmojiPicker ? 'bg-blue-600 text-white border-blue-400' : ''}`}>
-            <i className="far fa-smile text-lg"></i>
+          <button type="button" onClick={() => setInputText(p => p + '🏈')} className="w-10 h-10 flex items-center justify-center rounded-xl bg-slate-800 text-slate-400 border border-slate-700 transition-colors">
+            🏈
           </button>
           <input 
             type="text" 

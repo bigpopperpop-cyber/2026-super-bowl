@@ -44,12 +44,13 @@ export const NFL_TEAMS: NFLTeam[] = [
   { id: 'WAS', city: 'Washington', name: 'Commanders', primary: '#5A1414', secondary: '#FFB612' }
 ];
 
+// Removed 'odds' property as it is not defined in the PropBet type
 export const INITIAL_PROP_BETS: PropBet[] = [
-  { id: '1', question: "Coin Toss: Which side will land up?", odds: 1.9, category: 'Game', resolved: false, options: ['Heads', 'Tails'] },
-  { id: '2', question: "First Team to record a 1st Down?", odds: 1.9, category: 'Game', resolved: false, options: ['Home Team', 'Away Team'] },
-  { id: '3', question: "Halftime Show: Will there be a Guest Performer?", odds: 1.5, category: 'Entertainment', resolved: false, options: ['Yes', 'No'] },
-  { id: '4', question: "Total Points: Over or Under 44.5?", odds: 1.9, category: 'Stats', resolved: false, options: ['Over 44.5', 'Under 44.5'] },
-  { id: '5', question: "Will there be a Replay Challenge?", odds: 2.2, category: 'Game', resolved: false, options: ['Yes', 'No'] }
+  { id: '1', question: "Coin Toss: Which side will land up?", category: 'Game', resolved: false, options: ['Heads', 'Tails'] },
+  { id: '2', question: "First Team to record a 1st Down?", category: 'Game', resolved: false, options: ['Home Team', 'Away Team'] },
+  { id: '3', question: "Halftime Show: Will there be a Guest Performer?", category: 'Entertainment', resolved: false, options: ['Yes', 'No'] },
+  { id: '4', question: "Total Points: Over or Under 44.5?", category: 'Stats', resolved: false, options: ['Over 44.5', 'Under 44.5'] },
+  { id: '5', question: "Will there be a Replay Challenge?", category: 'Game', resolved: false, options: ['Yes', 'No'] }
 ];
 
 export const AVATARS = NFL_TEAMS.map(t => t.id);

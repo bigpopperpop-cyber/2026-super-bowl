@@ -1,11 +1,11 @@
 
 import React, { useState, useMemo } from 'react';
-import { PropBet, User, UserBet, BetStatus } from '../types';
+import { PropBet, User, UserBet } from '../types';
 
 interface BettingPanelProps {
   propBets: PropBet[];
   user: User;
-  onPlaceBet: (betId: string, amount: number, selection: string) => void;
+  onPlaceBet: (betId: string, selection: string) => void;
   allBets: UserBet[];
   hideFilters?: boolean;
 }
@@ -36,7 +36,7 @@ const BettingPanel: React.FC<BettingPanelProps> = ({
   const handleBetSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (selectedBet && selection) {
-      onPlaceBet(selectedBet.id, 0, selection);
+      onPlaceBet(selectedBet.id, selection);
       setSelectedBet(null);
       setSelection('');
     }
@@ -114,7 +114,7 @@ const BettingPanel: React.FC<BettingPanelProps> = ({
                 {bet.resolved ? (
                   <div className="flex items-center gap-2 text-[11px]">
                     <span className="text-slate-400 font-bold uppercase">Outcome:</span>
-                    <span className="text-yellow-400 font-black uppercase">{bet.outcome}</span>
+                    <span className="text-yellow-400 font-black uppercase">{bet.winner}</span>
                   </div>
                 ) : myBet ? (
                   <div className="flex items-center gap-2 text-[11px] font-black text-blue-400 bg-blue-500/10 py-2 px-3 rounded-xl border border-blue-500/20 w-fit">
@@ -158,7 +158,7 @@ const BettingPanel: React.FC<BettingPanelProps> = ({
                 <button
                   key={opt}
                   onClick={() => {
-                    onPlaceBet(selectedBet.id, 0, opt);
+                    onPlaceBet(selectedBet.id, opt);
                     setSelectedBet(null);
                   }}
                   className="py-5 px-6 rounded-2xl text-base font-black border bg-slate-800 border-slate-700 text-slate-300 hover:bg-blue-600 hover:border-blue-400 hover:text-white transition-all text-left flex justify-between items-center active:scale-95"

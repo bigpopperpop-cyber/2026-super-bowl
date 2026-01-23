@@ -1,394 +1,381 @@
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import * as Y from 'yjs';
 // @ts-ignore
 import { WebrtcProvider } from 'y-webrtc';
 // @ts-ignore
 import { WebsocketProvider } from 'y-websocket';
-// @ts-ignore
-import { IndexeddbPersistence } from 'y-indexeddb';
-import { User, PropBet, UserBet, ChatMessage, GameState, BetStatus } from './types';
-import { INITIAL_PROP_BETS, NFL_TEAMS } from './constants';
-import { getAICommentary } from './services/geminiService';
-import BettingPanel from './components/BettingPanel';
-import ChatRoom from './components/ChatRoom';
-import Leaderboard from './components/Leaderboard';
-import TeamHelmet from './components/TeamHelmet';
+import { User, ChatMessage, PropBet, UserBet, GameState } from './types';
+import { NFL_TEAMS, INITIAL_PROPS } from './constants';
+import { GoogleGenAI } from '@google/genai';
 
-type AppMode = 'LANDING' | 'GAME';
-type TabType = 'chat' | 'bets' | 'leaderboard' | 'command';
-type ConnStatus = 'OFFLINE' | 'CONNECTING' | 'SYNCED' | 'ROBUST';
+const STORAGE_KEY = 'sblix_profile_v3';
+const ROOM_NAME = 'sblix-party-lix';
 
-const APP_VERSION = 'v25.02.13-STABLE'; 
-const STORAGE_KEY = 'sblix_user_v25';
-const HOST_KEY = 'sblix_host_v25';
+const generateId = () => Math.random().toString(36).substring(2, 11);
 
-const generateId = () => Math.random().toString(36).substring(2, 9);
-
-const App: React.FC = () => {
-  const [mode, setMode] = useState<AppMode>(() => {
-    try {
-      return localStorage.getItem(STORAGE_KEY) ? 'GAME' : 'LANDING';
-    } catch {
-      return 'LANDING';
-    }
+export default function App() {
+  const [user, setUser] = useState<User | null>(() => {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    return saved ? JSON.parse(saved) : null;
   });
 
-  const [currentUser, setCurrentUser] = useState<User | null>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      return saved ? JSON.parse(saved) : null;
-    } catch {
-      return null;
-    }
-  });
-
-  const [users, setUsers] = useState<User[]>([]);
+  const [activeTab, setActiveTab] = useState<'chat' | 'bets' | 'leaderboard' | 'host'>('chat');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [gameState, setGameState] = useState<GameState>({
-    quarter: 1, timeRemaining: "15:00", score: { home: 0, away: 0 }, possession: 'home'
-  });
-  const [propBets, setPropBets] = useState<PropBet[]>(INITIAL_PROP_BETS);
-  const [allUserBets, setAllUserBets] = useState<UserBet[]>([]);
-  
-  // Connection state
-  const [connectedPeers, setConnectedPeers] = useState(0);
-  const [wsConnected, setWsConnected] = useState(false);
-  const [connStatus, setConnStatus] = useState<ConnStatus>('CONNECTING');
+  const [gameState, setGameState] = useState<GameState>({ scoreHome: 0, scoreAway: 0, quarter: '1st', time: '15:00', possession: 'home' });
+  const [props, setProps] = useState<PropBet[]>(INITIAL_PROPS);
+  const [userBets, setUserBets] = useState<UserBet[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
+  const [connected, setConnected] = useState(false);
+  const [isHost, setIsHost] = useState(() => localStorage.getItem('sblix_host') === 'true');
 
-  const [activeTab, setActiveTab] = useState<TabType>('chat');
-  const [isAiLoading, setIsAiLoading] = useState(false);
-  const [isHost, setIsHost] = useState(() => {
-    try {
-      return localStorage.getItem(HOST_KEY) === 'true';
-    } catch {
-      return false;
-    }
-  });
-
-  const partyCode = useMemo(() => {
-    const params = new URLSearchParams(window.location.search);
-    return (params.get('room') || 'SBLIX').toUpperCase();
-  }, []);
-
-  // Shared Doc and Maps
+  // YJS Setup
   const doc = useMemo(() => new Y.Doc(), []);
-  const sharedGame = useMemo(() => doc.getMap('gameState'), [doc]);
   const sharedMessages = useMemo(() => doc.getArray<ChatMessage>('messages'), [doc]);
+  const sharedGame = useMemo(() => doc.getMap('gameState'), [doc]);
   const sharedProps = useMemo(() => doc.getMap('props'), [doc]);
-  const sharedUsers = useMemo(() => doc.getMap('users'), [doc]);
   const sharedUserBets = useMemo(() => doc.getArray<UserBet>('userBets'), [doc]);
+  const sharedUsers = useMemo(() => doc.getMap('users'), [doc]);
 
   useEffect(() => {
-    if (!currentUser) return;
+    if (!user) return;
 
-    const roomName = `sblix-v25-mesh-${partyCode}`;
-    
-    // 1. Local Persistence
-    const persistence = new IndexeddbPersistence(roomName, doc);
-    
-    // 2. WebRTC Mesh
-    const webrtcProvider = new WebrtcProvider(roomName, doc, {
-      signaling: [
-        'wss://signaling.yjs.dev',
-        'wss://y-webrtc-signaling-us.herokuapp.com',
-        'wss://y-webrtc-signaling-eu.herokuapp.com'
-      ]
-    });
+    const webrtc = new WebrtcProvider(ROOM_NAME, doc, { signaling: ['wss://signaling.yjs.dev'] });
+    const ws = new WebsocketProvider('wss://demos.yjs.dev', ROOM_NAME, doc);
 
-    // 3. Central WebSocket Relay
-    const wsProvider = new WebsocketProvider('wss://demos.yjs.dev', roomName, doc);
-
-    const updateConnStats = () => {
-      const peers = webrtcProvider.room.webrtcConns.size;
-      const ws = wsProvider.wsconnected;
-      setConnectedPeers(peers);
-      setWsConnected(ws);
+    const sync = () => {
+      setMessages(sharedMessages.toArray());
+      setGameState(sharedGame.toJSON() as GameState);
+      setAllBets(sharedUserBets.toArray());
       
-      if (ws && peers > 0) setConnStatus('ROBUST');
-      else if (ws || peers > 0) setConnStatus('SYNCED');
-      else setConnStatus('CONNECTING');
+      const pData = sharedProps.toJSON();
+      setProps(prev => prev.map(p => pData[p.id] ? { ...p, ...pData[p.id] } : p));
+      
+      const uMap = sharedUsers.toJSON();
+      setUsers(Object.values(uMap) as User[]);
+      setConnected(ws.wsconnected || webrtc.connected);
     };
 
-    webrtcProvider.on('status', updateConnStats);
-    wsProvider.on('status', updateConnStats);
-    webrtcProvider.room.on('peers', updateConnStats);
+    sharedMessages.observe(sync);
+    sharedGame.observe(sync);
+    sharedProps.observe(sync);
+    sharedUserBets.observe(sync);
+    sharedUsers.observe(sync);
 
-    // Initial sync
-    const syncAll = () => {
-      // Game State
-      const gameData = sharedGame.toJSON();
-      if (Object.keys(gameData).length > 0) {
-        setGameState({
-          quarter: gameData.quarter ?? 1,
-          timeRemaining: gameData.timeRemaining ?? "15:00",
-          score: { home: gameData.scoreHome ?? 0, away: gameData.scoreAway ?? 0 },
-          possession: gameData.possession ?? 'home'
-        });
-      }
-      
-      // Messages
-      const msgArray = (sharedMessages.toArray() as ChatMessage[]);
-      setMessages([...msgArray].sort((a, b) => a.timestamp - b.timestamp).slice(-100));
-      
-      // Bets
-      setAllUserBets(sharedUserBets.toArray() as UserBet[]);
-      
-      // Props
-      const pMap = (sharedProps.toJSON() as Record<string, any>);
-      setPropBets(prev => prev.map(p => pMap[p.id] ? { ...p, ...pMap[p.id] } : p));
-      
-      // Active Users
-      const userMap = (sharedUsers.toJSON() as Record<string, any>);
-      const now = Date.now();
-      const active = Object.values(userMap)
-        .filter((u: any) => now - (u.lastPing || 0) < 45000) as User[];
-      setUsers(active);
-    };
-
-    sharedGame.observe(syncAll);
-    sharedMessages.observe(syncAll);
-    sharedUserBets.observe(syncAll);
-    sharedProps.observe(syncAll);
-    sharedUsers.observe(syncAll);
-
-    // Heartbeat
     const heartbeat = setInterval(() => {
-      sharedUsers.set(currentUser.id, { ...currentUser, lastPing: Date.now() });
-      updateConnStats();
-    }, 15000);
-
-    sharedUsers.set(currentUser.id, { ...currentUser, lastPing: Date.now() });
-    syncAll();
+      sharedUsers.set(user.id, { ...user, lastSeen: Date.now() });
+    }, 10000);
 
     return () => {
-      webrtcProvider.destroy();
-      wsProvider.destroy();
-      persistence.destroy();
+      webrtc.destroy();
+      ws.destroy();
       clearInterval(heartbeat);
     };
-  }, [currentUser, doc, partyCode, sharedGame, sharedMessages, sharedProps, sharedUsers, sharedUserBets]);
+  }, [user, doc]);
 
-  const onSendMessage = useCallback((text: string) => {
-    if (!currentUser) return;
-    const msg: ChatMessage = { 
-      id: generateId(), 
-      userId: currentUser.id, 
-      username: currentUser.username, 
-      text, 
-      timestamp: Date.now() 
-    };
-    try {
-      doc.transact(() => {
-        sharedMessages.push([msg]);
-      });
-    } catch (e) {
-      console.error("[SBLIX] Chat Send Failed:", e);
-    }
-  }, [currentUser, doc, sharedMessages]);
+  const [allBets, setAllBets] = useState<UserBet[]>([]);
 
-  const onPlaceBet = useCallback((betId: string, amount: number, selection: string) => {
-    if (!currentUser) return;
-    const newBet: UserBet = {
-      id: generateId(),
-      userId: currentUser.id,
-      betId,
-      amount,
-      selection,
-      status: BetStatus.PENDING,
-      placedAt: Date.now()
-    };
-    doc.transact(() => {
-      sharedUserBets.push([newBet]);
-    });
-  }, [currentUser, doc, sharedUserBets]);
+  const handleSendMessage = (text: string) => {
+    if (!user) return;
+    const msg: ChatMessage = { id: generateId(), userId: user.id, userName: user.handle, text, timestamp: Date.now() };
+    sharedMessages.push([msg]);
+  };
 
-  const updateGame = (updates: any) => {
+  const handlePlaceBet = (betId: string, selection: string) => {
+    if (!user) return;
+    const existing = allBets.find(b => b.userId === user.id && b.betId === betId);
+    if (existing) return;
+    const b: UserBet = { id: generateId(), userId: user.id, betId, selection, timestamp: Date.now() };
+    sharedUserBets.push([b]);
+  };
+
+  const updateGame = (updates: Partial<GameState>) => {
     if (!isHost) return;
-    doc.transact(() => {
-      if (updates.quarter !== undefined) sharedGame.set('quarter', updates.quarter);
-      if (updates.timeRemaining !== undefined) sharedGame.set('timeRemaining', updates.timeRemaining);
-      if (updates.scoreHome !== undefined) sharedGame.set('scoreHome', updates.scoreHome);
-      if (updates.scoreAway !== undefined) sharedGame.set('scoreAway', updates.scoreAway);
-      if (updates.possession !== undefined) sharedGame.set('possession', updates.possession);
-    });
+    Object.entries(updates).forEach(([k, v]) => sharedGame.set(k, v));
   };
 
-  const resolveProp = (betId: string, outcome: string) => {
+  const settleBet = (betId: string, winner: string) => {
     if (!isHost) return;
-    doc.transact(() => {
-      sharedProps.set(betId, { resolved: true, outcome });
+    sharedProps.set(betId, { resolved: true, winner });
+  };
+
+  const triggerAI = async () => {
+    if (!isHost) return;
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+    const context = `Score: Home ${gameState.scoreHome} - Away ${gameState.scoreAway}. Chat: ${messages.slice(-3).map(m => m.text).join(', ')}`;
+    const res = await ai.models.generateContent({
+      model: 'gemini-3-flash-preview',
+      contents: `You are Gerry the Gambler, a high-energy Super Bowl host. Context: ${context}. Give a 1-sentence wild commentary.`,
     });
+    const text = res.text || "THE HUDDLE IS HEATED!";
+    sharedMessages.push([{ id: generateId(), userId: 'AI', userName: 'GERRY', text, timestamp: Date.now(), isAI: true }]);
   };
 
-  const onTriggerAiCommentary = async () => {
-    if (!isHost || isAiLoading) return;
-    setIsAiLoading(true);
-    try {
-      const commentary = await getAICommentary(messages, gameState, users);
-      const msg: ChatMessage = {
-        id: generateId(), userId: 'AI_GERRY', username: 'GERRY THE GAMBLER',
-        text: commentary, timestamp: Date.now(), isAI: true
-      };
-      sharedMessages.push([msg]);
-    } catch (err) {
-      console.error("[SBLIX] AI Failure:", err);
-    } finally { setIsAiLoading(false); }
-  };
-
-  if (mode === 'LANDING' || !currentUser) {
-    return (
-      <div className="fixed inset-0 nfl-gradient flex items-center justify-center p-6 overflow-y-auto">
-        <div className="max-w-md w-full glass-card p-8 rounded-[3rem] text-center shadow-2xl border-white/20">
-          <div className="absolute top-4 right-4 text-[7px] text-white/30 font-mono">{APP_VERSION}</div>
-          <div className="w-20 h-20 bg-white rounded-3xl mx-auto flex items-center justify-center mb-6 shadow-2xl rotate-3 border-4 border-blue-600">
-            <i className="fas fa-satellite-dish text-blue-600 text-4xl animate-pulse"></i>
-          </div>
-          <h1 className="text-3xl font-black font-orbitron mb-2 tracking-tighter">SBLIX GRID-MESH</h1>
-          <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest mb-8 text-center">HYPER-SYNC RELIABILITY v25</p>
-          <GuestLogin onLogin={(e, h, r, t) => {
-            e.preventDefault();
-            const newUser = { id: generateId(), username: h, realName: r, avatar: t, credits: 0 };
-            setCurrentUser(newUser);
-            try { localStorage.setItem(STORAGE_KEY, JSON.stringify(newUser)); } catch {}
-            setMode('GAME');
-          }} />
-        </div>
-      </div>
-    );
-  }
+  if (!user) return <Login onEnter={(u) => { setUser(u); localStorage.setItem(STORAGE_KEY, JSON.stringify(u)); }} />;
 
   return (
-    <div className="fixed inset-0 bg-slate-950 flex flex-col overflow-hidden">
-      <div className="h-1 w-full bg-slate-900 flex overflow-hidden">
-        <div className={`h-full transition-all duration-1000 ${
-          connStatus === 'ROBUST' ? 'bg-blue-500 w-full shadow-[0_0_10px_#3b82f6]' : 
-          connStatus === 'SYNCED' ? 'bg-green-500 w-2/3 shadow-[0_0_10px_#22c55e]' : 
-          'bg-yellow-500 w-1/3 animate-pulse'}`} />
-      </div>
-
-      <header className="bg-slate-900 border-b border-slate-800 p-3 shrink-0 z-40">
-        <div className="container mx-auto flex items-center justify-between">
+    <div className="flex flex-col h-screen bg-slate-950 max-w-lg mx-auto overflow-hidden">
+      {/* HUD Header */}
+      <header className="glass p-4 border-b border-white/10 shrink-0">
+        <div className="flex justify-between items-center mb-2">
           <div className="flex items-center gap-2">
-            <div className="flex flex-col">
-              <h1 className="text-lg font-black font-orbitron text-blue-500 leading-none">SBLIX</h1>
-              <span className="text-[6px] text-slate-500 font-mono mt-0.5">{APP_VERSION}</span>
-            </div>
-            <div className="flex items-center gap-1.5 bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-[9px]">
-              <span className="font-orbitron font-black text-slate-200 uppercase">Q{gameState.quarter}</span>
-              <span className="text-slate-400 font-bold tabular-nums">{gameState.score.home}-{gameState.score.away}</span>
-            </div>
+            <div className={`w-2 h-2 rounded-full ${connected ? 'bg-green-500 shadow-[0_0_8px_#22c55e]' : 'bg-red-500'}`} />
+            <h1 className="font-orbitron font-black text-xl tracking-tighter text-sky-400">SBLIX</h1>
           </div>
-          <div className="flex items-center gap-3">
-             <div className="text-[7px] font-black uppercase tracking-tighter text-right leading-tight">
-                <div className={wsConnected ? 'text-blue-400' : 'text-slate-600'}>{wsConnected ? 'RELAY ACTIVE' : 'RELAY OFFLINE'}</div>
-                <div className={connectedPeers > 0 ? 'text-green-400' : 'text-slate-600'}>{connectedPeers} MESH PEERS</div>
-             </div>
-             <TeamHelmet teamId={currentUser.avatar} size="md" />
+          <div className="text-[10px] font-black uppercase tracking-widest text-slate-500">
+            {connected ? 'LIVE HUDDLE' : 'CONNECTING...'}
+          </div>
+        </div>
+        
+        <div className="flex justify-between items-center bg-black/40 rounded-xl p-3 border border-white/5">
+          <div className="text-center flex-1">
+            <p className="text-[9px] font-bold text-slate-500 uppercase">HOME</p>
+            <p className="text-3xl font-orbitron font-black leading-none">{gameState.scoreHome}</p>
+          </div>
+          <div className="px-4 text-center">
+            <div className="text-[10px] font-black bg-sky-500/20 text-sky-400 px-2 py-0.5 rounded-full mb-1">
+              {gameState.quarter} · {gameState.time}
+            </div>
+            <p className="text-[8px] font-bold text-slate-400 uppercase tracking-tighter">POSS: {gameState.possession}</p>
+          </div>
+          <div className="text-center flex-1">
+            <p className="text-[9px] font-bold text-slate-500 uppercase">AWAY</p>
+            <p className="text-3xl font-orbitron font-black leading-none">{gameState.scoreAway}</p>
           </div>
         </div>
       </header>
 
+      {/* Main Area */}
       <main className="flex-1 overflow-hidden relative">
-        {activeTab === 'chat' && <ChatRoom user={currentUser} messages={messages} users={users} onSendMessage={onSendMessage} />}
-        {activeTab === 'bets' && <BettingPanel propBets={propBets} user={currentUser} allBets={allUserBets} onPlaceBet={onPlaceBet} />}
-        {activeTab === 'leaderboard' && <Leaderboard users={users} currentUser={currentUser} propBets={propBets} userBets={allUserBets} />}
-        
-        {activeTab === 'command' && isHost && (
-          <div className="flex-1 overflow-y-auto p-6 space-y-8 pb-24 h-full bg-slate-950 custom-scrollbar">
-             <div className="flex items-center justify-between">
-                <div>
-                   <h2 className="text-sm font-black font-orbitron text-white">COMMAND CONSOLE</h2>
-                   <p className="text-[8px] font-black text-slate-500 uppercase tracking-[0.2em]">MESH KEY: {partyCode}</p>
-                </div>
-                <button onClick={() => { if (confirm("Exit Host?")) { setIsHost(false); localStorage.removeItem(HOST_KEY); setActiveTab('chat'); }}} className="text-[8px] font-black text-red-500 border border-red-500/30 px-2 py-1 rounded uppercase">Exit</button>
-             </div>
-
-             <div className="bg-indigo-950/40 border border-indigo-500/30 rounded-[2rem] p-6 shadow-2xl">
-                <button onClick={onTriggerAiCommentary} disabled={isAiLoading} className={`w-full py-4 rounded-xl font-black uppercase text-xs flex items-center justify-center gap-2 transition-all ${isAiLoading ? 'bg-slate-800 text-slate-500' : 'bg-indigo-600 text-white shadow-xl hover:bg-indigo-500 border-b-4 border-indigo-800 active:scale-95'}`}>
-                  {isAiLoading ? <i className="fas fa-spinner fa-spin"></i> : <i className="fas fa-bolt"></i>}
-                  {isAiLoading ? 'ANALYZING...' : 'SUMMON GERRY THE GAMBLER'}
-                </button>
-             </div>
-
-             <div className="bg-slate-900 border border-slate-800 rounded-[2rem] p-6 shadow-2xl">
-                <h3 className="text-center text-[10px] font-black text-blue-400 uppercase tracking-[0.3em] mb-8 font-orbitron">SCOREBOARD MASTER</h3>
-                <div className="grid grid-cols-2 gap-8 mb-8">
-                   <div className="text-center">
-                      <p className="text-[10px] font-black text-slate-500 uppercase mb-2">HOME</p>
-                      <div className="text-5xl font-black font-orbitron mb-4 text-white tabular-nums">{gameState.score.home}</div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <button onClick={() => updateGame({ scoreHome: gameState.score.home + 6 })} className="bg-blue-600 text-[9px] py-2 rounded-lg font-black">+6 TD</button>
-                        <button onClick={() => updateGame({ scoreHome: gameState.score.home + 3 })} className="bg-blue-800 text-[9px] py-2 rounded-lg font-black">+3 FG</button>
-                        <button onClick={() => updateGame({ scoreHome: Math.max(0, gameState.score.home - 1) })} className="bg-slate-800 text-[9px] py-2 rounded-lg font-black">-1</button>
-                        <button onClick={() => updateGame({ scoreHome: gameState.score.home + 1 })} className="bg-slate-700 text-[9px] py-2 rounded-lg font-black">+1</button>
-                      </div>
-                   </div>
-                   <div className="text-center">
-                      <p className="text-[10px] font-black text-slate-500 uppercase mb-2">AWAY</p>
-                      <div className="text-5xl font-black font-orbitron mb-4 text-white tabular-nums">{gameState.score.away}</div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <button onClick={() => updateGame({ scoreAway: gameState.score.away + 6 })} className="bg-red-600 text-[9px] py-2 rounded-lg font-black">+6 TD</button>
-                        <button onClick={() => updateGame({ scoreAway: gameState.score.away + 3 })} className="bg-red-800 text-[9px] py-2 rounded-lg font-black">+3 FG</button>
-                        <button onClick={() => updateGame({ scoreAway: Math.max(0, gameState.score.away - 1) })} className="bg-slate-800 text-[9px] py-2 rounded-lg font-black">-1</button>
-                        <button onClick={() => updateGame({ scoreAway: gameState.score.away + 1 })} className="bg-slate-700 text-[9px] py-2 rounded-lg font-black">+1</button>
-                      </div>
-                   </div>
-                </div>
-             </div>
-          </div>
+        {activeTab === 'chat' && <ChatView messages={messages} user={user} onSend={handleSendMessage} />}
+        {activeTab === 'bets' && <BetsView props={props} allBets={allBets} user={user} onBet={handlePlaceBet} />}
+        {activeTab === 'leaderboard' && <LeaderboardView users={users} allBets={allBets} props={props} />}
+        {activeTab === 'host' && (
+          <HostConsole state={gameState} update={updateGame} props={props} settle={settleBet} ai={triggerAI} />
         )}
       </main>
 
-      <nav className="bg-slate-900 border-t border-slate-800 pb-safe flex shrink-0 shadow-2xl">
-          {[
-            { id: 'chat', icon: 'fa-comments', label: 'Chat' },
-            { id: 'bets', icon: 'fa-ticket-alt', label: 'Props' },
-            { id: 'leaderboard', icon: 'fa-trophy', label: 'Rankings' },
-            ...(isHost ? [{ id: 'command', icon: 'fa-user-shield', label: 'Console' }] : [])
-          ].map(tab => (
-            <button key={tab.id} onClick={() => setActiveTab(tab.id as TabType)} className={`flex-1 py-4 flex flex-col items-center gap-1 transition-all ${activeTab === tab.id ? 'text-blue-500 bg-blue-500/5' : 'text-slate-600'}`}>
-              <i className={`fas ${tab.icon} text-lg ${activeTab === tab.id ? 'scale-110' : ''}`}></i>
-              <span className="text-[8px] font-black uppercase tracking-widest">{tab.label}</span>
-            </button>
-          ))}
+      {/* Tab Nav */}
+      <nav className="glass border-t border-white/10 flex pb-safe">
+        <NavBtn active={activeTab === 'chat'} icon="fa-comments" label="Chat" onClick={() => setActiveTab('chat')} />
+        <NavBtn active={activeTab === 'bets'} icon="fa-ticket-alt" label="Props" onClick={() => setActiveTab('bets')} />
+        <NavBtn active={activeTab === 'leaderboard'} icon="fa-trophy" label="Ranks" onClick={() => setActiveTab('leaderboard')} />
+        {isHost && <NavBtn active={activeTab === 'host'} icon="fa-shield-halved" label="Admin" onClick={() => setActiveTab('host')} />}
       </nav>
     </div>
   );
-};
+}
 
-const GuestLogin: React.FC<{ onLogin: (e: React.FormEvent, h: string, r: string, a: string) => void }> = ({ onLogin }) => {
-  const [handle, setHandle] = useState('');
-  const [real, setReal] = useState('');
-  const [av, setAv] = useState(NFL_TEAMS[15].id);
-  
+function NavBtn({ active, icon, label, onClick }: any) {
   return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-4 gap-2 h-32 overflow-y-auto no-scrollbar p-2 bg-black/30 rounded-2xl border border-white/5">
-        {NFL_TEAMS.map(t => (
-          <button type="button" key={t.id} onClick={() => setAv(t.id)} className={`flex flex-col items-center p-2 rounded-xl transition-all ${av === t.id ? 'bg-white/10 ring-2 ring-blue-500 scale-105' : 'opacity-40 hover:scale-105'}`}>
-            <TeamHelmet teamId={t.id} size="sm" />
-            <span className="text-[7px] font-black mt-1 text-slate-400">{t.id}</span>
-          </button>
-        ))}
+    <button onClick={onClick} className={`flex-1 py-3 flex flex-col items-center gap-1 transition-all ${active ? 'text-sky-400' : 'text-slate-500'}`}>
+      <i className={`fas ${icon} text-lg`}></i>
+      <span className="text-[8px] font-black uppercase tracking-widest">{label}</span>
+    </button>
+  );
+}
+
+function Login({ onEnter }: { onEnter: (u: User) => void }) {
+  const [handle, setHandle] = useState('');
+  const [team, setTeam] = useState(NFL_TEAMS[0].id);
+  return (
+    <div className="fixed inset-0 bg-slate-950 flex flex-col items-center justify-center p-8 text-center">
+      <div className="w-24 h-24 bg-sky-500 rounded-[2rem] flex items-center justify-center mb-6 shadow-2xl shadow-sky-500/20">
+        <i className="fas fa-football-ball text-4xl text-white"></i>
       </div>
-      <form onSubmit={e => onLogin(e, handle, real, av)} className="space-y-4 text-left">
-        <input type="text" placeholder="Huddle Handle" required value={handle} onChange={e => setHandle(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-2xl p-4 text-white font-bold outline-none focus:border-blue-500 text-sm" />
-        <input type="text" placeholder="Real Name" required value={real} onChange={e => setReal(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-2xl p-4 text-white font-bold outline-none focus:border-blue-500 text-sm" />
-        <button type="submit" className="w-full py-5 bg-white text-black rounded-2xl font-black uppercase tracking-widest text-sm shadow-xl active:scale-95 border-b-4 border-slate-300">
-          ENTER THE HUDDLE
+      <h1 className="text-4xl font-orbitron font-black mb-2 italic">SBLIX</h1>
+      <p className="text-slate-500 text-sm mb-12 uppercase font-black tracking-widest">LIX Party Hub Access</p>
+      
+      <div className="w-full max-w-xs space-y-4">
+        <input 
+          placeholder="HUDDLE HANDLE"
+          className="w-full bg-slate-900 border border-white/10 rounded-2xl p-4 text-white font-bold placeholder:text-slate-600 focus:border-sky-500 outline-none"
+          value={handle}
+          onChange={e => setHandle(e.target.value.toUpperCase().slice(0, 12))}
+        />
+        <div className="grid grid-cols-4 gap-2">
+          {NFL_TEAMS.map(t => (
+            <button 
+              key={t.id}
+              onClick={() => setTeam(t.id)}
+              className={`p-2 rounded-xl border text-[10px] font-black transition-all ${team === t.id ? 'bg-white text-black border-white' : 'bg-slate-900 border-white/5 text-slate-500'}`}
+            >
+              {t.id}
+            </button>
+          ))}
+        </div>
+        <button 
+          disabled={!handle}
+          onClick={() => onEnter({ id: generateId(), handle, name: handle, team, credits: 1000, lastSeen: Date.now() })}
+          className="w-full py-5 bg-sky-500 text-white rounded-2xl font-black uppercase tracking-widest shadow-xl active:scale-95 disabled:opacity-50"
+        >
+          JOIN HUDDLE
         </button>
-      </form>
-      <div className="pt-4 border-t border-white/5">
-         <button onClick={() => { 
-           const pin = prompt("PIN:");
-           if (pin === 'SB2026') { 
-             try { localStorage.setItem(HOST_KEY, 'true'); window.location.reload(); } catch {}
-           } 
-         }} className="text-[10px] font-black text-slate-600 uppercase tracking-widest hover:text-white">Commissioner Access</button>
+        <button 
+          onClick={() => { const p = prompt("CODE:"); if(p === 'SB59') { localStorage.setItem('sblix_host', 'true'); window.location.reload(); } }}
+          className="text-[9px] font-black text-slate-700 uppercase pt-4"
+        >
+          HOST OVERRIDE
+        </button>
       </div>
     </div>
   );
-};
+}
 
-export default App;
+function ChatView({ messages, user, onSend }: any) {
+  const [input, setInput] = useState('');
+  const endRef = useRef<HTMLDivElement>(null);
+  useEffect(() => endRef.current?.scrollIntoView({ behavior: 'smooth' }), [messages]);
+  
+  return (
+    <div className="flex flex-col h-full bg-slate-950">
+      <div className="flex-1 overflow-y-auto p-4 space-y-4 no-scrollbar">
+        {messages.map((m: ChatMessage) => (
+          <div key={m.id} className={`flex flex-col ${m.userId === user.id ? 'items-end' : 'items-start'}`}>
+            <span className="text-[8px] font-black text-slate-500 mb-1 uppercase px-1">{m.userName}</span>
+            <div className={`max-w-[85%] px-4 py-2.5 rounded-2xl text-sm ${m.isAI ? 'bg-indigo-600 border border-indigo-400 font-bold italic' : m.userId === user.id ? 'bg-sky-600 rounded-tr-none' : 'bg-slate-800 rounded-tl-none border border-white/5'}`}>
+              {m.text}
+            </div>
+          </div>
+        ))}
+        <div ref={endRef} />
+      </div>
+      <form onSubmit={e => { e.preventDefault(); if(input.trim()){ onSend(input); setInput(''); }}} className="p-4 glass border-t border-white/10 flex gap-2">
+        <input 
+          className="flex-1 bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm focus:border-sky-500 outline-none"
+          placeholder="CHIRP TO HUDDLE..."
+          value={input}
+          onChange={e => setInput(e.target.value)}
+        />
+        <button className="w-12 h-12 bg-sky-500 rounded-xl flex items-center justify-center active:scale-95 transition-all">
+          <i className="fas fa-paper-plane"></i>
+        </button>
+      </form>
+    </div>
+  );
+}
+
+function BetsView({ props, allBets, user, onBet }: any) {
+  return (
+    <div className="h-full overflow-y-auto p-4 space-y-4 no-scrollbar pb-24">
+      <h2 className="font-orbitron font-black text-sm uppercase text-slate-400 mb-2">LIVE PROPS</h2>
+      {props.map((p: PropBet) => {
+        const myBet = allBets.find((b: any) => b.userId === user.id && b.betId === p.id);
+        const stats = allBets.filter((b: any) => b.betId === p.id).length;
+        return (
+          <div key={p.id} className={`p-5 rounded-2xl border transition-all ${p.resolved ? 'opacity-40 bg-slate-900 border-white/5' : myBet ? 'border-sky-500 bg-sky-500/5' : 'bg-slate-900 border-white/10'}`}>
+            <div className="flex justify-between items-start mb-2">
+              <span className="text-[9px] font-black bg-slate-800 text-slate-500 px-2 py-0.5 rounded uppercase">{p.category}</span>
+              <span className="text-[9px] font-black text-slate-500 uppercase">{stats} PICKS</span>
+            </div>
+            <p className="font-bold text-lg leading-tight mb-4">{p.question}</p>
+            {p.resolved ? (
+              <div className="text-sm font-black text-green-400 uppercase">WINNER: {p.winner}</div>
+            ) : myBet ? (
+              <div className="text-sm font-black text-sky-400 uppercase flex items-center gap-2">
+                <i className="fas fa-lock"></i> LOCKED: {myBet.selection}
+              </div>
+            ) : (
+              <div className="flex gap-2">
+                {p.options.map(opt => (
+                  <button key={opt} onClick={() => onBet(p.id, opt)} className="flex-1 py-3 bg-slate-800 border border-white/5 rounded-xl text-xs font-black uppercase hover:bg-sky-500 transition-all active:scale-95">
+                    {opt}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function LeaderboardView({ users, allBets, props }: any) {
+  const standings = useMemo(() => {
+    return users.map((u: User) => {
+      let score = 0;
+      const uBets = allBets.filter((b: UserBet) => b.userId === u.id);
+      uBets.forEach((b: UserBet) => {
+        const prop = props.find((p: PropBet) => p.id === b.betId);
+        if (prop?.resolved) {
+          if (prop.winner === b.selection) score += 100;
+          else score -= 50;
+        }
+      });
+      return { ...u, score };
+    }).sort((a: any, b: any) => b.score - a.score);
+  }, [users, allBets, props]);
+
+  return (
+    <div className="h-full p-4 space-y-4 overflow-y-auto no-scrollbar">
+      <h2 className="font-orbitron font-black text-sm uppercase text-slate-400 mb-2">HUDDLE RANKINGS</h2>
+      {standings.map((u: any, i: number) => (
+        <div key={u.id} className="flex items-center gap-4 bg-slate-900/50 p-4 rounded-2xl border border-white/5">
+          <span className="w-8 font-orbitron font-black text-xl text-slate-700">#{i+1}</span>
+          <div className="w-10 h-10 rounded-full bg-slate-800 border border-white/10 flex items-center justify-center text-[10px] font-black">{u.team}</div>
+          <div className="flex-1">
+            <p className="font-black text-sm uppercase">{u.handle}</p>
+            <p className="text-[10px] text-slate-500 font-bold">GRID SCORE</p>
+          </div>
+          <div className="text-right">
+            <p className={`text-xl font-orbitron font-black ${u.score >= 0 ? 'text-green-500' : 'text-red-500'}`}>{u.score}</p>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function HostConsole({ state, update, props, settle, ai }: any) {
+  return (
+    <div className="h-full p-6 space-y-8 overflow-y-auto no-scrollbar pb-32">
+      <div className="space-y-4">
+        <h3 className="font-orbitron font-black text-sky-400 text-xs tracking-widest uppercase">Score Master</h3>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <p className="text-[10px] font-black text-slate-500 text-center">HOME</p>
+            <div className="flex gap-2">
+              <button onClick={() => update({ scoreHome: state.scoreHome + 3 })} className="flex-1 py-2 bg-slate-800 rounded-lg text-[10px] font-black">+3</button>
+              <button onClick={() => update({ scoreHome: state.scoreHome + 7 })} className="flex-1 py-2 bg-slate-800 rounded-lg text-[10px] font-black">+7</button>
+              <button onClick={() => update({ scoreHome: Math.max(0, state.scoreHome - 1) })} className="flex-1 py-2 bg-slate-900 border border-white/10 rounded-lg text-[10px] font-black">-1</button>
+            </div>
+          </div>
+          <div className="space-y-2">
+            <p className="text-[10px] font-black text-slate-500 text-center">AWAY</p>
+            <div className="flex gap-2">
+              <button onClick={() => update({ scoreAway: state.scoreAway + 3 })} className="flex-1 py-2 bg-slate-800 rounded-lg text-[10px] font-black">+3</button>
+              <button onClick={() => update({ scoreAway: state.scoreAway + 7 })} className="flex-1 py-2 bg-slate-800 rounded-lg text-[10px] font-black">+7</button>
+              <button onClick={() => update({ scoreAway: Math.max(0, state.scoreAway - 1) })} className="flex-1 py-2 bg-slate-900 border border-white/10 rounded-lg text-[10px] font-black">-1</button>
+            </div>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <input className="bg-slate-900 border border-white/5 p-3 rounded-xl text-xs font-black uppercase" value={state.time} onChange={e => update({ time: e.target.value })} />
+          <select className="bg-slate-900 border border-white/5 p-3 rounded-xl text-xs font-black uppercase" value={state.quarter} onChange={e => update({ quarter: e.target.value })}>
+            <option>1st</option><option>2nd</option><option>Halftime</option><option>3rd</option><option>4th</option><option>Final</option>
+          </select>
+        </div>
+        <button onClick={ai} className="w-full py-4 bg-indigo-600 rounded-2xl font-black uppercase tracking-widest shadow-lg shadow-indigo-600/20 active:scale-95">Summon Gerry (AI)</button>
+      </div>
+
+      <div className="space-y-4">
+        <h3 className="font-orbitron font-black text-red-500 text-xs tracking-widest uppercase">Settle Props</h3>
+        {props.map((p: PropBet) => (
+          <div key={p.id} className="p-4 bg-slate-900 rounded-2xl border border-white/5 space-y-3">
+            <p className="text-xs font-bold">{p.question}</p>
+            {!p.resolved ? (
+              <div className="flex gap-2">
+                {p.options.map(opt => (
+                  <button key={opt} onClick={() => settle(p.id, opt)} className="flex-1 py-2 bg-green-600 rounded-lg text-[10px] font-black uppercase">Win: {opt}</button>
+                ))}
+              </div>
+            ) : (
+              <div className="text-[10px] font-black text-slate-500 uppercase">Settled: {p.winner}</div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
