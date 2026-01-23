@@ -1,7 +1,6 @@
 
 import { GoogleGenAI } from "@google/genai";
 
-// Fix: Always use the required structure to initialize the GoogleGenAI client with the API key from process.env.API_KEY exclusively.
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 export const getAICommentary = async (
@@ -15,27 +14,20 @@ export const getAICommentary = async (
       .map((u, i) => `#${i + 1} ${u.username} (${u.credits} pts)`)
       .join(', ');
 
-    // Fix: Use the standard generateContent call as per the updated SDK guidelines.
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: `You are 'Gerry the Gambler', a legendary, high-energy Super Bowl AI commentator and smack-talk expert. 
-      You are watching a group of guests bet on the game props. 
-      
-      STANDINGS: ${standings}
+      contents: `You are 'Gerry the Gambler', a high-energy Super Bowl AI commentator. 
+      STANDINGS: ${standings || 'Nobody yet'}
       Current Game State: Quarter ${gameState.quarter}, Score: Home ${gameState.score.home} - Away ${gameState.score.away}.
-      
       Recent Chat Context:
       ${messages.slice(-5).map(m => `${m.username}: ${m.text}`).join('\n')}
       
-      Your goal: Provide a short, 1-2 sentence reaction. Mention someone from the standings. 
-      If someone is winning, celebrate their "spirit". If they're losing, encourage them to "bring it on" for the next quarter. 
-      Use sports betting lingo (parlays, locks, longshots). Be punchy and energetic.`,
+      Provide a sharp 1-2 sentence reaction. Talk like a sports betting pro. If standings exist, mention a leader. Use bold energy.`,
     });
 
-    // Fix: Access .text property directly (not as a method) on the response object.
-    return response.text || "Leaderboard is moving! Someone's about to jump the standings!";
+    return response.text?.trim() || "The atmosphere is electric! Keep those picks locked in!";
   } catch (error) {
-    console.error("Gemini Error:", error);
-    return "The atmosphere is heating up! Keep those picks coming!";
+    console.warn("[GeminiService] AI commentary failed, falling back.", error);
+    return "Someone's making a move on the leaderboards! Don't look now!";
   }
 };
