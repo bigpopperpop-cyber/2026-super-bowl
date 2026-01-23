@@ -12,10 +12,13 @@ type TabType = 'chat' | 'bets' | 'halftime' | 'leaderboard' | 'command';
 
 const generateId = () => Math.random().toString(36).substring(2, 15) + Date.now().toString(36);
 
+// Stable token for the party workspace
+const SYNC_TOKEN = "80c43666";
+
 const App: React.FC = () => {
   const [mode, setMode] = useState<AppMode>('LANDING');
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
-    const saved = localStorage.getItem('sb_user_v11');
+    const saved = localStorage.getItem('sb_user_v12');
     return saved ? JSON.parse(saved) : null;
   });
   const [users, setUsers] = useState<User[]>([]);
@@ -25,7 +28,8 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabType>('chat');
   const [partyCode, setPartyCode] = useState<string>(() => {
     const params = new URLSearchParams(window.location.search);
-    return params.get('room')?.toUpperCase() || 'SUPERBOWL_LIX_HUB';
+    const code = params.get('room')?.toUpperCase() || 'SB_LIX_PARTY';
+    return code.replace(/[^A-Z0-9_]/g, ''); // Sanitize
   });
   const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'error'>('idle');
   const [globalResetActive, setGlobalResetActive] = useState(false);
@@ -35,8 +39,9 @@ const App: React.FC = () => {
   const [isHostAuthenticated, setIsHostAuthenticated] = useState(localStorage.getItem('sb_is_host') === 'true');
 
   const lastSyncedAtRef = useRef<number>(0);
-  const resetEpochRef = useRef<number>(parseInt(localStorage.getItem('sb_reset_epoch_v11') || '0'));
+  const resetEpochRef = useRef<number>(parseInt(localStorage.getItem('sb_reset_epoch_v12') || '0'));
   const ignorePushesUntilRef = useRef<number>(0);
+  const hasSyncedOnce = useRef(false);
 
   const [gameState, setGameState] = useState<GameState>({
     quarter: 1,
@@ -45,12 +50,12 @@ const App: React.FC = () => {
     possession: 'home'
   });
 
-  // Track the most current state for the sync interval without triggering re-renders
+  // Track state for the sync loop
   const stateRef = useRef({ users, userBets, messages, propBets, gameState, partyCode, currentUser });
   useEffect(() => {
     stateRef.current = { users, userBets, messages, propBets, gameState, partyCode, currentUser };
     if (currentUser) {
-      localStorage.setItem('sb_user_v11', JSON.stringify(currentUser));
+      localStorage.setItem('sb_user_v12', JSON.stringify(currentUser));
       if (mode === 'LANDING') setMode('GAME');
     }
   }, [users, userBets, messages, propBets, gameState, partyCode, currentUser, mode]);
@@ -58,43 +63,39 @@ const App: React.FC = () => {
   const mergeState = useCallback((cloudData: any) => {
     if (!cloudData) return;
 
-    // Handle Global Nukes/Resets
-    const cloudResetEpoch = cloudData.resetEpoch || 0;
-    if (cloudResetEpoch > resetEpochRef.current) {
+    // Handle Nuke/Reset Events
+    if (cloudData.resetEpoch && cloudData.resetEpoch > resetEpochRef.current) {
       setGlobalResetActive(true);
       setMessages([]);
       setUserBets([]);
-      setPropBets(INITIAL_PROP_BETS.map(pb => ({ ...pb, resolved: false, outcome: undefined })));
-      resetEpochRef.current = cloudResetEpoch;
-      localStorage.setItem('sb_reset_epoch_v11', cloudResetEpoch.toString());
-      lastSyncedAtRef.current = cloudData.updatedAt || Date.now();
-      setTimeout(() => setGlobalResetActive(false), 3000);
+      setPropBets(INITIAL_PROP_BETS);
+      resetEpochRef.current = cloudData.resetEpoch;
+      localStorage.setItem('sb_reset_epoch_v12', cloudData.resetEpoch.toString());
+      setTimeout(() => setGlobalResetActive(false), 2000);
       return;
     }
 
-    // Advanced User Merge: Combine cloud list with current local state
+    // ROSTER MERGE: The key to the "island" problem
+    // Combine cloud users with local users, ensuring nobody is deleted
     setUsers(prev => {
       const userMap = new Map<string, User>();
-      // 1. Start with cloud users
       (cloudData.users || []).forEach((u: User) => userMap.set(u.id, u));
-      // 2. Overlay local users (keeps rosters consistent during lag)
       prev.forEach(u => userMap.set(u.id, u));
-      // 3. Ensure "Me" is always present and updated
       if (stateRef.current.currentUser) {
         userMap.set(stateRef.current.currentUser.id, stateRef.current.currentUser);
       }
       return Array.from(userMap.values());
     });
 
-    // Message Merge
+    // CHAT MERGE
     setMessages(prev => {
       const msgMap = new Map<string, ChatMessage>(prev.map(m => [m.id, m]));
       (cloudData.messages || []).forEach((m: ChatMessage) => msgMap.set(m.id, m));
       return Array.from(msgMap.values()).sort((a, b) => a.timestamp - b.timestamp).slice(-100);
     });
 
-    // Sync Game-Wide Events (Scores, Resolutions)
-    if (cloudData.updatedAt > lastSyncedAtRef.current) {
+    // SYNC GAME DATA (ONLY IF CLOUD IS NEWER)
+    if (!cloudData.updatedAt || cloudData.updatedAt > lastSyncedAtRef.current) {
       if (cloudData.userBets) {
         setUserBets(prev => {
           const betMap = new Map<string, UserBet>(prev.map(b => [b.id, b]));
@@ -104,26 +105,25 @@ const App: React.FC = () => {
       }
       if (cloudData.gameState) setGameState(cloudData.gameState);
       if (cloudData.propBets) setPropBets(cloudData.propBets);
-      lastSyncedAtRef.current = cloudData.updatedAt;
+      if (cloudData.updatedAt) lastSyncedAtRef.current = cloudData.updatedAt;
     }
+    
+    hasSyncedOnce.current = true;
   }, [currentUser]);
 
-  const syncWithCloud = useCallback(async (forcePush: boolean = false) => {
+  const syncWithCloud = useCallback(async (isAction: boolean = false) => {
     const code = stateRef.current.partyCode;
     if (!code) return;
-    
-    // Don't pull immediately after we nuke
-    if (!forcePush && Date.now() < ignorePushesUntilRef.current) return;
+    if (!isAction && Date.now() < ignorePushesUntilRef.current) return;
 
-    // Use a unique flat key for this specific room
-    const cloudKey = `sblix_v11_${code.toLowerCase().replace(/[^a-z0-9]/g, '')}`;
-    const url = `https://api.keyvalue.xyz/${cloudKey}`;
+    // Standard URL format for keyValue.xyz
+    const url = `https://api.keyvalue.xyz/${SYNC_TOKEN}/sblix_room_${code.toLowerCase()}`;
     
     try {
       setSyncStatus('syncing');
       
-      // 1. PULL latest from cloud (with cache busting)
-      const getRes = await fetch(`${url}?cb=${Date.now()}`);
+      // 1. PULL latest (with timestamp to kill browser caching)
+      const getRes = await fetch(`${url}?t=${Date.now()}`);
       let remoteData: any = null;
       if (getRes.ok) {
         const text = await getRes.text();
@@ -133,12 +133,12 @@ const App: React.FC = () => {
         }
       }
 
-      // 2. DECIDE if we need to push
-      // We push if we just did an action (forcePush) 
-      // OR if we are the Host (maintaining scores)
-      // OR if we aren't in the cloud roster yet
+      // 2. DECIDE if we need to PUSH our data to others
+      // - Host always pushes to keep scores live
+      // - Users push if they just did an action (chat/bet)
+      // - New users push if they aren't in the cloud roster yet
       const isMeInCloud = remoteData?.users?.some((u: User) => u.id === stateRef.current.currentUser?.id);
-      const shouldPush = forcePush || isHostAuthenticated || (stateRef.current.currentUser && !isMeInCloud);
+      const shouldPush = isAction || isHostAuthenticated || (stateRef.current.currentUser && !isMeInCloud);
 
       if (shouldPush) {
         const payload = {
@@ -166,10 +166,8 @@ const App: React.FC = () => {
   }, [mergeState, isHostAuthenticated]);
 
   useEffect(() => {
-    // Initial sync
     syncWithCloud(false);
-    // Recurring sync every 3.5 seconds
-    const interval = setInterval(() => syncWithCloud(false), 3500);
+    const interval = setInterval(() => syncWithCloud(false), 4500); // 4.5s for stability
     return () => clearInterval(interval);
   }, [syncWithCloud]);
 
@@ -178,7 +176,7 @@ const App: React.FC = () => {
     if (hostKeyInput === 'SB2026') { 
       setIsHostAuthenticated(true);
       localStorage.setItem('sb_is_host', 'true');
-      alert("Commissioner Mode ON");
+      alert("Commissioner Authenticated");
     } else {
       alert("Invalid Code");
     }
@@ -196,16 +194,15 @@ const App: React.FC = () => {
     setCurrentUser(newUser);
     setUsers(prev => [...prev.filter(u => u.id !== newUser.id), newUser]);
     setMode('GAME');
-    // Immediate push to ensure they show up in the roster for everyone else
-    setTimeout(() => syncWithCloud(true), 500);
+    // Important: Immediate sync as a Guest to announce presence
+    setTimeout(() => syncWithCloud(true), 300);
   };
 
   const nukeRoom = async () => {
-    if (!confirm("☢️ CLEAR ALL GUESTS? This resets the hub for everyone.")) return;
+    if (!confirm("☢️ CLEAR ALL DATA? This removes all guests and chat for everyone.")) return;
     ignorePushesUntilRef.current = Date.now() + 8000;
     const newEpoch = Date.now();
-    const cloudKey = `sblix_v11_${partyCode.toLowerCase().replace(/[^a-z0-9]/g, '')}`;
-    const url = `https://api.keyvalue.xyz/${cloudKey}`;
+    const url = `https://api.keyvalue.xyz/${SYNC_TOKEN}/sblix_room_${partyCode.toLowerCase()}`;
     const payload = {
       resetEpoch: newEpoch,
       users: [],
@@ -217,19 +214,18 @@ const App: React.FC = () => {
     };
     await fetch(url, { method: 'POST', body: JSON.stringify(payload), headers: { 'Content-Type': 'text/plain' } });
     resetEpochRef.current = newEpoch;
-    localStorage.setItem('sb_reset_epoch_v11', newEpoch.toString());
+    localStorage.setItem('sb_reset_epoch_v12', newEpoch.toString());
     setMessages([]);
     setUserBets([]);
     setUsers([]);
     setPropBets(INITIAL_PROP_BETS);
-    alert("Hub Cleared.");
+    alert("Hub Reset.");
   };
 
   const resolveBet = (betId: string, outcome: string) => {
     const updatedProps = propBets.map(pb => pb.id === betId ? { ...pb, resolved: true, outcome } : pb);
     setPropBets(updatedProps);
     
-    // Update credits for the host locally, will sync out to everyone
     setUsers(uList => uList.map(u => {
       const b = userBets.find(ub => ub.betId === betId && ub.userId === u.id);
       if (b) {
@@ -265,10 +261,10 @@ const App: React.FC = () => {
           <h1 className="text-3xl font-black font-orbitron mb-2 tracking-tighter">SBLIX HUB</h1>
           <div className="mb-8 flex flex-col gap-1">
             <p className="text-slate-400 font-bold uppercase text-[9px] tracking-[0.3em]">
-              {isHostAuthenticated ? 'Commissioner Entry' : 'Guest Check-in'}
+              {isHostAuthenticated ? 'Commissioner Console' : 'Guest Identification'}
             </p>
             <div className="bg-slate-900/50 py-1 px-3 rounded-full border border-white/10 w-fit mx-auto text-[8px] font-black uppercase text-slate-500 tracking-widest">
-              ROOM: {partyCode}
+              HUB: {partyCode}
             </div>
           </div>
 
@@ -302,7 +298,7 @@ const App: React.FC = () => {
         <div className="fixed inset-0 z-[100] bg-red-600 flex items-center justify-center">
            <div className="text-center p-12 bg-black/80 backdrop-blur-3xl rounded-3xl border-4 border-white">
              <i className="fas fa-sync text-6xl text-white mb-6 animate-spin"></i>
-             <h2 className="text-3xl font-black font-orbitron text-white uppercase">Syncing Everyone...</h2>
+             <h2 className="text-3xl font-black font-orbitron text-white uppercase tracking-tighter">Updating Hub...</h2>
            </div>
         </div>
       )}
@@ -388,20 +384,20 @@ const App: React.FC = () => {
            {activeTab === 'command' && isHostAuthenticated && (
              <div className="flex-1 overflow-y-auto p-6 space-y-8 bg-slate-950">
                 <div className="glass-card p-6 rounded-[2rem] border-blue-900/20 bg-blue-950/5 text-center">
-                  <h2 className="text-[10px] font-black text-blue-500 uppercase tracking-widest mb-4">Connect Guests (Room: {partyCode})</h2>
+                  <h2 className="text-[10px] font-black text-blue-500 uppercase tracking-widest mb-4">Connect Your 20+ Guests (HUB: {partyCode})</h2>
                   <div className="flex flex-col items-center gap-4">
                     <div className="bg-white p-3 rounded-2xl shadow-xl">
                       <img src={qrCodeUrl} alt="QR" className="w-40 h-40" />
                     </div>
                     <button onClick={handleCopyLink} className="w-full py-4 bg-blue-600 text-white rounded-xl font-black uppercase text-[11px]">
-                      {copied ? 'LINK COPIED' : 'COPY PARTY LINK'}
+                      {copied ? 'LINK COPIED' : 'COPY INVITE LINK'}
                     </button>
-                    <p className="text-[9px] text-slate-600 uppercase font-black">Scanning this links them to your session.</p>
+                    <p className="text-[9px] text-slate-600 uppercase font-black">All guests scanning this will appear in your hub.</p>
                   </div>
                 </div>
 
                 <div className="glass-card p-6 rounded-[2rem] border-white/5">
-                   <h2 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-4 text-center">Settlement Control</h2>
+                   <h2 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-4 text-center">Outcome Settlement</h2>
                    <div className="space-y-4">
                      {propBets.map(bet => (
                        <div key={bet.id} className="p-4 bg-slate-900 rounded-xl border border-slate-800 flex flex-col gap-3">
@@ -424,7 +420,7 @@ const App: React.FC = () => {
 
                 <div className="pt-4">
                   <button onClick={nukeRoom} className="w-full py-5 bg-red-600/10 border border-red-500/20 text-red-500 rounded-2xl font-black uppercase tracking-widest text-[10px]">
-                    RESET HUB & DISCONNECT GUESTS
+                    RESET HUB & CLEAR ROSTER
                   </button>
                 </div>
              </div>
@@ -469,10 +465,10 @@ const PlayerLogin: React.FC<{ onLogin: (e: React.FormEvent, h: string, r: string
           </div>
         </div>
         <div className="space-y-4">
-          <input type="text" placeholder="Handle (e.g. Blitz)" required value={handle} onChange={e => setHandle(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-2xl p-4 text-white font-bold outline-none focus:border-red-500" />
-          <input type="text" placeholder="Real Name (John D.)" required value={realName} onChange={e => setRealName(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-2xl p-4 text-white font-bold outline-none focus:border-red-500" />
+          <input type="text" placeholder="Chat Handle" required value={handle} onChange={e => setHandle(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-2xl p-4 text-white font-bold outline-none focus:border-red-500" />
+          <input type="text" placeholder="Real Name" required value={realName} onChange={e => setRealName(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-2xl p-4 text-white font-bold outline-none focus:border-red-500" />
           <button type="submit" className="w-full py-5 bg-white text-black rounded-2xl font-black uppercase tracking-widest text-sm shadow-xl active:scale-95 transition-all">
-            {isHost ? 'ENTER AS COMMISSIONER' : 'JOIN PARTY'}
+            {isHost ? 'ENTER AS COMMISSIONER' : 'JOIN THE PARTY'}
           </button>
         </div>
       </form>
