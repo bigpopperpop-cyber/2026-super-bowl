@@ -1,7 +1,7 @@
 
 import React, { useMemo } from 'react';
-import { User, UserBet, PropBet, BetStatus } from '../types';
-import TeamHelmet from './TeamHelmet';
+import { User, UserBet, PropBet, BetStatus } from '../types.ts';
+import TeamHelmet from './TeamHelmet.tsx';
 
 interface LeaderboardProps {
   users: User[];
@@ -20,9 +20,9 @@ const Leaderboard: React.FC<LeaderboardProps> = ({ users, currentUser, propBets,
         const prop = propBets.find(p => p.id === bet.betId);
         if (prop?.resolved) {
           if (prop.outcome === bet.selection) {
-            credits += 10; // Simple scoring for now: +10 per correct prop
+            credits += 10; 
           } else {
-            credits -= 5;  // -5 per incorrect prop
+            credits -= 5;
           }
         }
       });

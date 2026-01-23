@@ -1,7 +1,8 @@
 
 import { GoogleGenAI } from "@google/genai";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+const apiKey = typeof process !== 'undefined' ? process.env.API_KEY : '';
+const ai = new GoogleGenAI({ apiKey: apiKey || '' });
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -11,6 +12,8 @@ export const getAICommentary = async (
   leaderboard: any[],
   retries = 2
 ): Promise<string> => {
+  if (!apiKey) return "The atmosphere is electric! Keep those picks locked in!";
+  
   try {
     const standings = leaderboard
       .slice(0, 5)

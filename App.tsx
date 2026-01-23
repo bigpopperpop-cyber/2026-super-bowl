@@ -4,13 +4,13 @@ import * as Y from 'yjs';
 import { WebrtcProvider } from 'y-webrtc';
 import { WebsocketProvider } from 'y-websocket';
 import { IndexeddbPersistence } from 'y-indexeddb';
-import { User, PropBet, UserBet, ChatMessage, GameState, BetStatus } from './types';
-import { INITIAL_PROP_BETS, NFL_TEAMS } from './constants';
-import { getAICommentary } from './services/geminiService';
-import BettingPanel from './components/BettingPanel';
-import ChatRoom from './components/ChatRoom';
-import Leaderboard from './components/Leaderboard';
-import TeamHelmet from './components/TeamHelmet';
+import { User, PropBet, UserBet, ChatMessage, GameState, BetStatus } from './types.ts';
+import { INITIAL_PROP_BETS, NFL_TEAMS } from './constants.tsx';
+import { getAICommentary } from './services/geminiService.ts';
+import BettingPanel from './components/BettingPanel.tsx';
+import ChatRoom from './components/ChatRoom.tsx';
+import Leaderboard from './components/Leaderboard.tsx';
+import TeamHelmet from './components/TeamHelmet.tsx';
 
 type AppMode = 'LANDING' | 'GAME';
 type TabType = 'chat' | 'bets' | 'leaderboard' | 'command';
@@ -19,10 +19,21 @@ type ConnStatus = 'CONNECTING' | 'SYNCED' | 'HYBRID_ACTIVE' | 'OFFLINE';
 const generateId = () => Math.random().toString(36).substring(2, 9);
 
 const App: React.FC = () => {
-  const [mode, setMode] = useState<AppMode>(() => localStorage.getItem('sblix_user_v24') ? 'GAME' : 'LANDING');
+  const [mode, setMode] = useState<AppMode>(() => {
+    try {
+      return localStorage.getItem('sblix_user_v24') ? 'GAME' : 'LANDING';
+    } catch {
+      return 'LANDING';
+    }
+  });
+
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
-    const saved = localStorage.getItem('sblix_user_v24');
-    return saved ? JSON.parse(saved) : null;
+    try {
+      const saved = localStorage.getItem('sblix_user_v24');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
   });
 
   const [users, setUsers] = useState<User[]>([]);
@@ -37,15 +48,19 @@ const App: React.FC = () => {
 
   const [activeTab, setActiveTab] = useState<TabType>('chat');
   const [isAiLoading, setIsAiLoading] = useState(false);
-  const [isHost, setIsHost] = useState(localStorage.getItem('sblix_host_v24') === 'true');
-  const [hostKeyInput, setHostKeyInput] = useState('');
+  const [isHost, setIsHost] = useState(() => {
+    try {
+      return localStorage.getItem('sblix_host_v24') === 'true';
+    } catch {
+      return false;
+    }
+  });
 
   const partyCode = useMemo(() => {
     const params = new URLSearchParams(window.location.search);
     return (params.get('room') || 'SBLIX').toUpperCase();
   }, []);
 
-  // Y.js Document State Initialization
   const { doc, sharedGame, sharedMessages, sharedProps, sharedUsers, sharedUserBets } = useMemo(() => {
     const d = new Y.Doc();
     return {
@@ -62,11 +77,8 @@ const App: React.FC = () => {
     if (!currentUser) return;
 
     const roomName = `sblix-v24-mesh-${partyCode}`;
-    
-    // 1. Persistence Layer (IndexedDB)
     const persistence = new IndexeddbPersistence(roomName, doc);
     
-    // 2. Hybrid Delivery Layer
     const webrtcProvider = new WebrtcProvider(roomName, doc, {
       signaling: [
         'wss://signaling.yjs.dev',
@@ -98,7 +110,6 @@ const App: React.FC = () => {
     webrtcProvider.on('status', updateStatus);
     wsProvider.on('status', updateStatus);
 
-    // Sync Handlers
     const syncGame = () => {
       const data = sharedGame.toJSON();
       if (Object.keys(data).length > 0) {
@@ -139,13 +150,11 @@ const App: React.FC = () => {
     };
     sharedProps.observe(syncProps);
 
-    // Heartbeat for User Awareness
     const heartbeat = setInterval(() => {
       sharedUsers.set(currentUser.id, { ...currentUser, lastPing: Date.now() });
       updateStatus();
     }, 10000);
 
-    // Initial Registration & Sync
     sharedUsers.set(currentUser.id, { ...currentUser, lastPing: Date.now() });
     syncGame(); syncMessages(); syncUsers(); syncProps(); syncUserBets();
 
@@ -233,7 +242,9 @@ const App: React.FC = () => {
             e.preventDefault();
             const newUser = { id: generateId(), username: h, realName: r, avatar: t, credits: 0 };
             setCurrentUser(newUser);
-            localStorage.setItem('sblix_user_v24', JSON.stringify(newUser));
+            try {
+              localStorage.setItem('sblix_user_v24', JSON.stringify(newUser));
+            } catch {}
             setMode('GAME');
           }} isHost={isHost} />
         </div>
@@ -390,7 +401,15 @@ const GuestLogin: React.FC<{ onLogin: (e: React.FormEvent, h: string, r: string,
         </button>
       </form>
       <div className="pt-4 border-t border-white/5">
-         <button onClick={() => { if (prompt("PIN:") === 'SB2026') { localStorage.setItem('sblix_host_v24', 'true'); window.location.reload(); }}} className="text-[10px] font-black text-slate-600 uppercase tracking-widest hover:text-white transition-colors">Commissioner Access</button>
+         <button onClick={() => { 
+           const pin = prompt("PIN:");
+           if (pin === 'SB2026') { 
+             try {
+               localStorage.setItem('sblix_host_v24', 'true'); 
+               window.location.reload(); 
+             } catch {}
+           } 
+         }} className="text-[10px] font-black text-slate-600 uppercase tracking-widest hover:text-white transition-colors">Commissioner Access</button>
       </div>
     </div>
   );
