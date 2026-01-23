@@ -140,7 +140,7 @@ const App: React.FC = () => {
       <div className="fixed inset-0 nfl-gradient flex items-center justify-center p-6 overflow-y-auto">
         <div className="max-w-md w-full glass-card p-8 rounded-[3rem] text-center shadow-2xl border-white/20">
           <div className="w-20 h-20 bg-white rounded-3xl mx-auto flex items-center justify-center mb-6 shadow-2xl rotate-3 border-4 border-red-600">
-            <i className="fas fa-mesh-gradient text-red-600 text-4xl animate-pulse"></i>
+            <i className="fas fa-tower-broadcast text-red-600 text-4xl animate-pulse"></i>
           </div>
           <h1 className="text-3xl font-black font-orbitron mb-2 tracking-tighter">SBLIX MESH</h1>
           <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest mb-8">P2P HUDDLE: {partyCode}</p>
@@ -207,96 +207,138 @@ const App: React.FC = () => {
         )}
         {activeTab === 'command' && isHost && (
           <div className="flex-1 overflow-y-auto p-6 space-y-8 pb-24">
+             {/* COMMAND HEADER */}
+             <div className="flex items-center justify-between mb-2">
+                <div>
+                   <h2 className="text-sm font-black font-orbitron text-white">COMMISSIONER HUB</h2>
+                   <p className="text-[8px] font-black text-slate-500 uppercase tracking-[0.2em]">ROOM ID: {partyCode}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                   <div className="flex items-center gap-1 bg-green-500/10 px-2 py-0.5 rounded border border-green-500/20">
+                      <div className="w-1 h-1 bg-green-500 rounded-full"></div>
+                      <span className="text-[7px] text-green-500 font-black uppercase tracking-tighter">Mesh Sync: Online</span>
+                   </div>
+                   <div className="flex items-center gap-1 bg-red-600/10 px-2 py-0.5 rounded border border-red-600/20">
+                      <div className="w-1 h-1 bg-red-600 rounded-full animate-pulse"></div>
+                      <span className="text-[7px] text-red-500 font-black uppercase tracking-tighter">Live Broadcast</span>
+                   </div>
+                </div>
+             </div>
+
              {/* AI TRIGGER */}
              <div className="bg-indigo-950/40 border border-indigo-500/30 rounded-[2rem] p-6 shadow-2xl">
-                <button onClick={onTriggerAiCommentary} disabled={isAiLoading} className={`w-full py-4 rounded-xl font-black uppercase text-xs flex items-center justify-center gap-2 ${isAiLoading ? 'bg-slate-800 text-slate-500' : 'bg-indigo-600 text-white shadow-xl'}`}>
+                <button onClick={onTriggerAiCommentary} disabled={isAiLoading} className={`w-full py-4 rounded-xl font-black uppercase text-xs flex items-center justify-center gap-2 transition-all ${isAiLoading ? 'bg-slate-800 text-slate-500' : 'bg-indigo-600 text-white shadow-xl hover:bg-indigo-500 active:scale-95 border-b-4 border-indigo-800'}`}>
                   {isAiLoading ? <i className="fas fa-spinner fa-spin"></i> : <i className="fas fa-bolt"></i>}
-                  {isAiLoading ? 'SYNCING AI...' : 'SUMMON GERRY THE GAMBLER'}
+                  {isAiLoading ? 'GENERATING...' : 'SUMMON GERRY THE GAMBLER'}
                 </button>
+                <p className="text-[8px] text-indigo-400/50 mt-3 text-center uppercase font-black tracking-widest italic">Broadcast smack talk to all guests</p>
              </div>
 
              {/* LIVE SCOREBOARD CONSOLE */}
-             <div className="bg-slate-900 border border-slate-800 rounded-[2rem] p-6 shadow-2xl relative">
-                <div className="absolute top-4 right-4 flex items-center gap-1.5 bg-red-600/10 px-2 py-1 rounded-full border border-red-600/30">
-                  <div className="w-1 h-1 bg-red-600 rounded-full animate-ping"></div>
-                  <span className="text-[7px] text-red-500 font-black uppercase tracking-tighter">Live Broadcast</span>
-                </div>
+             <div className="bg-slate-900 border border-slate-800 rounded-[2rem] p-6 shadow-2xl">
                 <h3 className="text-center text-[10px] font-black text-blue-400 uppercase tracking-widest mb-8">WAR ROOM SCORE CONSOLE</h3>
                 <div className="grid grid-cols-2 gap-8 mb-8">
                    <div className="text-center">
                       <p className="text-[10px] font-black text-slate-500 uppercase mb-2">HOME</p>
-                      <div className="text-5xl font-black font-orbitron mb-4 text-white">{gameState.score.home}</div>
+                      <div className="text-5xl font-black font-orbitron mb-4 text-white drop-shadow-[0_0_10px_rgba(255,255,255,0.1)]">{gameState.score.home}</div>
                       <div className="grid grid-cols-2 gap-2">
-                        <button onClick={() => updateGame({ scoreHome: gameState.score.home + 6 })} className="bg-blue-600 text-[9px] py-2 rounded-lg font-black">+6 TD</button>
-                        <button onClick={() => updateGame({ scoreHome: gameState.score.home + 3 })} className="bg-blue-800 text-[9px] py-2 rounded-lg font-black">+3 FG</button>
-                        <button onClick={() => updateGame({ scoreHome: Math.max(0, gameState.score.home - 1) })} className="bg-slate-800 text-[9px] py-2 rounded-lg font-black">-1 ERR</button>
-                        <button onClick={() => updateGame({ scoreHome: gameState.score.home + 1 })} className="bg-slate-700 text-[9px] py-2 rounded-lg font-black">+1 PAT</button>
+                        <button onClick={() => updateGame({ scoreHome: gameState.score.home + 6 })} className="bg-blue-600 text-[9px] py-2 rounded-lg font-black shadow-lg">+6 TD</button>
+                        <button onClick={() => updateGame({ scoreHome: gameState.score.home + 3 })} className="bg-blue-800 text-[9px] py-2 rounded-lg font-black shadow-lg">+3 FG</button>
+                        <button onClick={() => updateGame({ scoreHome: Math.max(0, gameState.score.home - 1) })} className="bg-slate-800 text-[9px] py-2 rounded-lg font-black shadow-lg">-1 ERR</button>
+                        <button onClick={() => updateGame({ scoreHome: gameState.score.home + 1 })} className="bg-slate-700 text-[9px] py-2 rounded-lg font-black shadow-lg">+1 PAT</button>
                       </div>
                    </div>
                    <div className="text-center">
                       <p className="text-[10px] font-black text-slate-500 uppercase mb-2">AWAY</p>
-                      <div className="text-5xl font-black font-orbitron mb-4 text-white">{gameState.score.away}</div>
+                      <div className="text-5xl font-black font-orbitron mb-4 text-white drop-shadow-[0_0_10px_rgba(255,255,255,0.1)]">{gameState.score.away}</div>
                       <div className="grid grid-cols-2 gap-2">
-                        <button onClick={() => updateGame({ scoreAway: gameState.score.away + 6 })} className="bg-red-600 text-[9px] py-2 rounded-lg font-black">+6 TD</button>
-                        <button onClick={() => updateGame({ scoreAway: gameState.score.away + 3 })} className="bg-red-800 text-[9px] py-2 rounded-lg font-black">+3 FG</button>
-                        <button onClick={() => updateGame({ scoreAway: Math.max(0, gameState.score.away - 1) })} className="bg-slate-800 text-[9px] py-2 rounded-lg font-black">-1 ERR</button>
-                        <button onClick={() => updateGame({ scoreAway: gameState.score.away + 1 })} className="bg-slate-700 text-[9px] py-2 rounded-lg font-black">+1 PAT</button>
+                        <button onClick={() => updateGame({ scoreAway: gameState.score.away + 6 })} className="bg-red-600 text-[9px] py-2 rounded-lg font-black shadow-lg">+6 TD</button>
+                        <button onClick={() => updateGame({ scoreAway: gameState.score.away + 3 })} className="bg-red-800 text-[9px] py-2 rounded-lg font-black shadow-lg">+3 FG</button>
+                        <button onClick={() => updateGame({ scoreAway: Math.max(0, gameState.score.away - 1) })} className="bg-slate-800 text-[9px] py-2 rounded-lg font-black shadow-lg">-1 ERR</button>
+                        <button onClick={() => updateGame({ scoreAway: gameState.score.away + 1 })} className="bg-slate-700 text-[9px] py-2 rounded-lg font-black shadow-lg">+1 PAT</button>
                       </div>
                    </div>
                 </div>
 
                 <div className="border-t border-slate-800 pt-6 space-y-6">
                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-black text-slate-500 uppercase">Quarter</span>
+                      <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Quarter Period</span>
                       <div className="flex gap-1.5">
                          {[1, 2, 3, 4, 'OT'].map(q => (
                            <button key={q} onClick={() => updateGame({ quarter: typeof q === 'string' ? 5 : q })} 
-                             className={`w-9 h-9 rounded-xl text-[10px] font-black ${gameState.quarter === (q === 'OT' ? 5 : q) ? 'bg-white text-black' : 'bg-slate-800 text-slate-500'}`}>{q}</button>
+                             className={`w-9 h-9 rounded-xl text-[10px] font-black transition-all ${gameState.quarter === (q === 'OT' ? 5 : q) ? 'bg-white text-black shadow-xl scale-110' : 'bg-slate-800 text-slate-500'}`}>{q}</button>
                          ))}
                       </div>
                    </div>
                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-black text-slate-500 uppercase">Possession</span>
+                      <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Possession</span>
                       <div className="flex bg-slate-950 rounded-xl p-1 border border-slate-800">
-                         <button onClick={() => updateGame({ possession: 'home' })} className={`px-5 py-2.5 rounded-lg text-[10px] font-black ${gameState.possession === 'home' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-600'}`}>HOME</button>
-                         <button onClick={() => updateGame({ possession: 'away' })} className={`px-5 py-2.5 rounded-lg text-[10px] font-black ${gameState.possession === 'away' ? 'bg-red-600 text-white shadow-lg' : 'text-slate-600'}`}>AWAY</button>
+                         <button onClick={() => updateGame({ possession: 'home' })} className={`px-5 py-2.5 rounded-lg text-[10px] font-black transition-all ${gameState.possession === 'home' ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-600'}`}>HOME</button>
+                         <button onClick={() => updateGame({ possession: 'away' })} className={`px-5 py-2.5 rounded-lg text-[10px] font-black transition-all ${gameState.possession === 'away' ? 'bg-red-600 text-white shadow-lg' : 'text-slate-600'}`}>AWAY</button>
                       </div>
                    </div>
                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-black text-slate-500 uppercase">Clock</span>
-                      <input type="text" value={gameState.timeRemaining} onChange={e => updateGame({ timeRemaining: e.target.value })} className="bg-black border border-slate-700 rounded-xl px-4 py-2 text-sm font-black text-center w-24 text-blue-400" />
+                      <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Game Clock</span>
+                      <input type="text" value={gameState.timeRemaining} onChange={e => updateGame({ timeRemaining: e.target.value })} className="bg-black border border-slate-700 rounded-xl px-4 py-2 text-sm font-black text-center w-24 text-blue-400 outline-none focus:border-blue-500" />
                    </div>
                 </div>
              </div>
 
              {/* PROP SETTLEMENT */}
              <div className="space-y-4">
-                <h3 className="text-center text-[10px] font-black text-slate-600 uppercase tracking-widest">SETTLE PROPS</h3>
+                <h3 className="text-center text-[10px] font-black text-slate-600 uppercase tracking-widest">SETTLE LIVE PROPS</h3>
                 {propBets.map(bet => (
-                  <div key={bet.id} className={`p-5 bg-slate-900 border rounded-2xl ${bet.resolved ? 'opacity-50 border-slate-800' : 'border-slate-700'}`}>
+                  <div key={bet.id} className={`p-5 bg-slate-900 border rounded-2xl transition-all ${bet.resolved ? 'opacity-40 border-slate-800 scale-95' : 'border-slate-700 shadow-xl'}`}>
                     <p className="text-xs font-black text-slate-200 mb-4">{bet.question}</p>
                     <div className="flex gap-2">
                       {bet.options.map(opt => (
                         <button key={opt} onClick={() => room.get('props').get(bet.id).put({ resolved: true, outcome: opt })} 
-                          className={`flex-1 py-4 rounded-xl text-[10px] font-black uppercase ${bet.outcome === opt ? 'bg-green-600 text-white' : 'bg-slate-800 text-slate-500'}`}>{opt}</button>
+                          className={`flex-1 py-4 rounded-xl text-[10px] font-black uppercase transition-all ${bet.outcome === opt ? 'bg-green-600 text-white shadow-lg' : 'bg-slate-800 text-slate-500'}`}>
+                          {opt}
+                        </button>
                       ))}
                     </div>
                   </div>
                 ))}
              </div>
+
+             {/* RECRUIT GUESTS / QR CODE */}
+             <div className="glass-card p-8 rounded-[3rem] text-center border-white/10 shadow-2xl">
+                <h2 className="text-[10px] font-black text-blue-400 uppercase tracking-[0.3em] mb-6">RECRUIT THE SQUAD</h2>
+                <div className="bg-white p-4 rounded-3xl w-fit mx-auto shadow-[0_0_30px_rgba(255,255,255,0.2)] mb-6 transform hover:scale-105 transition-transform">
+                   <img 
+                    src={`https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(window.location.origin + window.location.pathname + '?room=' + partyCode)}`} 
+                    alt="Invite QR Code" 
+                    className="w-48 h-48"
+                   />
+                </div>
+                <div className="space-y-3">
+                   <button 
+                    onClick={() => { 
+                      const link = window.location.origin + window.location.pathname + '?room=' + partyCode;
+                      navigator.clipboard.writeText(link); 
+                      alert("Invite Link Copied to Clipboard!"); 
+                    }} 
+                    className="w-full py-5 bg-blue-600 text-white rounded-2xl font-black uppercase tracking-widest text-xs shadow-xl active:scale-95 transition-all border-b-4 border-blue-800"
+                   >
+                    COPY INVITE LINK
+                   </button>
+                   <p className="text-[8px] text-slate-500 uppercase font-black tracking-widest">GUESTS WILL JOIN HUDDLE: {partyCode}</p>
+                </div>
+             </div>
           </div>
         )}
       </main>
 
-      <nav className="bg-slate-900 border-t border-slate-800 pb-safe flex shrink-0 shadow-2xl">
+      <nav className="bg-slate-900 border-t border-slate-800 pb-safe flex shrink-0 shadow-[0_-10px_40px_rgba(0,0,0,0.5)]">
           {[
             { id: 'chat', icon: 'fa-comments', label: 'Chat' },
             { id: 'bets', icon: 'fa-ticket-alt', label: 'Props' },
             { id: 'leaderboard', icon: 'fa-trophy', label: 'Rankings' },
             ...(isHost ? [{ id: 'command', icon: 'fa-user-shield', label: 'Commish' }] : [])
           ].map(tab => (
-            <button key={tab.id} onClick={() => setActiveTab(tab.id as TabType)} className={`flex-1 py-5 flex flex-col items-center gap-1.5 ${activeTab === tab.id ? 'text-red-600 bg-red-600/5' : 'text-slate-600'}`}>
-              <i className={`fas ${tab.icon} text-xl`}></i>
+            <button key={tab.id} onClick={() => setActiveTab(tab.id as TabType)} className={`flex-1 py-5 flex flex-col items-center gap-1.5 transition-all ${activeTab === tab.id ? 'text-red-600 bg-red-600/5' : 'text-slate-600 hover:text-slate-400'}`}>
+              <i className={`fas ${tab.icon} text-xl ${activeTab === tab.id ? 'animate-pulse' : ''}`}></i>
               <span className="text-[9px] font-black uppercase tracking-widest">{tab.label}</span>
             </button>
           ))}
@@ -314,16 +356,16 @@ const GuestLogin: React.FC<{ onLogin: (e: React.FormEvent, h: string, r: string,
     <div className="space-y-6">
       <div className="grid grid-cols-4 gap-2 h-40 overflow-y-auto no-scrollbar p-2 bg-black/30 rounded-2xl border border-white/5">
         {NFL_TEAMS.map(t => (
-          <button type="button" key={t.id} onClick={() => setAv(t.id)} className={`flex flex-col items-center p-2 rounded-xl transition-all ${av === t.id ? 'bg-white/10 ring-2 ring-red-500' : 'opacity-40 hover:opacity-100'}`}>
+          <button type="button" key={t.id} onClick={() => setAv(t.id)} className={`flex flex-col items-center p-2 rounded-xl transition-all ${av === t.id ? 'bg-white/10 ring-2 ring-red-500 scale-105' : 'opacity-40 hover:opacity-100 hover:scale-105'}`}>
             <TeamHelmet teamId={t.id} size="sm" />
             <span className="text-[8px] font-black mt-1 text-slate-400">{t.id}</span>
           </button>
         ))}
       </div>
       <div className="space-y-4 text-left">
-        <input type="text" placeholder="Chat Handle" required value={handle} onChange={e => setHandle(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-2xl p-4 text-white font-bold outline-none focus:border-red-500 text-sm" />
-        <input type="text" placeholder="Real Name" required value={real} onChange={e => setReal(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-2xl p-4 text-white font-bold outline-none focus:border-red-500 text-sm" />
-        <button type="submit" onClick={e => onLogin(e, handle, real, av)} className="w-full py-5 bg-white text-black rounded-2xl font-black uppercase tracking-widest text-sm shadow-xl active:scale-95 transition-all">
+        <input type="text" placeholder="Choose a Handle" required value={handle} onChange={e => setHandle(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-2xl p-4 text-white font-bold outline-none focus:border-red-500 text-sm placeholder:text-slate-600" />
+        <input type="text" placeholder="Your Real Name" required value={real} onChange={e => setReal(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-2xl p-4 text-white font-bold outline-none focus:border-red-500 text-sm placeholder:text-slate-600" />
+        <button type="submit" onClick={e => onLogin(e, handle, real, av)} className="w-full py-5 bg-white text-black rounded-2xl font-black uppercase tracking-widest text-sm shadow-xl active:scale-95 transition-all border-b-4 border-slate-300">
           {isHost ? 'LAUNCH COMMISSIONER WAR ROOM' : 'JOIN THE HUDDLE'}
         </button>
       </div>
