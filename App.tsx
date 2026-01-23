@@ -10,17 +10,17 @@ import Leaderboard from './components/Leaderboard';
 type AppMode = 'LANDING' | 'GAME';
 type TabType = 'chat' | 'bets' | 'halftime' | 'leaderboard' | 'command';
 
-const generateId = () => Math.random().toString(36).substring(2, 9) + Date.now().toString(36).substring(4, 8);
+const generateId = () => Math.random().toString(36).substring(2, 7) + Date.now().toString(36).substring(5, 9);
 
-// TITAN-SYNC CONFIG
-const TITAN_NS = "titan_sblix_v14"; // New namespace for a clean slate
+// OMNI-SYNC ARCHITECTURE
+const SYNC_VERSION = "omni_v15_final";
 const API_BASE = "https://api.keyvalue.xyz/a6b7c8d9";
-const LOBBY_SHARDS = 8; // Number of "Join" slots to prevent collisions
+const MAX_LANES = 25; // Supports up to 25 simultaneous guests
 
 const App: React.FC = () => {
   const [mode, setMode] = useState<AppMode>('LANDING');
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
-    const saved = localStorage.getItem('sblix_u_v14');
+    const saved = localStorage.getItem('sblix_user_v15');
     return saved ? JSON.parse(saved) : null;
   });
   
@@ -30,147 +30,152 @@ const App: React.FC = () => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [activeTab, setActiveTab] = useState<TabType>('chat');
   const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'error' | 'connected'>('idle');
-  const [diag, setDiag] = useState<string>("Initializing...");
+  const [activeLanes, setActiveLanes] = useState<number[]>([]);
   
   const [partyCode] = useState<string>(() => {
     const params = new URLSearchParams(window.location.search);
-    const room = (params.get('room') || 'SBLIX').toUpperCase();
-    return room;
+    return (params.get('room') || params.get('code') || 'SBLIX').toUpperCase();
   });
 
-  const [isHost, setIsHost] = useState(localStorage.getItem('sblix_h_v14') === 'true');
+  const [isHost, setIsHost] = useState(localStorage.getItem('sblix_is_host_v15') === 'true');
   const [hostKeyInput, setHostKeyInput] = useState('');
   const [gameState, setGameState] = useState<GameState>({
     quarter: 1, timeRemaining: "15:00", score: { home: 0, away: 0 }, possession: 'home'
   });
 
-  // PERSISTENT REFERENCES
+  // REFS FOR SYNC STABILITY
+  const pulse = useRef(0);
   const outbox = useRef<ChatMessage[]>([]);
-  const lastSync = useRef(0);
   const isSyncing = useRef(false);
   const stateRef = useRef({ users, messages, gameState, propBets, isHost, currentUser, partyCode });
 
   useEffect(() => {
     stateRef.current = { users, messages, gameState, propBets, isHost, currentUser, partyCode };
-    if (currentUser) localStorage.setItem('sblix_u_v14', JSON.stringify(currentUser));
-    localStorage.setItem('sblix_h_v14', isHost.toString());
+    if (currentUser) localStorage.setItem('sblix_user_v15', JSON.stringify(currentUser));
+    localStorage.setItem('sblix_is_host_v15', isHost.toString());
   }, [users, messages, gameState, propBets, isHost, currentUser, partyCode]);
 
-  // TITAN SYNC ENGINE
-  const runTitanSync = useCallback(async () => {
+  // ASSIGN DETERMINISTIC LANE (1-25)
+  const getMyLane = (id: string) => {
+    let hash = 0;
+    for (let i = 0; i < id.length; i++) hash = id.charCodeAt(i) + ((hash << 5) - hash);
+    return (Math.abs(hash) % MAX_LANES) + 1;
+  };
+
+  const runOmniSync = useCallback(async () => {
     if (isSyncing.current || !currentUser) return;
     isSyncing.current = true;
     setSyncStatus('syncing');
 
-    const room = stateRef.current.partyCode.toLowerCase();
-    const masterKey = `${TITAN_NS}_${room}_master`;
-    const cb = `?cb=${Date.now()}`; // CACHE BUSTER FOR IOS
+    const prefix = `${SYNC_VERSION}_${stateRef.current.partyCode.toLowerCase()}`;
+    const masterKey = `${prefix}_master_pulse`;
+    const myLaneNum = getMyLane(currentUser.id);
+    const myLaneKey = `${prefix}_lane_${myLaneNum}`;
+    const cb = `?cb=${Date.now()}`;
 
     try {
-      // 1. ALL USERS: Send Handshake to random Lobby Slot
-      const myShard = (parseInt(currentUser.id.substring(0, 2), 36) % LOBBY_SHARDS) + 1;
-      const shardKey = `${TITAN_NS}_${room}_lobby_${myShard}`;
+      // 1. ALL DEVICES: Update their Private Lane (No collisions)
+      pulse.current += 1;
+      const myUpdate = {
+        u: currentUser,
+        out: [...outbox.current],
+        p: pulse.current,
+        t: Date.now()
+      };
       
-      setDiag(`Broadcasting to Shard ${myShard}...`);
-      
-      // Post to personal inbox (Zero collision)
-      const myInboxKey = `${TITAN_NS}_${room}_user_${currentUser.id.substring(0, 6)}`;
-      await fetch(`${API_BASE}/${myInboxKey}`, {
+      await fetch(`${API_BASE}/${myLaneKey}`, {
         method: 'POST',
         mode: 'cors',
-        body: JSON.stringify({
-          u: currentUser,
-          msgs: outbox.current,
-          ts: Date.now()
-        }),
+        body: JSON.stringify(myUpdate),
         headers: { 'Content-Type': 'text/plain' }
       });
 
-      // 2. HUB (HOST): HARVEST & BROADCAST
+      // 2. HOST: FULL BRUTE-FORCE SWEEP
       if (isHost) {
-        setDiag("Host: Harvesting Inboxes...");
-        // In a real env, we'd list keys, but here we scan the roster we have + lobby shards
-        const harvestedMsgs = [...stateRef.current.messages];
-        const harvestedUsers = new Map<string, User>();
-        harvestedUsers.set(currentUser.id, currentUser);
-
-        // Scan all potential user boxes (based on current roster)
-        const boxesToScan = stateRef.current.users.map(u => u.id.substring(0, 6));
-        const scanPromises = boxesToScan.map(boxId => 
-          fetch(`${API_BASE}/${TITAN_NS}_${room}_user_${boxId}${cb}`).then(r => r.ok ? r.json() : null).catch(() => null)
+        // Fetch ALL 25 lanes simultaneously
+        const sweepPromises = Array.from({ length: MAX_LANES }, (_, i) => 
+          fetch(`${API_BASE}/${prefix}_lane_${i + 1}${cb}`).then(r => r.ok ? r.json() : null).catch(() => null)
         );
 
-        const inboxData = await Promise.all(scanPromises);
-        inboxData.forEach(data => {
-          if (data && Date.now() - data.ts < 60000) {
-            harvestedUsers.set(data.u.id, data.u);
-            if (data.msgs) {
-              data.msgs.forEach((m: ChatMessage) => {
-                if (!harvestedMsgs.find(ex => ex.id === m.id)) harvestedMsgs.push(m);
+        const allLaneData = await Promise.all(sweepPromises);
+        const discoveredUsers: User[] = [currentUser];
+        const discoveredMsgs: ChatMessage[] = [...stateRef.current.messages];
+        const msgIds = new Set(discoveredMsgs.map(m => m.id));
+        const lanesShowingLife: number[] = [myLaneNum];
+
+        allLaneData.forEach((lane, idx) => {
+          const laneIdx = idx + 1;
+          if (!lane || laneIdx === myLaneNum) return;
+          
+          // If lane updated in the last 2 minutes, it's alive
+          if (Date.now() - lane.t < 120000) {
+            lanesShowingLife.push(laneIdx);
+            discoveredUsers.push(lane.u);
+            if (lane.out) {
+              lane.out.forEach((m: ChatMessage) => {
+                if (!msgIds.has(m.id)) {
+                  discoveredMsgs.push(m);
+                  msgIds.add(m.id);
+                }
               });
             }
           }
         });
 
-        const finalUsers = Array.from(harvestedUsers.values());
-        const finalMsgs = harvestedMsgs.sort((a,b) => a.timestamp - b.timestamp).slice(-80);
-
-        const masterPayload = {
-          users: finalUsers,
+        // Broadcast Master State
+        const finalMsgs = discoveredMsgs.sort((a,b) => a.timestamp - b.timestamp).slice(-60);
+        const masterData = {
+          users: discoveredUsers,
           messages: finalMsgs,
-          gameState: stateRef.current.gameState,
-          propBets: stateRef.current.propBets,
+          game: stateRef.current.gameState,
+          props: stateRef.current.propBets,
           ts: Date.now()
         };
 
         await fetch(`${API_BASE}/${masterKey}`, {
           method: 'POST',
           mode: 'cors',
-          body: JSON.stringify(masterPayload),
+          body: JSON.stringify(masterData),
           headers: { 'Content-Type': 'text/plain' }
         });
 
-        setUsers(finalUsers);
+        setUsers(discoveredUsers);
         setMessages(finalMsgs);
-        setDiag(`Host Active: ${finalUsers.length} Users`);
+        setActiveLanes(lanesShowingLife);
+        outbox.current = outbox.current.filter(m => !msgIds.has(m.id));
       } else {
-        // 3. GUESTS: LISTEN TO MASTER PULSE
-        setDiag("Guest: Listening for Pulse...");
-        const resp = await fetch(`${API_BASE}/${masterKey}${cb}`);
-        if (resp.ok) {
-          const master = await resp.json();
-          if (master && Date.now() - master.ts < 45000) {
+        // 3. GUESTS: Pull Master Data
+        const masterResp = await fetch(`${API_BASE}/${masterKey}${cb}`);
+        if (masterResp.ok) {
+          const master = await masterResp.json();
+          // 5 minute fallback for master pulse
+          if (master && Date.now() - master.ts < 300000) {
             setUsers(master.users || []);
             setMessages(master.messages || []);
-            setGameState(master.gameState);
-            setPropBets(master.propBets);
-            setDiag(`Sync OK: ${master.users?.length} Online`);
+            setGameState(master.game);
+            setPropBets(master.props);
             
-            // Clear outbox if host has picked them up
+            // Clear items host has acknowledged
             const hostMsgIds = new Set(master.messages.map((m: any) => m.id));
             outbox.current = outbox.current.filter(m => !hostMsgIds.has(m.id));
-          } else {
-            setDiag("Searching for Host...");
           }
         }
       }
       setSyncStatus('connected');
     } catch (e) {
       setSyncStatus('error');
-      setDiag("Network Congestion...");
     } finally {
       isSyncing.current = false;
-      lastSync.current = Date.now();
     }
   }, [currentUser, isHost]);
 
   useEffect(() => {
     if (mode === 'GAME' && currentUser) {
-      runTitanSync();
-      const interval = setInterval(runTitanSync, isHost ? 4000 : 3000);
+      runOmniSync();
+      const interval = setInterval(runOmniSync, isHost ? 4000 : 3000);
       return () => clearInterval(interval);
     }
-  }, [mode, currentUser, isHost, runTitanSync]);
+  }, [mode, currentUser, isHost, runOmniSync]);
 
   const onSendMessage = (text: string) => {
     if (!currentUser) return;
@@ -181,8 +186,7 @@ const App: React.FC = () => {
 
   const onJoin = (e: React.FormEvent, handle: string, real: string, av: string) => {
     e.preventDefault();
-    const id = currentUser?.id || generateId();
-    setCurrentUser({ id, username: handle, realName: real, avatar: av, credits: 0 });
+    setCurrentUser({ id: generateId(), username: handle, realName: real, avatar: av, credits: 0 });
     setMode('GAME');
   };
 
@@ -191,19 +195,19 @@ const App: React.FC = () => {
       <div className="fixed inset-0 nfl-gradient flex items-center justify-center p-6">
         <div className="max-w-md w-full glass-card p-8 rounded-[3rem] text-center shadow-2xl border-white/20">
           <div className="w-16 h-16 bg-white rounded-2xl mx-auto flex items-center justify-center mb-6 shadow-2xl rotate-3 border-4 border-red-600">
-            <i className="fas fa-microchip text-red-600 text-3xl"></i>
+            <i className="fas fa-radar text-red-600 text-3xl animate-pulse"></i>
           </div>
-          <h1 className="text-3xl font-black font-orbitron mb-2 uppercase tracking-tighter">SBLIX TITAN</h1>
-          <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest mb-8">TITAN SYNC ACTIVE: {partyCode}</p>
+          <h1 className="text-3xl font-black font-orbitron mb-2 uppercase tracking-tighter">SBLIX OMNI</h1>
+          <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest mb-8">BRUTE-FORCE SYNC: {partyCode}</p>
           <GuestLogin onLogin={onJoin} isHost={isHost} />
           {!isHost && (
             <div className="mt-8 pt-6 border-t border-white/5">
               <form onSubmit={e => {
                 e.preventDefault();
-                if (hostKeyInput === 'SB2026') { setIsHost(true); setHostKeyInput(''); setActiveTab('command'); } else alert("PIN Incorrect");
+                if (hostKeyInput === 'SB2026') { setIsHost(true); setHostKeyInput(''); setActiveTab('command'); } else alert("PIN Error");
               }} className="flex gap-2">
                 <input type="password" placeholder="COMMISH PIN" value={hostKeyInput} onChange={e => setHostKeyInput(e.target.value)} className="flex-1 bg-black/40 border border-slate-700 rounded-xl px-4 py-2 text-xs font-bold outline-none text-white focus:border-red-500" />
-                <button type="submit" className="bg-slate-800 text-slate-400 px-4 py-2 rounded-xl text-[9px] font-black uppercase">AUTH</button>
+                <button type="submit" className="bg-slate-800 text-slate-400 px-4 py-2 rounded-xl text-[9px] font-black uppercase">Verify</button>
               </form>
             </div>
           )}
@@ -221,12 +225,13 @@ const App: React.FC = () => {
             <div className="flex items-center gap-1.5 bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-[9px]">
               <span className="font-orbitron font-black text-slate-200">Q{gameState.quarter}</span>
               <span className="text-slate-400 font-bold">{gameState.score.home}-{gameState.score.away}</span>
-              <div className={`w-1.5 h-1.5 rounded-full ${syncStatus === 'syncing' ? 'bg-blue-500 animate-pulse' : syncStatus === 'error' ? 'bg-red-500 animate-bounce' : 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,1)]'}`}></div>
+              <div className={`w-1.5 h-1.5 rounded-full ${syncStatus === 'syncing' ? 'bg-blue-500 animate-pulse' : syncStatus === 'error' ? 'bg-red-500' : 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,1)]'}`}></div>
             </div>
           </div>
           <div className="flex items-center gap-3">
              <div className="text-[7px] font-black text-slate-500 uppercase tracking-tighter text-right">
-                {diag}<br/><span className="text-slate-700">MOD: TITAN-14</span>
+                OMNI-SCAN: {activeLanes.length}/{MAX_LANES} ACTIVE<br/>
+                <span className={syncStatus === 'connected' ? 'text-green-500' : 'text-slate-700'}>DATA MESH STABLE</span>
              </div>
              <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center border border-slate-700 text-lg">
                {currentUser.avatar}
@@ -245,28 +250,29 @@ const App: React.FC = () => {
           <div className="h-full flex flex-col overflow-hidden">
             <Leaderboard users={users} currentUser={currentUser} propBets={propBets} userBets={userBets} />
             <div className="p-4 border-t border-white/5 bg-slate-900/50 text-center shrink-0">
-               <div className="flex justify-center gap-1.5 mb-2">
-                  {Array.from({length: Math.min(users.length, 12)}).map((_, i) => (
-                    <div key={i} className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></div>
+               <h4 className="text-[8px] font-black text-slate-600 uppercase tracking-[0.2em] mb-3 text-center">OMNI-LANE RADAR</h4>
+               <div className="grid grid-cols-5 gap-1.5 w-fit mx-auto mb-3">
+                  {Array.from({length: MAX_LANES}).map((_, i) => (
+                    <div key={i} className={`w-2.5 h-2.5 rounded-sm transition-all duration-500 ${activeLanes.includes(i+1) ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.5)]' : 'bg-slate-800'}`}></div>
                   ))}
                </div>
                <p className="text-[10px] text-green-400 font-black uppercase tracking-widest">
-                 {users.length} TITAN DEVICES DISCOVERED
+                 {users.length} {users.length === 1 ? 'DEVICE' : 'DEVICES'} SYNCHRONIZED
                </p>
             </div>
           </div>
         )}
         {activeTab === 'command' && isHost && (
           <div className="flex-1 overflow-y-auto p-6 space-y-6 pb-24">
-             <div className="glass-card p-6 rounded-[2rem] text-center border-blue-500/20 bg-blue-600/5">
-                <h2 className="text-xs font-black text-blue-400 uppercase tracking-widest mb-4">Commissioner Command</h2>
+             <div className="glass-card p-6 rounded-[2rem] text-center border-blue-500/20 bg-blue-600/5 shadow-2xl">
+                <h2 className="text-xs font-black text-blue-400 uppercase tracking-widest mb-4">Commissioner Control</h2>
                 <div className="bg-white p-4 rounded-2xl w-fit mx-auto shadow-2xl mb-4">
                    <img src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(window.location.origin + window.location.pathname + '?room=' + partyCode)}`} alt="QR" />
                 </div>
-                <button onClick={() => { navigator.clipboard.writeText(window.location.origin + window.location.pathname + '?room=' + partyCode); alert("Copied!"); }} className="w-full py-4 bg-blue-600 text-white rounded-xl font-black uppercase text-xs">COPY PARTY LINK</button>
+                <button onClick={() => { navigator.clipboard.writeText(window.location.origin + window.location.pathname + '?room=' + partyCode); alert("Link Copied!"); }} className="w-full py-4 bg-blue-600 text-white rounded-xl font-black uppercase text-xs shadow-lg active:scale-95 transition-all">COPY PARTY LINK</button>
              </div>
              <div className="space-y-4">
-                <h3 className="text-center text-[10px] font-black text-slate-600 uppercase tracking-widest">Prop Management</h3>
+                <h3 className="text-center text-[10px] font-black text-slate-600 uppercase tracking-widest">Global Prop Settlement</h3>
                 {propBets.map(bet => (
                   <div key={bet.id} className="p-4 bg-slate-900 border border-slate-800 rounded-2xl shadow-lg">
                     <p className="text-xs font-bold text-slate-300 mb-3">{bet.question}</p>
@@ -275,7 +281,7 @@ const App: React.FC = () => {
                         <button key={opt} onClick={() => {
                             const upd = propBets.map(pb => pb.id === bet.id ? { ...pb, resolved: true, outcome: opt } : pb);
                             setPropBets(upd);
-                          }} className={`flex-1 py-3 rounded-lg text-[10px] font-black uppercase ${bet.outcome === opt ? 'bg-green-600 text-white' : 'bg-slate-800 text-slate-500'}`}>{opt}</button>
+                          }} className={`flex-1 py-3 rounded-lg text-[10px] font-black uppercase transition-all ${bet.outcome === opt ? 'bg-green-600 text-white shadow-lg' : 'bg-slate-800 text-slate-500 active:bg-slate-700'}`}>{opt}</button>
                       ))}
                     </div>
                   </div>
@@ -285,14 +291,14 @@ const App: React.FC = () => {
         )}
       </main>
 
-      <nav className="bg-slate-900 border-t border-slate-800 pb-safe flex shrink-0">
+      <nav className="bg-slate-900 border-t border-slate-800 pb-safe flex shrink-0 shadow-2xl">
           {[
             { id: 'chat', icon: 'fa-comments', label: 'Chat' },
-            { id: 'bets', icon: 'fa-ticket-alt', label: 'Picks' },
+            { id: 'bets', icon: 'fa-ticket-alt', label: 'Props' },
             { id: 'leaderboard', icon: 'fa-trophy', label: 'Rank' },
             ...(isHost ? [{ id: 'command', icon: 'fa-cog', label: 'Commish' }] : [])
           ].map(tab => (
-            <button key={tab.id} onClick={() => setActiveTab(tab.id as TabType)} className={`flex-1 py-4 flex flex-col items-center gap-1 ${activeTab === tab.id ? 'text-red-500 bg-red-500/5' : 'text-slate-500'}`}>
+            <button key={tab.id} onClick={() => setActiveTab(tab.id as TabType)} className={`flex-1 py-4 flex flex-col items-center gap-1 transition-all ${activeTab === tab.id ? 'text-red-500 bg-red-500/5' : 'text-slate-500'}`}>
               <i className={`fas ${tab.icon} text-lg`}></i>
               <span className="text-[8px] font-black uppercase tracking-widest">{tab.label}</span>
             </button>
@@ -316,12 +322,12 @@ const GuestLogin: React.FC<{ onLogin: (e: React.FormEvent, h: string, r: string,
         ))}
       </div>
       <div className="space-y-4 text-left">
-        <label className="text-[10px] font-black text-slate-500 uppercase ml-2 tracking-widest">Chat Handle</label>
-        <input type="text" placeholder="e.g. TouchdownKing" required value={handle} onChange={e => setHandle(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-2xl p-4 text-white font-bold outline-none focus:border-red-500 text-sm" />
-        <label className="text-[10px] font-black text-slate-500 uppercase ml-2 tracking-widest">Real Name</label>
-        <input type="text" placeholder="e.g. John Doe" required value={real} onChange={e => setReal(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-2xl p-4 text-white font-bold outline-none focus:border-red-500 text-sm" />
-        <button type="submit" onClick={e => onLogin(e, handle, real, av)} className="w-full py-5 bg-white text-black rounded-2xl font-black uppercase tracking-widest text-sm shadow-xl active:scale-95 transition-all">
-          {isHost ? 'LAUNCH AS COMMISSIONER' : 'JOIN SUPER BOWL LIX'}
+        <label className="text-[10px] font-black text-slate-500 uppercase ml-2 tracking-widest">Your Handle</label>
+        <input type="text" placeholder="Handle" required value={handle} onChange={e => setHandle(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-2xl p-4 text-white font-bold outline-none focus:border-red-500 text-sm" />
+        <label className="text-[10px] font-black text-slate-500 uppercase ml-2 tracking-widest">Real Name (John D.)</label>
+        <input type="text" placeholder="Real Name" required value={real} onChange={e => setReal(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-2xl p-4 text-white font-bold outline-none focus:border-red-500 text-sm" />
+        <button type="submit" onClick={e => onLogin(e, handle, real, av)} className="w-full py-5 bg-white text-black rounded-2xl font-black uppercase tracking-widest text-sm shadow-xl hover:bg-slate-100 transition-all active:scale-95">
+          {isHost ? 'ENTER AS COMMISSIONER' : 'JOIN SUPER BOWL HUB'}
         </button>
       </div>
     </div>
