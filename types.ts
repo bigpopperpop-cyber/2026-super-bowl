@@ -3,7 +3,7 @@ export interface User {
   id: string;
   username: string; // This is the chat name/handle
   realName: string; // This is the real name (e.g., John D.)
-  avatar: string;
+  avatar: string;   // Now stores the Team ID (e.g., 'KC', 'SF')
   credits: number;
 }
 
@@ -16,7 +16,7 @@ export enum BetStatus {
 export interface PropBet {
   id: string;
   question: string;
-  odds: number; // Decimal odds: 2.0 = 100 profit on 100 bet
+  odds: number;
   category: 'Game' | 'Player' | 'Entertainment' | 'Stats' | 'Halftime';
   resolved: boolean;
   outcome?: string;
