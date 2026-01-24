@@ -1,3 +1,5 @@
+
+// Source of truth for NFL teams and initial prop bets
 import { PropBet } from './types';
 
 export interface NFLTeam {
@@ -18,9 +20,9 @@ export const NFL_TEAMS: NFLTeam[] = [
 ];
 
 export const INITIAL_PROPS: PropBet[] = [
-  { id: '1', question: "Coin Toss Outcome?", category: 'Game', resolved: false, options: ['Heads', 'Tails'] },
-  { id: '2', question: "First Team to Score?", category: 'Game', resolved: false, options: ['Home', 'Away'] },
-  { id: '3', question: "Total Points: Over 44.5?", category: 'Stats', resolved: false, options: ['Over', 'Under'] }
+  { id: 'p-initial-1', question: "Coin Toss Outcome?", category: 'Game', resolved: false, options: ['Heads', 'Tails'] },
+  { id: 'p-initial-2', question: "First Team to Score?", category: 'Game', resolved: false, options: ['Home', 'Away'] },
+  { id: 'p-initial-3', question: "Total Points: Over 44.5?", category: 'Stats', resolved: false, options: ['Over', 'Under'] }
 ];
 
 export const AVATARS = NFL_TEAMS.map(t => t.id);

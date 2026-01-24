@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import * as Y from 'yjs';
 // @ts-ignore
@@ -10,8 +9,10 @@ import { IndexeddbPersistence } from 'y-indexeddb';
 import { User, PropBet, UserBet, GameState } from './types';
 import { INITIAL_PROPS } from './constants';
 import { generateLiveProps, resolveProps, checkGameEnd } from './services/geminiService';
+import BettingPanel from './components/BettingPanel';
+import Leaderboard from './components/Leaderboard';
 
-const STORAGE_KEY = 'sblix_sync_engine_v11';
+const STORAGE_KEY = 'sblix_party_sync_v25';
 const generateId = () => Math.random().toString(36).substring(2, 11);
 
 export default function App() {
@@ -35,134 +36,117 @@ export default function App() {
   const [presenceCount, setPresenceCount] = useState(0);
   const [isHost] = useState(() => localStorage.getItem('sblix_host') === 'true');
   const [showQR, setShowQR] = useState(false);
-  const [aiStatus, setAiStatus] = useState<'idle' | 'searching' | 'settling'>('idle');
+  const [isSynced, setIsSynced] = useState(false);
 
-  // Unified Yjs Store
+  // Use useMemo for consistent doc and map references
   const doc = useMemo(() => new Y.Doc(), []);
-  const sharedGame = doc.getMap('gameState');
-  // Explicitly type sharedProps to avoid 'unknown' return types from .get()
-  const sharedProps = doc.getMap<any>('props');
-  const sharedUserBets = doc.getArray<UserBet>('userBets');
-  const sharedUsers = doc.getMap<User>('users');
+  const sharedGame = useMemo(() => doc.getMap('gameState'), [doc]);
+  const sharedProps = useMemo(() => doc.getMap<any>('props'), [doc]);
+  const sharedUserBets = useMemo(() => doc.getArray<UserBet>('userBets'), [doc]);
+  const sharedUsers = useMemo(() => doc.getMap<User>('users'), [doc]);
 
   const providersRef = useRef<any[]>([]);
 
   useEffect(() => {
     if (!user || !roomCode) return;
 
-    const fullRoomName = `sblix-v11-${roomCode}`;
-    
-    // Cleanup old providers
+    const fullRoomName = `sblix-v25-party-${roomCode}`;
     providersRef.current.forEach(p => p.destroy());
     
-    // Persistence for offline/refreshes
+    // Persistent local and network providers
     const idb = new IndexeddbPersistence(fullRoomName, doc);
-    
-    // WebRTC for local mesh sync (fastest)
     const webrtc = new WebrtcProvider(fullRoomName, doc, { 
       signaling: ['wss://signaling.yjs.dev', 'wss://y-webrtc-signaling-us.herokuapp.com'] 
     });
-    
-    // WebSocket as reliable fallback
     const ws = new WebsocketProvider('wss://demos.yjs.dev', fullRoomName, doc);
 
     providersRef.current = [idb, webrtc, ws];
 
-    // Awareness for real-time presence (the bubble counts)
     const awareness = ws.awareness;
     awareness.setLocalStateField('user', user);
-    awareness.on('change', () => {
-      const states = Array.from(awareness.getStates().values()) as any[];
-      setPresenceCount(states.filter(s => s.user).length);
-    });
 
-    // Sync state to UI
     const syncUI = () => {
-      // 1. Users list for Leaderboard
-      const userList = Object.values(sharedUsers.toJSON()) as User[];
-      setAllUsers(userList);
+      // Permanent User Registry
+      const userRecords = sharedUsers.toJSON();
+      setAllUsers(Object.values(userRecords) as User[]);
       
-      // 2. Game Engine
+      // Game State Sync
       const g = sharedGame.toJSON() as GameState;
       if (g.quarter) setGameState(g);
 
-      // 3. User Bets
+      // Shared Bet Ledger
       setAllBets(sharedUserBets.toArray());
 
-      // 4. Props Pool
-      const pData = sharedProps.toJSON();
+      // Prop Pool Merging
+      const pData = sharedProps.toJSON() as Record<string, PropBet>;
       setProps(prev => {
-        // Merge initial + dynamic props
         const base = INITIAL_PROPS.map(p => pData[p.id] ? { ...p, ...pData[p.id] } : p);
         const dynamic = Object.values(pData).filter((p: any) => p.isAiGenerated && !INITIAL_PROPS.find(x => x.id === p.id));
         return [...base, ...(dynamic as PropBet[])];
       });
+
+      // Presence Tracking
+      const states = Array.from(awareness.getStates().values()) as any[];
+      setPresenceCount(states.filter(s => s.user).length);
+      setIsSynced(true);
     };
 
     sharedUsers.observe(syncUI);
     sharedGame.observe(syncUI);
     sharedProps.observe(syncUI);
     sharedUserBets.observe(syncUI);
+    awareness.on('change', syncUI);
     
-    // Register current user in the shared persistence map
+    // Add me to the room record permanently
     sharedUsers.set(user.id, user);
 
     doc.on('update', syncUI);
+    idb.on('synced', syncUI);
     syncUI();
 
     return () => {
       providersRef.current.forEach(p => p.destroy());
     };
-  }, [user, doc, roomCode]);
+  }, [user, roomCode, doc]);
 
-  // AI Host Logic
+  // Oracle process (Host only)
   useEffect(() => {
     if (!isHost || gameState.isGameOver) return;
-
-    const runOracle = async () => {
+    
+    const runOracleCycle = async () => {
       try {
-        setAiStatus('searching');
         const gameCheck = await checkGameEnd();
-        
         if (gameCheck.is3rdQuarterOver) {
           sharedGame.set('isGameOver', true);
           sharedGame.set('quarter', 'FINAL');
-          setAiStatus('idle');
-          return;
-        }
-
-        if (gameCheck.homeScore !== gameState.scoreHome || gameCheck.awayScore !== gameState.scoreAway) {
+        } else {
           sharedGame.set('scoreHome', gameCheck.homeScore);
           sharedGame.set('scoreAway', gameCheck.awayScore);
         }
 
-        setAiStatus('settling');
         const resolutions = await resolveProps(props);
         resolutions.forEach(res => {
-          // Cast retrieved value to PropBet or any to avoid "unknown" type errors in strict TS environments
-          const existing = (sharedProps.get(res.id) as PropBet | undefined) || props.find(x => x.id === res.id);
-          if (existing && !existing.resolved) {
-            sharedProps.set(res.id, { ...existing, resolved: true, winner: res.winner });
+          const p = (sharedProps.get(res.id) as PropBet | undefined) || props.find(x => x.id === res.id);
+          if (p && !p.resolved) {
+            sharedProps.set(res.id, { ...p, resolved: true, winner: res.winner });
           }
         });
 
-        if (props.filter(p => !p.resolved).length < 3) {
-          setAiStatus('searching');
+        if (props.filter(p => !p.resolved).length < 2) {
           const newProps = await generateLiveProps(gameState);
           newProps.forEach(np => {
             const id = generateId();
-            sharedProps.set(id, { ...np, id, resolved: false, isAiGenerated: true });
+            sharedProps.set(id, { ...np, id, resolved: false, isAiGenerated: true } as PropBet);
           });
         }
-        setAiStatus('idle');
       } catch (e) {
-        setAiStatus('idle');
+        console.error("Oracle cycle failed:", e);
       }
     };
 
-    const interval = setInterval(runOracle, 60000);
+    const interval = setInterval(runOracleCycle, 60000);
     return () => clearInterval(interval);
-  }, [isHost, gameState, props]);
+  }, [isHost, gameState, props, sharedGame, sharedProps]);
 
   const handlePlaceBet = (betId: string, selection: string) => {
     if (gameState.isGameOver) return;
@@ -188,26 +172,24 @@ export default function App() {
   }
 
   return (
-    <div className="flex flex-col h-screen bg-[#020617] text-white max-w-lg mx-auto border-x border-white/5 shadow-2xl overflow-hidden">
-      {/* Broadcast Header */}
+    <div className="flex flex-col h-screen bg-[#020617] text-white max-w-lg mx-auto border-x border-white/5 shadow-2xl overflow-hidden font-inter">
       <header className="shrink-0 z-50">
         <div className="p-4 bg-slate-900/90 backdrop-blur-xl border-b border-white/10">
           <div className="flex justify-between items-center mb-4">
             <div className="flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_10px_#10b981]" />
-              <h1 className="font-orbitron font-black text-xl italic tracking-tighter text-white uppercase">SBLIX <span className="text-emerald-400">HUB</span></h1>
+              <div className={`w-2 h-2 rounded-full ${isSynced ? 'bg-emerald-500 shadow-[0_0_10px_#10b981] animate-pulse' : 'bg-red-500'}`} />
+              <h1 className="font-orbitron font-black text-xl italic tracking-tighter text-white uppercase">SBLIX <span className="text-emerald-400">SYNC</span></h1>
             </div>
             <div className="flex items-center gap-3">
                <div className="flex items-center gap-1.5 bg-white/5 px-2.5 py-1 rounded-full border border-white/10">
-                 <i className="fas fa-users text-[8px] text-emerald-400"></i>
-                 <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest">{allUsers.length} JOINED</span>
+                 <i className="fas fa-tower-broadcast text-[8px] text-emerald-400"></i>
+                 <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest">{presenceCount} SYNCED</span>
                </div>
-               <button onClick={() => setShowQR(true)} className="text-emerald-400"><i className="fas fa-qrcode"></i></button>
+               <button onClick={() => setShowQR(true)} className="text-emerald-400 transition-transform active:scale-90"><i className="fas fa-qrcode"></i></button>
             </div>
           </div>
 
           <div className="bg-gradient-to-b from-slate-800 to-black rounded-2xl p-0.5 border border-white/10 shadow-2xl relative overflow-hidden">
-            {gameState.isGameOver && <div className="absolute inset-0 bg-red-600/40 backdrop-blur-sm flex items-center justify-center z-10 font-orbitron font-black text-xs tracking-[0.4em]">POOL CLOSED</div>}
             <div className="flex justify-between items-stretch h-16 bg-black/90 rounded-[14px] overflow-hidden">
               <div className="flex-1 flex flex-col items-center justify-center bg-gradient-to-r from-emerald-950/20 to-transparent">
                 <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">HOME</span>
@@ -229,32 +211,26 @@ export default function App() {
            <div className="flex animate-ticker gap-10 items-center">
              {settledResults.length > 0 ? settledResults.map(p => (
                <div key={p.id} className="flex items-center gap-2">
-                 <span className="text-[9px] font-black text-slate-400 uppercase">{p.question.substring(0,20)}...</span>
+                 <span className="text-[9px] font-black text-slate-400 uppercase">{p.question.substring(0,25)}:</span>
                  <span className="text-[9px] font-black text-emerald-400 uppercase font-orbitron">{p.winner}</span>
                </div>
              )) : (
-               <div className="text-[9px] font-black text-slate-600 uppercase tracking-[0.2em] px-4">Waiting for first results... AI is monitoring live feed...</div>
+               <div className="text-[9px] font-black text-slate-600 uppercase tracking-[0.2em] px-4">AI monitoring live feed... all huddle phones syncing records...</div>
              )}
-             {settledResults.map(p => (
-               <div key={p.id+'_dup'} className="flex items-center gap-2">
-                 <span className="text-[9px] font-black text-slate-400 uppercase">{p.question.substring(0,20)}...</span>
-                 <span className="text-[9px] font-black text-emerald-400 uppercase font-orbitron">{p.winner}</span>
-               </div>
-             ))}
            </div>
         </div>
       </header>
 
-      <main className="flex-1 overflow-y-auto no-scrollbar bg-slate-950">
+      <main className="flex-1 overflow-hidden bg-slate-950">
         {activeTab === 'bets' ? (
-          <BetsView props={props} allBets={allBets} user={user} onBet={handlePlaceBet} isGameOver={gameState.isGameOver} />
+          <BettingPanel propBets={props} user={user} onPlaceBet={handlePlaceBet} allBets={allBets} />
         ) : (
-          <LeaderboardView users={allUsers} allBets={allBets} props={props} currentUser={user} />
+          <Leaderboard users={allUsers} currentUser={user} propBets={props} userBets={allBets} />
         )}
       </main>
 
       <nav className="bg-slate-900 border-t border-white/10 flex pb-safe shrink-0 shadow-2xl">
-        <NavBtn active={activeTab === 'bets'} icon="fa-ticket" label="Live Pool" onClick={() => setActiveTab('bets')} />
+        <NavBtn active={activeTab === 'bets'} icon="fa-ticket" label="Pool" onClick={() => setActiveTab('bets')} />
         <NavBtn active={activeTab === 'leaderboard'} icon="fa-trophy" label="Standings" onClick={() => setActiveTab('leaderboard')} />
       </nav>
 
@@ -272,105 +248,6 @@ function NavBtn({ active, icon, label, onClick }: any) {
   );
 }
 
-function BetsView({ props, allBets, user, onBet, isGameOver }: any) {
-  const sortedProps = useMemo(() => [...props].sort((a, b) => (a.resolved ? 1 : -1)), [props]);
-  
-  return (
-    <div className="p-4 space-y-4 pb-20">
-      <div className="flex justify-between items-center px-1">
-        <h2 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em]">Active Predictions</h2>
-        {isGameOver && <span className="text-[10px] font-black text-red-500 uppercase">Bets Locked</span>}
-      </div>
-      {sortedProps.map(p => {
-        const myBet = allBets.find(b => b.userId === user.id && b.betId === p.id);
-        return (
-          <div key={p.id} className={`p-5 rounded-2xl border transition-all duration-300 ${p.resolved ? 'bg-black/40 opacity-40 border-white/5' : myBet ? 'bg-emerald-500/5 border-emerald-500/30' : 'bg-slate-900 border-white/10'}`}>
-            <div className="flex justify-between items-start mb-2">
-              <span className={`text-[8px] font-black px-2 py-0.5 rounded uppercase tracking-widest ${p.category === 'PRE-GAME' ? 'bg-indigo-500/20 text-indigo-400' : 'bg-white/5 text-slate-500'}`}>{p.category}</span>
-              {p.isAiGenerated && <span className="text-[8px] font-black text-emerald-400 animate-pulse"><i className="fas fa-magic mr-1"></i> LIVE AI</span>}
-            </div>
-            <p className="font-bold text-lg mb-4 text-white leading-tight">{p.question}</p>
-            {p.resolved ? (
-              <div className="text-xs font-black text-emerald-400 uppercase flex items-center gap-2 bg-emerald-500/10 p-3 rounded-xl border border-emerald-500/20">
-                <i className="fas fa-check-circle"></i> OUTCOME: {p.winner}
-              </div>
-            ) : myBet ? (
-              <div className="text-xs font-black text-emerald-400 uppercase flex items-center gap-2 bg-emerald-500/10 p-3 rounded-xl border border-emerald-500/20">
-                <i className="fas fa-lock"></i> PICKED: {myBet.selection}
-              </div>
-            ) : isGameOver ? (
-              <div className="text-xs text-slate-600 font-bold uppercase p-3 border border-white/5 rounded-xl text-center">Locked</div>
-            ) : (
-              <div className="grid grid-cols-1 gap-2">
-                {p.options.map((opt: string) => (
-                  <button key={opt} onClick={() => onBet(p.id, opt)} className="py-4 bg-white/5 border border-white/10 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-emerald-500 hover:text-black transition-all active:scale-95 text-left px-5 flex justify-between items-center group">
-                    {opt}
-                    <i className="fas fa-chevron-right opacity-0 group-hover:opacity-100 transition-opacity"></i>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function LeaderboardView({ users, allBets, props, currentUser }: any) {
-  const leaderboard = useMemo(() => {
-    return users.map((u: any) => {
-      let score = 0;
-      let correct = 0;
-      let total = 0;
-      const uBets = allBets.filter((b: any) => b.userId === u.id);
-      uBets.forEach((b: any) => {
-        const prop = props.find((p: any) => p.id === b.betId);
-        if (prop?.resolved) {
-          total++;
-          if (prop.winner === b.selection) {
-            score += 100;
-            correct++;
-          } else {
-            score -= 50;
-          }
-        }
-      });
-      return { ...u, score, correct, total };
-    }).sort((a: any, b: any) => b.score - a.score);
-  }, [users, allBets, props]);
-
-  return (
-    <div className="p-4 space-y-4 pb-24">
-      <h2 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] px-1">Party Standings</h2>
-      <div className="space-y-3">
-        {leaderboard.length === 0 && (
-          <div className="text-center py-20 text-slate-600 text-[10px] font-black uppercase tracking-widest">Waiting for squad to sync...</div>
-        )}
-        {leaderboard.map((u: any, i: number) => {
-          const isMe = u.id === currentUser.id;
-          return (
-            <div key={u.id} className={`flex items-center gap-4 p-4 rounded-2xl border transition-all ${isMe ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-slate-900 border-white/5'}`}>
-              <span className={`font-orbitron font-black text-2xl w-8 text-center ${i === 0 ? 'text-yellow-500' : 'text-slate-700'}`}>#{i+1}</span>
-              <div className="flex-1">
-                <p className="font-black text-sm uppercase text-white flex items-center gap-2">
-                  {u.handle}
-                  {isMe && <span className="text-[7px] bg-emerald-500 text-black px-1 rounded">YOU</span>}
-                </p>
-                <p className="text-[8px] font-bold text-slate-500 uppercase tracking-widest">{u.correct} Correct • {u.total} Picked</p>
-              </div>
-              <div className="text-right">
-                <p className={`font-orbitron font-black text-xl ${u.score > 0 ? 'text-emerald-400' : u.score < 0 ? 'text-red-500' : 'text-slate-500'}`}>{u.score}</p>
-                <p className="text-[8px] font-black text-slate-500 uppercase">Points</p>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 function Login({ onEnter, initialRoom }: any) {
   const [handle, setHandle] = useState('');
   const [room, setRoom] = useState(initialRoom || '');
@@ -380,7 +257,7 @@ function Login({ onEnter, initialRoom }: any) {
         <i className="fas fa-eye text-3xl text-black"></i>
       </div>
       <h1 className="text-4xl font-orbitron font-black italic tracking-tighter text-white mb-2 uppercase">SBLIX SYNC</h1>
-      <p className="text-emerald-500 text-[10px] font-black uppercase tracking-[0.5em] mb-12">LIVE PARTY HUB</p>
+      <p className="text-emerald-500 text-[10px] font-black uppercase tracking-[0.5em] mb-12">LIVE HUDDLE HUB</p>
       <div className="w-full max-w-xs space-y-4">
         <input placeholder="ROOM CODE" value={room} onChange={e => setRoom(e.target.value.toUpperCase())} className="w-full bg-slate-900 border border-white/10 rounded-2xl p-5 text-white font-black text-center focus:border-emerald-500 outline-none" />
         <input placeholder="YOUR NAME" value={handle} onChange={e => setHandle(e.target.value.toUpperCase())} className="w-full bg-slate-900 border border-white/10 rounded-2xl p-5 text-white font-black text-center focus:border-emerald-500 outline-none" />
@@ -394,7 +271,7 @@ function QRModal({ url, onClose }: any) {
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-black/95 backdrop-blur-md">
       <div className="bg-slate-900 border border-white/10 p-10 rounded-[3rem] w-full max-w-xs text-center flex flex-col items-center gap-6 shadow-2xl">
-        <h2 className="font-orbitron font-black text-emerald-400 uppercase text-xs tracking-[0.3em]">Sync Squad</h2>
+        <h2 className="font-orbitron font-black text-emerald-400 uppercase text-xs tracking-[0.3em]">Huddle Sync</h2>
         <div className="bg-white p-4 rounded-3xl">
           <img src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(url)}&color=020617`} alt="QR" className="w-44 h-44" />
         </div>
