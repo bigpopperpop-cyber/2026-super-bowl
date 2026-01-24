@@ -1,5 +1,5 @@
 {
-  "name": "Super Bowl LIX Party Hub",
-  "description": "A real-time Super Bowl betting and chat application where guests can place prop bets, track their credits, and engage with an AI sports commentator.",
+  "name": "SBLIX Handshake",
+  "description": "Core connection layer for multi-device Super Bowl party synchronization.",
   "requestFramePermissions": []
 }

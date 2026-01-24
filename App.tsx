@@ -1,384 +1,238 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
 import * as Y from 'yjs';
 // @ts-ignore
 import { WebrtcProvider } from 'y-webrtc';
 // @ts-ignore
 import { WebsocketProvider } from 'y-websocket';
-// @ts-ignore
-import { IndexeddbPersistence } from 'y-indexeddb';
-import { GoogleGenAI, Type } from "@google/genai";
-import { User, PropBet, UserBet, GameState } from './types';
-import TeamHelmet from './components/TeamHelmet';
+import { User } from './types';
 
-const STORAGE_KEY = 'sblix_user_v3';
 const generateId = () => Math.random().toString(36).substring(2, 11);
 
 export default function App() {
   const [roomCode, setRoomCode] = useState(() => {
-    const params = new URLSearchParams(window.location.search);
-    return params.get('room')?.toUpperCase() || '';
+    return new URLSearchParams(window.location.search).get('room')?.toUpperCase() || '';
   });
 
-  const [user, setUser] = useState<User | null>(() => {
+  const [localUser, setLocalUser] = useState<User | null>(() => {
     const params = new URLSearchParams(window.location.search);
-    const urlId = params.get('u');
-    const urlName = params.get('n');
-    const urlTeam = params.get('t');
-
-    if (urlId && urlName && urlTeam) {
-      const newUser = { id: urlId, handle: urlName, name: urlName, team: urlTeam, credits: 1000 };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(newUser));
-      return newUser;
+    const uId = params.get('u');
+    const uName = params.get('n');
+    if (uId && uName) {
+      return { id: uId, name: uName, deviceType: 'mobile', lastSeen: Date.now() };
     }
-
-    const saved = localStorage.getItem(STORAGE_KEY);
-    return saved ? JSON.parse(saved) : null;
+    return null;
   });
 
-  const [isHostMode, setIsHostMode] = useState(false);
-  const [activeTab, setActiveTab] = useState<'bets' | 'standings'>('bets');
-  const [gameState, setGameState] = useState<GameState>({ scoreHome: 0, scoreAway: 0, quarter: '1st', time: '15:00', possession: 'home', isGameOver: false });
-  const [props, setProps] = useState<PropBet[]>([]);
-  const [allBets, setAllBets] = useState<UserBet[]>([]);
-  const [allUsers, setAllUsers] = useState<User[]>([]);
-  const [presenceCount, setPresenceCount] = useState(0);
+  const [view, setView] = useState<'landing' | 'host' | 'guest'>(() => {
+    if (localUser) return 'guest';
+    return 'landing';
+  });
 
-  // Mesh Sync Setup
+  // Yjs Sync Engine
   const doc = useMemo(() => new Y.Doc(), []);
-  const sharedGame = useMemo(() => doc.getMap<any>('gameState'), [doc]);
-  const sharedProps = useMemo(() => doc.getMap<PropBet>('props'), [doc]);
-  const sharedBets = useMemo(() => doc.getArray<UserBet>('userBets'), [doc]);
-  const sharedUsers = useMemo(() => doc.getMap<User>('users'), [doc]);
+  const [onlineUsers, setOnlineUsers] = useState<any[]>([]);
+  const [pings, setPings] = useState<Record<string, number>>({});
+
+  const sharedPings = useMemo(() => doc.getMap<number>('pings'), [doc]);
 
   useEffect(() => {
     if (!roomCode) return;
-    const fullRoomName = `sblix-party-v3-${roomCode}`;
-    
-    const idb = new IndexeddbPersistence(fullRoomName, doc);
-    const webrtc = new WebrtcProvider(fullRoomName, doc, { 
-      signaling: ['wss://signaling.yjs.dev', 'wss://y-webrtc-signaling-us.herokuapp.com'] 
+
+    const fullRoomName = `sblix-v5-sync-${roomCode}`;
+    const webrtc = new WebrtcProvider(fullRoomName, doc, {
+      signaling: ['wss://signaling.yjs.dev', 'wss://y-webrtc-signaling-us.herokuapp.com']
     });
     const ws = new WebsocketProvider('wss://demos.yjs.dev', fullRoomName, doc);
 
-    const sync = () => {
-      setGameState(sharedGame.toJSON() as GameState);
-      setProps(Object.values(sharedProps.toJSON() as Record<string, PropBet>));
-      setAllBets(sharedBets.toArray());
-      setAllUsers(Object.values(sharedUsers.toJSON() as Record<string, User>));
-      setPresenceCount(ws.awareness.getStates().size);
-    };
+    const awareness = ws.awareness;
 
-    sharedGame.observe(sync);
-    sharedProps.observe(sync);
-    sharedBets.observe(sync);
-    sharedUsers.observe(sync);
-    ws.awareness.on('change', sync);
-
-    if (user) {
-      sharedUsers.set(user.id, user);
-      ws.awareness.setLocalStateField('user', user);
+    if (localUser) {
+      awareness.setLocalStateField('user', localUser);
+    } else if (view === 'host') {
+      awareness.setLocalStateField('user', { id: 'host', name: 'MASTER HUB', deviceType: 'desktop' });
     }
-    
-    sync();
-    return () => { webrtc.destroy(); ws.destroy(); idb.destroy(); };
-  }, [user, roomCode, doc]);
 
-  // AI Oracle
-  useEffect(() => {
-    if (!roomCode || presenceCount === 0) return;
-    const runOracle = async () => {
-      // Always create a fresh instance of GoogleGenAI before making an API call
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      try {
-        const response = await ai.models.generateContent({
-          model: 'gemini-3-flash-preview',
-          contents: `Monitor Super Bowl LIX. Live score and suggesting 2 props. Check: ${JSON.stringify(props.filter(p => !p.resolved))}`,
-          config: {
-            tools: [{ googleSearch: {} }],
-            responseMimeType: "application/json",
-            responseSchema: {
-              type: Type.OBJECT,
-              properties: {
-                homeScore: { type: Type.NUMBER }, awayScore: { type: Type.NUMBER },
-                quarter: { type: Type.STRING }, time: { type: Type.STRING },
-                newProps: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { id: { type: Type.STRING }, question: { type: Type.STRING }, options: { type: Type.ARRAY, items: { type: Type.STRING } }, category: { type: Type.STRING } } } },
-                resolutions: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { id: { type: Type.STRING }, winner: { type: Type.STRING } } } }
-              }
-            }
-          }
-        });
-        const data = JSON.parse(response.text);
-        doc.transact(() => {
-          sharedGame.set('scoreHome', data.homeScore); sharedGame.set('scoreAway', data.awayScore);
-          sharedGame.set('quarter', data.quarter); sharedGame.set('time', data.time);
-          if (data.newProps) data.newProps.forEach((p: any) => { if (!sharedProps.has(p.id)) sharedProps.set(p.id, { ...p, resolved: false }); });
-          if (data.resolutions) data.resolutions.forEach((res: any) => { const p = sharedProps.get(res.id); if (p && !p.resolved) sharedProps.set(res.id, { ...p, resolved: true, winner: res.winner }); });
-        });
-      } catch (e) {}
+    const syncPresence = () => {
+      const states = Array.from(awareness.getStates().values());
+      setOnlineUsers(states.map((s: any) => s.user).filter(Boolean));
+      setPings(sharedPings.toJSON());
     };
-    const interval = setInterval(runOracle, 60000);
-    runOracle();
-    return () => clearInterval(interval);
-  }, [presenceCount, roomCode, doc]);
 
-  if (isHostMode || (!user && !roomCode)) {
+    awareness.on('change', syncPresence);
+    sharedPings.observe(syncPresence);
+
+    return () => {
+      webrtc.destroy();
+      ws.destroy();
+    };
+  }, [roomCode, localUser, view, doc, sharedPings]);
+
+  const triggerPing = (targetId: string) => {
+    sharedPings.set(targetId, Date.now());
+  };
+
+  // 1. Landing View
+  if (view === 'landing') {
     return (
-      <HostRegistry 
-        room={roomCode} 
-        onSetRoom={(r) => {
-          setRoomCode(r.toUpperCase());
-          const newUrl = window.location.protocol + "//" + window.location.host + window.location.pathname + `?room=${r.toUpperCase()}`;
-          window.history.pushState({ path: newUrl }, '', newUrl);
-        }}
-        onEnterGame={() => {
-          setIsHostMode(false);
-          if (!user) {
-            const hostUser = { id: 'host-main', handle: 'HOST', name: 'Host Monitor', team: 'KC', credits: 1000 };
-            setUser(hostUser);
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(hostUser));
-          }
-        }}
-      />
-    );
-  }
-
-  if (!user || !roomCode) {
-     return <div className="h-screen bg-slate-950 flex items-center justify-center p-8 text-center">
-       <div className="space-y-6">
-         <div className="w-16 h-16 bg-emerald-500 rounded-2xl mx-auto flex items-center justify-center shadow-2xl animate-bounce">
-           <i className="fas fa-link text-black"></i>
-         </div>
-         <h2 className="text-xl font-orbitron font-black text-white uppercase italic">Initializing Link...</h2>
-         <p className="text-slate-500 text-xs uppercase tracking-widest leading-loose">Waiting for Huddle Credentials.<br/>Ask your host for your QR Ticket.</p>
-         <button onClick={() => setIsHostMode(true)} className="text-[9px] font-black text-emerald-500 uppercase tracking-widest mt-8 underline">I am the Host</button>
-       </div>
-     </div>;
-  }
-
-  return (
-    <div className="flex flex-col h-screen max-w-lg mx-auto bg-[#020617] relative overflow-hidden">
-      <header className="p-4 pt-8 bg-slate-900/80 backdrop-blur-2xl border-b border-white/5 shrink-0 z-50">
-        <div className="flex justify-between items-center mb-6">
-          <div className="flex flex-col">
-            <h1 className="font-orbitron font-black text-2xl italic tracking-tighter text-white uppercase leading-none">SBLIX <span className="text-emerald-400">SYNC</span></h1>
-            <span className="text-[9px] font-black text-slate-500 uppercase tracking-[0.3em] mt-1">{roomCode}</span>
+      <div className="h-screen bg-[#020617] flex items-center justify-center p-8">
+        <div className="max-w-xs w-full space-y-8 text-center">
+          <div className="w-20 h-20 bg-emerald-500 rounded-3xl mx-auto flex items-center justify-center shadow-[0_0_40px_rgba(16,185,129,0.3)] rotate-12">
+            <i className="fas fa-signal-stream text-black text-3xl"></i>
           </div>
-          <div className="flex items-center gap-3">
-             <button onClick={() => setIsHostMode(true)} className="text-[10px] font-black text-slate-500 uppercase tracking-widest border border-white/5 px-3 py-1.5 rounded-full hover:bg-white/5 transition-all">Registry</button>
-             <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-500/10 rounded-full border border-emerald-500/20">
-              <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-              <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest">{presenceCount}</span>
-            </div>
-          </div>
-        </div>
-        
-        <div className="flex justify-between items-center bg-black/60 rounded-3xl p-6 border border-white/10 relative overflow-hidden shadow-2xl">
-          <div className="absolute inset-0 bg-gradient-to-r from-emerald-500/5 via-transparent to-indigo-500/5 animate-pulse-soft" />
-          <div className="flex flex-col items-center z-10">
-            <span className="text-[10px] font-black text-slate-500 mb-1 tracking-widest uppercase">HOME</span>
-            <span className="text-5xl font-orbitron font-black text-white">{gameState.scoreHome || 0}</span>
-          </div>
-          <div className="flex flex-col items-center text-center z-10 px-4 border-x border-white/5">
-            <span className="text-[11px] font-black text-emerald-400 mb-1 tracking-widest uppercase">{gameState.quarter || 'LIVE'}</span>
-            <span className="text-[10px] font-bold text-slate-400 font-mono tracking-widest">{gameState.time || '15:00'}</span>
-          </div>
-          <div className="flex flex-col items-center z-10">
-            <span className="text-[10px] font-black text-slate-500 mb-1 tracking-widest uppercase">AWAY</span>
-            <span className="text-5xl font-orbitron font-black text-white">{gameState.scoreAway || 0}</span>
-          </div>
-        </div>
-      </header>
-
-      <main className="flex-1 overflow-y-auto no-scrollbar pb-24 p-4 space-y-4">
-        {activeTab === 'bets' ? (
-          <BettingHub props={props} onBet={(id, sel) => {
-            const bet: UserBet = { id: generateId(), userId: user.id, betId: id, selection: sel, timestamp: Date.now() };
-            sharedBets.push([bet]);
-          }} user={user} bets={allBets} />
-        ) : (
-          <Standings users={allUsers} bets={allBets} props={props} />
-        )}
-      </main>
-
-      <nav className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-lg bg-slate-900/95 backdrop-blur-xl border-t border-white/5 flex pb-safe shadow-2xl z-50">
-        <NavBtn active={activeTab === 'bets'} icon="fa-ticket" label="Huddle Pool" onClick={() => setActiveTab('bets')} />
-        <NavBtn active={activeTab === 'standings'} icon="fa-trophy" label="Live Standings" onClick={() => setActiveTab('standings')} />
-      </nav>
-    </div>
-  );
-}
-
-function HostRegistry({ room, onSetRoom, onEnterGame }: any) {
-  const [guestName, setGuestName] = useState('');
-  const [guestTeam, setGuestTeam] = useState('HOME');
-  const [registry, setRegistry] = useState<any[]>([]);
-
-  const addGuest = () => {
-    if (!guestName || !room) return;
-    const g = { id: generateId(), name: guestName.toUpperCase(), team: guestTeam };
-    setRegistry([g, ...registry]);
-    setGuestName('');
-  };
-
-  const getGuestUrl = (g: any) => {
-    return `${window.location.origin}${window.location.pathname}?room=${room}&u=${g.id}&n=${encodeURIComponent(g.name)}&t=${g.team}`;
-  };
-
-  return (
-    <div className="min-h-screen bg-[#020617] text-white p-6 pb-24 font-inter">
-      <div className="max-w-4xl mx-auto space-y-12">
-        <div className="flex justify-between items-end">
           <div className="space-y-2">
-            <h1 className="text-5xl font-orbitron font-black italic tracking-tighter uppercase leading-tight">Host<br/><span className="text-emerald-400">Registry</span></h1>
-            <p className="text-[10px] font-black text-slate-500 tracking-[0.5em] uppercase">Super Bowl LIX Huddle</p>
+            <h1 className="text-4xl font-orbitron font-black text-white italic tracking-tighter">SBLIX SYNC</h1>
+            <p className="text-[10px] font-black text-slate-500 tracking-[0.4em] uppercase">Multi-Device Handshake</p>
           </div>
-          <button onClick={onEnterGame} className="px-8 py-4 bg-emerald-500 text-black font-black uppercase text-xs rounded-2xl shadow-2xl active:scale-95 transition-all">Launch Scoreboard</button>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
-          <div className="space-y-6">
-            <div className="glass-card p-8 space-y-6">
-              <h2 className="text-xs font-black uppercase tracking-[0.3em] text-slate-400">1. Define Room</h2>
-              <input 
-                placeholder="ROOM CODE (E.G. HUDDLE)" 
-                value={room} 
-                onChange={e => onSetRoom(e.target.value)}
-                className="w-full bg-black/40 border border-white/10 rounded-2xl p-5 text-xl font-black text-white outline-none focus:border-emerald-500 transition-all placeholder:text-slate-800"
-              />
-            </div>
-
-            <div className="glass-card p-8 space-y-6">
-              <h2 className="text-xs font-black uppercase tracking-[0.3em] text-slate-400">2. Check-In Guest</h2>
-              <div className="space-y-4">
-                <input 
-                  placeholder="GUEST NAME" 
-                  value={guestName} 
-                  onChange={e => setGuestName(e.target.value)}
-                  className="w-full bg-black/40 border border-white/10 rounded-2xl p-5 text-xl font-black text-white outline-none focus:border-emerald-500 transition-all placeholder:text-slate-800"
-                />
-                <div className="grid grid-cols-2 gap-3">
-                  <button onClick={() => setGuestTeam('KC')} className={`p-4 rounded-2xl font-black text-[10px] border transition-all ${guestTeam === 'KC' ? 'bg-emerald-600 border-emerald-400 text-white' : 'bg-slate-900 border-white/5 text-slate-500'}`}>HOME TEAM</button>
-                  {/* Fixed duplicate onClick and missing setTeamAlternative by merging into setGuestTeam('SF') */}
-                  <button onClick={() => setGuestTeam('SF')} className={`p-4 rounded-2xl font-black text-[10px] border transition-all ${guestTeam !== 'KC' ? 'bg-indigo-600 border-indigo-400 text-white' : 'bg-slate-900 border-white/5 text-slate-500'}`}>AWAY TEAM</button>
-                </div>
-                <button 
-                  disabled={!guestName || !room}
-                  onClick={addGuest}
-                  className="w-full py-5 bg-white text-black font-black uppercase tracking-widest rounded-2xl shadow-2xl active:scale-95 disabled:opacity-30 transition-all"
-                >
-                  Generate Guest Ticket
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <div className="space-y-6">
-             <h2 className="text-xs font-black uppercase tracking-[0.3em] text-slate-400 px-2">Active Huddle Tickets</h2>
-             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {registry.map(g => (
-                  <div key={g.id} className="glass-card p-6 flex flex-col items-center gap-4 text-center group animate-in zoom-in duration-300">
-                    <div className="bg-white p-2 rounded-2xl shadow-xl transition-transform group-hover:scale-105">
-                      <img 
-                        src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(getGuestUrl(g))}&color=020617`} 
-                        alt="QR" 
-                        className="w-32 h-32"
-                      />
-                    </div>
-                    <div>
-                      <div className="font-orbitron font-black text-sm uppercase text-white truncate w-32">{g.name}</div>
-                      <div className="text-[9px] font-black text-emerald-500 uppercase tracking-widest">TEAM {g.team}</div>
-                    </div>
-                  </div>
-                ))}
-                {registry.length === 0 && (
-                  <div className="col-span-2 py-20 border-2 border-dashed border-white/5 rounded-[3rem] flex flex-col items-center justify-center opacity-20">
-                    <i className="fas fa-qrcode text-4xl mb-4"></i>
-                    <p className="text-[10px] font-black uppercase tracking-widest">Waiting for entries...</p>
-                  </div>
-                )}
-             </div>
+          <div className="space-y-4">
+            <button 
+              onClick={() => setView('host')}
+              className="w-full py-5 bg-white text-black font-black uppercase tracking-widest rounded-2xl shadow-xl active:scale-95 transition-all"
+            >
+              Start as Host
+            </button>
+            <p className="text-slate-600 text-[9px] uppercase font-black tracking-widest">Laptop / TV Recommended</p>
           </div>
         </div>
       </div>
-    </div>
-  );
-}
+    );
+  }
 
-function BettingHub({ props, onBet, user, bets }: any) {
-  return (
-    <div className="space-y-4">
-      {props.length === 0 && (
-        <div className="py-20 text-center flex flex-col items-center gap-4 text-slate-700">
-          <i className="fas fa-radar-alt text-4xl animate-spin-slow"></i>
-          <p className="text-[10px] font-black uppercase tracking-[0.3em]">AI Oracle Monitoring Play...</p>
-        </div>
-      )}
-      {props.map((p: PropBet) => {
-        const myBet = bets.find((b: UserBet) => b.betId === p.id && b.userId === user.id);
-        return (
-          <div key={p.id} className={`glass-card p-6 border-l-4 transition-all ${p.resolved ? 'opacity-50' : 'border-l-emerald-500/30'}`}>
-            <div className="flex justify-between items-start mb-4">
-              <span className="text-[9px] font-black px-2 py-1 bg-slate-800 rounded text-slate-400 uppercase tracking-widest">{p.category}</span>
-              {p.resolved && <span className="text-[10px] font-black text-yellow-500 uppercase">{p.winner} Won</span>}
+  // 2. Host Registry View
+  if (view === 'host') {
+    return (
+      <div className="min-h-screen bg-[#020617] text-white p-10 font-inter">
+        <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-16">
+          <div className="space-y-12">
+            <div className="space-y-4">
+              <h1 className="text-6xl font-orbitron font-black italic text-emerald-400">HOST<br/><span className="text-white">COMMAND</span></h1>
+              <div className="flex items-center gap-4">
+                <input 
+                  placeholder="SET ROOM CODE (e.g. PARTY)" 
+                  value={roomCode}
+                  onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
+                  className="bg-slate-900 border border-white/10 rounded-xl px-6 py-4 text-xl font-black focus:border-emerald-500 outline-none w-full"
+                />
+              </div>
             </div>
-            <h3 className="text-lg font-bold text-white mb-6 leading-tight">{p.question}</h3>
-            <div className="grid grid-cols-2 gap-3">
-              {p.options.map(opt => (
-                <button
-                  key={opt}
-                  disabled={!!myBet || p.resolved}
-                  onClick={() => onBet(p.id, opt)}
-                  className={`py-4 rounded-2xl text-[11px] font-black uppercase tracking-wider transition-all border ${
-                    myBet?.selection === opt ? 'bg-emerald-600 border-emerald-400 text-white shadow-lg' : 
-                    p.resolved && p.winner === opt ? 'bg-yellow-600/20 border-yellow-500 text-yellow-500' :
-                    'bg-slate-900 border-white/5 text-slate-500'
-                  }`}
+
+            <div className="glass-card p-8 space-y-6">
+              <h2 className="text-xs font-black uppercase tracking-[0.3em] text-slate-500">Add Guest to Manifest</h2>
+              <div className="flex gap-4">
+                <input id="guestNameInput" placeholder="Enter Guest Name" className="flex-1 bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white font-bold outline-none focus:border-emerald-500" />
+                <button 
+                  onClick={() => {
+                    const el = document.getElementById('guestNameInput') as HTMLInputElement;
+                    if (!el.value || !roomCode) return;
+                    const id = generateId();
+                    const name = el.value.toUpperCase();
+                    const url = `${window.location.origin}${window.location.pathname}?room=${roomCode}&u=${id}&n=${encodeURIComponent(name)}`;
+                    // We just log it or add to a list to generate QR
+                    const newGuest = { id, name, url };
+                    (window as any).guestList = [...((window as any).guestList || []), newGuest];
+                    el.value = '';
+                    setOnlineUsers(prev => [...prev]); // Trigger re-render
+                  }}
+                  className="bg-emerald-500 text-black px-6 py-3 rounded-xl font-black uppercase text-xs"
                 >
-                  {opt}
+                  Generate Ticket
                 </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {((window as any).guestList || []).map((g: any) => (
+                <div key={g.id} className="glass-card p-6 flex flex-col items-center gap-4 border-white/5 hover:border-emerald-500/50 transition-all group">
+                  <div className="bg-white p-2 rounded-xl">
+                    <img src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(g.url)}&color=020617`} className="w-24 h-24" />
+                  </div>
+                  <div className="text-center">
+                    <div className="font-black text-white text-sm uppercase">{g.name}</div>
+                    <div className="text-[8px] text-slate-500 uppercase font-black tracking-widest mt-1">Ticket Issued</div>
+                  </div>
+                </div>
               ))}
             </div>
           </div>
-        );
-      })}
-    </div>
-  );
-}
 
-function Standings({ users, bets, props }: any) {
-  const scores = useMemo(() => {
-    return users.map((u: User) => {
-      let score = 1000;
-      bets.filter((b: UserBet) => b.userId === u.id).forEach((b: UserBet) => {
-        const p = props.find((p: PropBet) => p.id === b.betId);
-        if (p?.resolved) score += p.winner === b.selection ? 500 : -200;
-      });
-      return { ...u, score };
-    }).sort((a: any, b: any) => b.score - a.score);
-  }, [users, bets, props]);
-
-  return (
-    <div className="space-y-3">
-      {scores.map((s: any, i: number) => (
-        <div key={s.id} className="glass-card p-4 flex items-center justify-between border-white/5">
-          <div className="flex items-center gap-4">
-            <span className={`w-8 h-8 rounded-xl flex items-center justify-center font-black text-xs ${i === 0 ? 'bg-amber-500 text-black' : 'bg-slate-800 text-slate-500'}`}>{i + 1}</span>
-            <div className="font-bold text-sm text-white uppercase">{s.handle}</div>
-          </div>
-          <div className="text-right">
-            <div className="font-orbitron font-black text-emerald-400">{s.score}</div>
+          <div className="space-y-8">
+            <div className="flex justify-between items-center">
+              <h2 className="text-xs font-black uppercase tracking-[0.3em] text-slate-500">Live Mesh ({onlineUsers.length})</h2>
+              <div className="flex items-center gap-2 text-emerald-500 text-[10px] font-black uppercase">
+                <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                Mesh Active
+              </div>
+            </div>
+            
+            <div className="space-y-3">
+              {onlineUsers.map(u => (
+                <div key={u.id} className="glass-card p-5 flex items-center justify-between border-white/5 animate-in slide-in-from-right duration-500">
+                  <div className="flex items-center gap-4">
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center text-xs font-black ${u.deviceType === 'desktop' ? 'bg-indigo-500' : 'bg-emerald-500 text-black'}`}>
+                      <i className={`fas fa-${u.deviceType === 'desktop' ? 'laptop' : 'mobile-alt'}`}></i>
+                    </div>
+                    <div>
+                      <div className="font-black text-white uppercase">{u.name}</div>
+                      <div className="text-[9px] text-slate-500 uppercase tracking-widest">{u.id}</div>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => triggerPing(u.id)}
+                    className="p-3 bg-white/5 hover:bg-emerald-500 hover:text-black rounded-xl transition-all border border-white/5"
+                  >
+                    <i className="fas fa-bullhorn"></i>
+                  </button>
+                </div>
+              ))}
+              {onlineUsers.length === 0 && (
+                <div className="py-20 border-2 border-dashed border-white/5 rounded-[3rem] text-center opacity-20">
+                  <p className="text-[10px] font-black uppercase tracking-[0.5em]">Awaiting Handshake...</p>
+                </div>
+              )}
+            </div>
           </div>
         </div>
-      ))}
-    </div>
-  );
-}
+      </div>
+    );
+  }
 
-function NavBtn({ active, icon, label, onClick }: any) {
-  return (
-    <button onClick={onClick} className={`flex-1 py-4 flex flex-col items-center gap-1 transition-all ${active ? 'text-emerald-400' : 'text-slate-500'}`}>
-      <i className={`fas ${icon} text-lg`}></i>
-      <span className="text-[9px] font-black uppercase tracking-widest">{label}</span>
-    </button>
-  );
+  // 3. Guest (Phone) View
+  if (view === 'guest' && localUser) {
+    const isPinged = Date.now() - (pings[localUser.id] || 0) < 2000;
+
+    return (
+      <div className={`h-screen flex flex-col items-center justify-center p-8 transition-colors duration-300 ${isPinged ? 'bg-emerald-500' : 'bg-[#020617]'}`}>
+        <div className={`text-center space-y-10 transition-transform ${isPinged ? 'scale-110' : 'scale-100'}`}>
+          <div className={`w-32 h-32 rounded-[2.5rem] mx-auto flex items-center justify-center shadow-2xl transition-all ${isPinged ? 'bg-white text-emerald-500' : 'bg-emerald-500 text-black shadow-emerald-500/20'}`}>
+            <i className={`fas fa-${isPinged ? 'bell animate-bounce' : 'check-circle'} text-5xl`}></i>
+          </div>
+          
+          <div className="space-y-2">
+            <h2 className={`text-xs font-black uppercase tracking-[0.4em] ${isPinged ? 'text-emerald-900' : 'text-emerald-500'}`}>Handshake Successful</h2>
+            <h1 className={`text-4xl font-orbitron font-black uppercase italic ${isPinged ? 'text-black' : 'text-white'}`}>{localUser.name}</h1>
+          </div>
+
+          <div className="space-y-4">
+             <div className={`px-6 py-4 rounded-2xl border transition-all ${isPinged ? 'bg-black/10 border-black/20 text-black' : 'bg-white/5 border-white/10 text-slate-400'}`}>
+                <p className="text-[10px] font-black uppercase tracking-widest mb-1">Room Identity</p>
+                <p className="text-xl font-orbitron font-black text-white">{roomCode}</p>
+             </div>
+             
+             <button 
+               onClick={() => triggerPing('host')}
+               className={`w-full py-6 rounded-2xl font-black uppercase tracking-widest shadow-2xl active:scale-95 transition-all ${isPinged ? 'bg-black text-white' : 'bg-white text-black'}`}
+             >
+               Ping Master Hub
+             </button>
+          </div>
+
+          <p className={`text-[9px] font-black uppercase tracking-[0.3em] animate-pulse ${isPinged ? 'text-emerald-900' : 'text-slate-600'}`}>
+            Connected via Mesh Protocol
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  return null;
 }

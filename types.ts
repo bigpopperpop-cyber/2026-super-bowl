@@ -1,19 +1,16 @@
+
 export interface User {
   id: string;
   name: string;
-  handle: string;
-  team: string;
-  credits: number;
+  handle?: string;
+  team?: string;
+  deviceType: 'mobile' | 'desktop';
+  lastSeen: number;
 }
 
-// Added ChatMessage interface to fix the import error in ChatRoom.tsx
-export interface ChatMessage {
-  id: string;
-  userId: string;
-  userName: string;
-  text: string;
-  timestamp: number;
-  isAI?: boolean;
+export interface ConnectionState {
+  users: User[];
+  roomCode: string;
 }
 
 export interface PropBet {
@@ -23,22 +20,25 @@ export interface PropBet {
   options: string[];
   resolved: boolean;
   winner?: string;
-  isAiGenerated?: boolean;
 }
 
 export interface UserBet {
+  betId: string;
+  userId: string;
+  selection: string;
+}
+
+export interface ChatMessage {
   id: string;
   userId: string;
-  betId: string;
-  selection: string;
-  timestamp: number;
+  userName: string;
+  text: string;
+  isAI?: boolean;
 }
 
 export interface GameState {
-  scoreHome: number;
-  scoreAway: number;
   quarter: string;
   time: string;
-  possession: 'home' | 'away';
-  isGameOver: boolean;
+  scoreHome: number;
+  scoreAway: number;
 }
