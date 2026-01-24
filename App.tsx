@@ -24,7 +24,8 @@ const generateId = () => Math.random().toString(36).substring(2, 11);
 export default function App() {
   const [roomCode, setRoomCode] = useState(() => new URLSearchParams(window.location.search).get('room')?.toUpperCase() || '');
   const [view, setView] = useState<'landing' | 'onboarding' | 'main' | 'host'>(() => {
-    if (new URLSearchParams(window.location.search).get('room')) return 'onboarding';
+    const urlRoom = new URLSearchParams(window.location.search).get('room');
+    if (urlRoom) return 'onboarding';
     return 'landing';
   });
 
@@ -32,7 +33,13 @@ export default function App() {
     const uId = localStorage.getItem('sblix_uid');
     const uName = localStorage.getItem('sblix_uname');
     const uTeam = localStorage.getItem('sblix_uteam');
-    if (uId && uName) return { id: uId, name: uName, handle: uName, team: uTeam || 'KC', deviceType: 'mobile', score: 0, lastPulse: Date.now(), isVerified: true, pingCount: 0 };
+    if (uId && uName) {
+      return { 
+        id: uId, name: uName, handle: uName, team: uTeam || 'KC', 
+        deviceType: 'mobile', score: 0, lastPulse: Date.now(), 
+        isVerified: true, pingCount: 0 
+      };
+    }
     return null;
   });
 
@@ -43,40 +50,6 @@ export default function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [isAiLoading, setIsAiLoading] = useState(false);
-
-  // --- CONFIGURATION HELPER ---
-  if (!isFirebaseConfigured) {
-    return (
-      <div className="h-screen bg-[#020617] flex items-center justify-center p-8 text-center">
-        <div className="max-w-md space-y-8 glass-card p-10 border-emerald-500/30">
-          <div className="w-20 h-20 bg-emerald-600 rounded-3xl mx-auto flex items-center justify-center status-pulse">
-            <i className="fas fa-key text-white text-3xl"></i>
-          </div>
-          <div className="space-y-4">
-            <h1 className="text-3xl font-orbitron font-black text-white italic">SETUP REQUIRED</h1>
-            <p className="text-slate-400 text-sm leading-relaxed">
-              Your site is almost ready! To sync with your 20 guests, you need to add your <span className="text-emerald-500 font-bold">API Key</span> to the code.
-            </p>
-          </div>
-          <div className="bg-slate-900 rounded-2xl p-6 text-left space-y-4 border border-white/5">
-            <div className="flex gap-4">
-              <span className="bg-emerald-500 text-black w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black shrink-0">1</span>
-              <p className="text-[12px] text-slate-300">Click the <b>Gear icon</b> (Settings) in your Firebase console.</p>
-            </div>
-            <div className="flex gap-4">
-              <span className="bg-emerald-500 text-black w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black shrink-0">2</span>
-              <p className="text-[12px] text-slate-300">Register a <b>Web App</b> and copy the <b>apiKey</b> and <b>appId</b>.</p>
-            </div>
-            <div className="flex gap-4">
-              <span className="bg-emerald-500 text-black w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black shrink-0">3</span>
-              <p className="text-[12px] text-slate-300">Paste them into <code>services/firebaseService.ts</code>.</p>
-            </div>
-          </div>
-          <p className="text-[10px] font-black text-slate-600 uppercase tracking-widest">Waiting for Cloud Credentials...</p>
-        </div>
-      </div>
-    );
-  }
 
   useEffect(() => {
     if (!roomCode || !db) return;
@@ -117,29 +90,55 @@ export default function App() {
         const newProps = await generateLiveProps(freshGame);
         for (const p of newProps) {
           const id = `p-ai-${generateId()}`;
-          await setDoc(doc(db, "rooms", roomCode, "props", id), { ...p, id, resolved: false });
+          await setDoc(doc(db, "rooms", roomCode, "props", id), { ...p, id, resolved: false } as PropBet);
         }
       }
+    } catch (e) {
+      console.error("AI Update Failed", e);
     } finally {
       setIsAiLoading(false);
     }
   };
 
+  if (!isFirebaseConfigured) {
+    return (
+      <div className="h-screen bg-[#020617] flex items-center justify-center p-8 text-center">
+        <div className="glass-card p-10 border-emerald-500/30 max-w-md">
+          <h1 className="text-2xl font-orbitron font-black text-white mb-4 italic">SETUP REQUIRED</h1>
+          <p className="text-slate-400 text-sm">Update the Firebase credentials in <code>services/firebaseService.ts</code> to initialize the party mesh protocol.</p>
+        </div>
+      </div>
+    );
+  }
+
   if (view === 'landing') {
     return (
-      <div className="h-screen bg-[#020617] flex items-center justify-center p-8">
-        <div className="max-w-xs w-full space-y-12 text-center">
-          <div className="w-24 h-24 bg-emerald-600 rounded-[2.5rem] mx-auto flex items-center justify-center shadow-[0_0_60px_rgba(16,185,129,0.3)] status-pulse">
-            <i className="fas fa-football text-white text-4xl"></i>
-          </div>
-          <div className="space-y-4">
-            <h1 className="text-5xl font-orbitron font-black text-white italic tracking-tighter uppercase">SBLIX</h1>
-            <p className="text-[10px] font-black text-slate-500 tracking-[0.4em] uppercase">Super Bowl LIX Mesh</p>
-          </div>
-          <div className="space-y-3">
-             <input placeholder="ROOM CODE" className="w-full bg-slate-900 border border-white/5 rounded-2xl px-6 py-4 font-bold text-center text-white outline-none focus:border-emerald-500" onChange={(e) => setRoomCode(e.target.value.toUpperCase())} />
-             <button onClick={() => roomCode && setView('host')} className="w-full py-6 bg-white text-black font-black uppercase tracking-widest rounded-3xl shadow-2xl active:scale-95 transition-all">Launch Hub</button>
-          </div>
+      <div className="h-screen bg-[#020617] flex flex-col items-center justify-center p-8 text-center">
+        <div className="w-24 h-24 bg-emerald-600 rounded-[2.5rem] flex items-center justify-center shadow-[0_0_50px_rgba(16,185,129,0.3)] status-pulse mb-8">
+          <i className="fas fa-football text-white text-4xl"></i>
+        </div>
+        <h1 className="text-6xl font-orbitron font-black text-white italic tracking-tighter uppercase mb-2">SBLIX</h1>
+        <p className="text-[11px] font-black text-slate-500 tracking-[0.5em] uppercase mb-12">Registry Mesh Protocol</p>
+        
+        <div className="w-full max-w-xs space-y-4">
+          <input 
+            placeholder="ROOM ID" 
+            className="w-full bg-slate-900 border border-white/10 rounded-2xl px-6 py-5 font-bold text-center text-white outline-none focus:border-emerald-500 uppercase tracking-widest transition-all text-xl" 
+            value={roomCode}
+            onChange={(e) => setRoomCode(e.target.value.toUpperCase())} 
+          />
+          <button 
+            onClick={() => roomCode && setView('host')} 
+            className="w-full py-6 bg-white text-black font-black uppercase tracking-widest rounded-3xl shadow-2xl active:scale-95 transition-all hover:bg-emerald-400"
+          >
+            Launch Hub
+          </button>
+          <button 
+            onClick={() => roomCode && setView('onboarding')} 
+            className="text-slate-500 font-black uppercase text-[10px] tracking-widest hover:text-white transition-colors"
+          >
+            Join Existing Room
+          </button>
         </div>
       </div>
     );
@@ -147,30 +146,66 @@ export default function App() {
 
   if (view === 'host') {
     return (
-      <div className="min-h-screen bg-[#020410] text-white p-6 lg:p-12 font-inter">
-        <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-12">
-          <div className="lg:col-span-4 space-y-8">
-            <h1 className="text-5xl font-orbitron font-black italic leading-none">HUB<br/><span className="text-emerald-500">MASTER</span></h1>
-            <div className="glass-card p-8 bg-slate-900/50 space-y-6">
-               <div className="bg-white p-4 rounded-3xl mx-auto max-w-[200px]">
-                  <img src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(window.location.origin + '?room=' + roomCode)}`} className="w-full" />
+      <div className="min-h-screen bg-[#020410] text-white p-4 sm:p-10 font-inter">
+        <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8 sm:gap-12">
+          <div className="lg:col-span-5 space-y-8">
+            <header className="flex items-center gap-4">
+               <div className="w-12 h-12 bg-emerald-500 rounded-xl flex items-center justify-center shadow-lg">
+                 <i className="fas fa-satellite text-black text-xl"></i>
                </div>
-               <div className="text-center font-orbitron text-3xl font-black">{roomCode}</div>
-               <button onClick={handleAiOperations} disabled={isAiLoading} className="w-full py-5 bg-emerald-600 text-black rounded-2xl font-black uppercase flex items-center justify-center gap-3 active:scale-95 disabled:opacity-50">
-                 {isAiLoading ? <i className="fas fa-spinner fa-spin"></i> : <i className="fas fa-bolt"></i>}
-                 Sync Game & Resolves
+               <h1 className="text-4xl font-orbitron font-black italic">SBLIX <span className="text-emerald-500">HUB</span></h1>
+            </header>
+
+            <div className="glass-card p-10 bg-slate-900/50 space-y-8 text-center border-emerald-500/10 shadow-2xl">
+               <div className="bg-white p-5 rounded-[2.5rem] mx-auto w-fit shadow-[0_0_60px_rgba(255,255,255,0.1)]">
+                  <img src={`https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(window.location.origin + '?room=' + roomCode)}`} className="w-64 h-64 rounded-2xl" alt="Join QR" />
+               </div>
+               <div>
+                 <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Protocol Address</div>
+                 <div className="font-orbitron text-6xl font-black text-emerald-400 tracking-tighter uppercase italic">{roomCode}</div>
+               </div>
+               <button 
+                 onClick={handleAiOperations} 
+                 disabled={isAiLoading} 
+                 className="w-full py-6 bg-emerald-600 text-black rounded-3xl font-black uppercase flex items-center justify-center gap-4 active:scale-95 disabled:opacity-50 transition-all shadow-[0_20px_50px_rgba(16,185,129,0.3)] text-lg"
+               >
+                 {isAiLoading ? <i className="fas fa-sync fa-spin"></i> : <i className="fas fa-bolt"></i>}
+                 {isAiLoading ? 'Syncing Game...' : 'Sync Live Game Data'}
                </button>
             </div>
+
             {gameState && (
-              <div className="p-6 bg-slate-900 border border-white/5 rounded-3xl text-center">
-                <div className="text-[10px] font-black text-slate-500 uppercase">Live Update</div>
-                <div className="text-2xl font-orbitron font-black text-emerald-500 uppercase">{gameState.quarter} - {gameState.time}</div>
-                <div className="text-3xl font-black mt-2">{gameState.scoreHome} - {gameState.scoreAway}</div>
+              <div className="p-8 bg-slate-900/80 border border-white/5 rounded-[3rem] text-center shadow-xl relative overflow-hidden">
+                <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-emerald-500 to-transparent animate-pulse"></div>
+                <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-4 flex items-center justify-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
+                  Live Feed Synchronized
+                </div>
+                <div className="text-4xl font-orbitron font-black text-white uppercase italic leading-none mb-4">{gameState.quarter} <span className="text-emerald-500">•</span> {gameState.time}</div>
+                <div className="flex justify-center items-center gap-10">
+                   <div className="text-center">
+                      <div className="text-6xl font-black tracking-tighter">{gameState.scoreHome}</div>
+                      <div className="text-[10px] text-slate-500 font-bold uppercase">HOME</div>
+                   </div>
+                   <div className="text-3xl text-slate-700 font-black italic">VS</div>
+                   <div className="text-center">
+                      <div className="text-6xl font-black tracking-tighter">{gameState.scoreAway}</div>
+                      <div className="text-[10px] text-slate-500 font-bold uppercase">AWAY</div>
+                   </div>
+                </div>
               </div>
             )}
           </div>
-          <div className="lg:col-span-8">
-            <Leaderboard users={allUsers} currentUser={allUsers[0] || localUser} propBets={propBets} userBets={userBets} />
+          <div className="lg:col-span-7 flex flex-col gap-6">
+            <div className="flex justify-between items-end px-4">
+               <h2 className="text-2xl font-orbitron font-black uppercase italic tracking-tight">Party <span className="text-slate-600">Leaderboard</span></h2>
+               <div className="flex items-center gap-3">
+                 <span className="text-[10px] font-black text-emerald-500 uppercase tracking-widest bg-emerald-500/10 px-3 py-1 rounded-full border border-emerald-500/20">{allUsers.length} Devices Online</span>
+               </div>
+            </div>
+            <div className="bg-slate-900/30 rounded-[3rem] border border-white/5 overflow-hidden h-[600px]">
+               <Leaderboard users={allUsers} currentUser={localUser || allUsers[0]} propBets={propBets} userBets={userBets} />
+            </div>
           </div>
         </div>
       </div>
@@ -180,18 +215,18 @@ export default function App() {
   if (view === 'main' && localUser) {
     return (
       <div className="h-screen flex flex-col bg-[#020617] overflow-hidden">
-        <header className="px-6 pt-12 pb-6 flex justify-between items-center bg-slate-900/40 shrink-0">
-          <div className="flex items-center gap-3">
+        <header className="px-6 pt-12 pb-6 flex justify-between items-center bg-slate-900/40 border-b border-white/5 shrink-0">
+          <div className="flex items-center gap-4">
              <TeamHelmet teamId={localUser.team} size="md" />
              <div>
-                <h1 className="font-orbitron font-black text-xl italic leading-none text-white">SBLIX</h1>
-                <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">{roomCode}</span>
+                <h1 className="font-orbitron font-black text-xl italic text-white leading-none">SBLIX</h1>
+                <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">RM: {roomCode}</span>
              </div>
           </div>
           {gameState && (
-             <div className="px-3 py-1 bg-emerald-500/10 border border-emerald-500/20 rounded-lg text-center">
-                <div className="text-[7px] font-black text-emerald-500 uppercase">Live</div>
-                <div className="text-[10px] font-orbitron font-black text-white">{gameState.scoreHome}-{gameState.scoreAway}</div>
+             <div className="px-4 py-2 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-center">
+                <div className="text-[7px] font-black text-emerald-500 uppercase tracking-widest">Scoreboard</div>
+                <div className="text-sm font-orbitron font-black text-white">{gameState.scoreHome}-{gameState.scoreAway}</div>
              </div>
           )}
         </header>
@@ -208,11 +243,16 @@ export default function App() {
           {activeTab === 'scores' && <Leaderboard users={allUsers} currentUser={localUser} propBets={propBets} userBets={userBets} />}
         </main>
 
-        <nav className="shrink-0 bg-slate-900/90 backdrop-blur-xl border-t border-white/5 flex justify-around pb-safe">
-           {[{id:'bets',i:'ticket-alt',l:'Props'},{id:'chat',i:'comment-alt',l:'Chat'},{id:'scores',i:'trophy',l:'Rank'}].map(t => (
-             <button key={t.id} onClick={() => setActiveTab(t.id as any)} className={`flex flex-col items-center py-4 px-8 gap-1 transition-all ${activeTab === t.id ? 'text-emerald-500' : 'text-slate-500'}`}>
-               <i className={`fas fa-${t.i} text-lg`}></i>
-               <span className="text-[8px] font-black uppercase">{t.l}</span>
+        <nav className="shrink-0 bg-slate-900/95 backdrop-blur-xl border-t border-white/5 flex justify-around pb-safe">
+           {[
+             {id:'bets',i:'ticket-alt',l:'Prop Pool'},
+             {id:'chat',i:'comment-dots',l:'Huddle'},
+             {id:'scores',i:'trophy',l:'Standings'}
+           ].map(t => (
+             <button key={t.id} onClick={() => setActiveTab(t.id as any)} className={`flex flex-col items-center py-5 px-8 gap-1.5 transition-all relative ${activeTab === t.id ? 'text-emerald-400' : 'text-slate-500'}`}>
+               {activeTab === t.id && <span className="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-0.5 bg-emerald-400 rounded-full"></span>}
+               <i className={`fas fa-${t.i} text-xl`}></i>
+               <span className="text-[9px] font-black uppercase tracking-tighter">{t.l}</span>
              </button>
            ))}
         </nav>
@@ -223,21 +263,40 @@ export default function App() {
   if (view === 'onboarding') {
     return (
       <div className="h-screen bg-[#020617] p-8 flex flex-col justify-center max-w-md mx-auto">
-        <h2 className="text-3xl font-orbitron font-black italic mb-8 uppercase text-white">Huddle <span className="text-emerald-500">Up</span></h2>
-        <div className="space-y-6">
-           <input id="joinName" placeholder="ENTER NAME" className="w-full bg-slate-900 border border-white/5 rounded-2xl px-6 py-4 font-bold text-white outline-none focus:border-emerald-500" />
-           <div className="grid grid-cols-3 gap-3">
-             {NFL_TEAMS.map(t => (
-               <button key={t.id} onClick={() => (window as any).selectedTeam = t.id} className="p-4 bg-slate-900 rounded-2xl border border-white/5 hover:border-emerald-500 flex flex-col items-center gap-2 focus:bg-emerald-500/10 focus:border-emerald-500 transition-all">
-                 <TeamHelmet teamId={t.id} size="md" />
-                 <span className="text-[8px] font-black uppercase text-slate-400">{t.name}</span>
-               </button>
-             ))}
+        <h2 className="text-4xl font-orbitron font-black italic mb-2 uppercase text-white leading-none">JOIN THE<br/><span className="text-emerald-500">HUDDLE</span></h2>
+        <p className="text-slate-500 text-[10px] font-black uppercase tracking-widest mb-10">Syncing with Room: {roomCode}</p>
+        
+        <div className="space-y-8">
+           <div className="space-y-2">
+             <label className="text-[9px] font-black text-slate-600 uppercase tracking-widest px-1">Display Name</label>
+             <input id="joinName" placeholder="PLAYER_ONE" className="w-full bg-slate-900 border border-white/5 rounded-2xl px-6 py-5 font-bold text-white outline-none focus:border-emerald-500 transition-all uppercase" />
            </div>
-           <button onClick={() => {
+           
+           <div className="space-y-3">
+             <label className="text-[9px] font-black text-slate-600 uppercase tracking-widest px-1">Loyalty</label>
+             <div className="grid grid-cols-3 gap-3">
+               {NFL_TEAMS.slice(0, 6).map(t => (
+                 <button 
+                  key={t.id} 
+                  onClick={() => (window as any).selectedTeam = t.id} 
+                  className="p-4 bg-slate-900/50 rounded-2xl border border-white/5 hover:border-emerald-500 focus:border-emerald-500 focus:bg-emerald-500/5 transition-all flex flex-col items-center gap-2 group"
+                 >
+                   <TeamHelmet teamId={t.id} size="md" className="group-hover:scale-110 transition-transform" />
+                   <span className="text-[10px] font-black uppercase text-slate-600 group-focus:text-emerald-400">{t.id}</span>
+                 </button>
+               ))}
+             </div>
+           </div>
+
+           <button 
+            onClick={() => {
              const n = (document.getElementById('joinName') as HTMLInputElement).value;
              if (n) handleJoin(n, (window as any).selectedTeam || 'KC');
-           }} className="w-full py-6 bg-emerald-500 text-black font-black uppercase tracking-widest rounded-3xl shadow-xl active:scale-95 transition-all">Join Game</button>
+            }} 
+            className="w-full py-6 bg-emerald-500 text-black font-black uppercase tracking-widest rounded-3xl shadow-[0_10px_40px_rgba(16,185,129,0.2)] active:scale-95 transition-all mt-4"
+           >
+            Connect to Mesh
+           </button>
         </div>
       </div>
     );

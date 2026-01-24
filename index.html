@@ -22,23 +22,34 @@
     }
     .font-orbitron { font-family: 'Orbitron', sans-serif; }
     .no-scrollbar::-webkit-scrollbar { display: none; }
-    input, button { font-size: 16px !important; }
-    .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
-    
     .glass-card {
       background: rgba(255, 255, 255, 0.02);
       backdrop-filter: blur(20px);
       border: 1px solid rgba(255, 255, 255, 0.05);
       border-radius: 32px;
     }
-
+    .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+    .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+    .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
+    
     @keyframes pulse-emerald {
       0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4); }
-      70% { box-shadow: 0 0 0 20px rgba(16, 185, 129, 0); }
+      70% { box-shadow: 0 0 0 15px rgba(16, 185, 129, 0); }
       100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
     }
     .status-pulse { animation: pulse-emerald 2s infinite; }
+    input, button { font-size: 16px !important; }
+    .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
   </style>
+  <script>
+    // Essential shim for libraries expecting process.env in a browser environment
+    window.process = {
+      env: {
+        NODE_ENV: 'development',
+        API_KEY: '' 
+      }
+    };
+  </script>
   <script type="importmap">
 {
   "imports": {
@@ -59,6 +70,6 @@
 </head>
 <body>
   <div id="root"></div>
-  <script type="module" src="./index.tsx"></script>
+  <script type="module" src="index.tsx"></script>
 </body>
 </html>

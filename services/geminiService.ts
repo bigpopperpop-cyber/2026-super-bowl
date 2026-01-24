@@ -1,8 +1,11 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { PropBet, GameState } from "../types.ts";
 
+// Helper to get Gemini client using the shimmed process.env
+const getAi = () => new GoogleGenAI({ apiKey: process.env.API_KEY });
+
 export const generateLiveProps = async (gameState: GameState): Promise<Partial<PropBet>[]> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = getAi();
   try {
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
@@ -36,7 +39,7 @@ export const generateLiveProps = async (gameState: GameState): Promise<Partial<P
 };
 
 export const resolveProps = async (props: PropBet[]): Promise<{ id: string, winner: string }[]> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = getAi();
   const unresolved = props.filter(p => !p.resolved);
   if (unresolved.length === 0) return [];
 
@@ -71,11 +74,11 @@ export const resolveProps = async (props: PropBet[]): Promise<{ id: string, winn
 };
 
 export const getGameUpdate = async (): Promise<GameState | null> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = getAi();
   try {
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: "What is the current score and game clock of Super Bowl LIX? (Chiefs vs 49ers/Eagles etc)",
+      contents: "What is the current score and game clock of Super Bowl LIX? (Chiefs vs Eagles etc)",
       config: {
         tools: [{ googleSearch: {} }],
         responseMimeType: "application/json",
@@ -94,6 +97,7 @@ export const getGameUpdate = async (): Promise<GameState | null> => {
     });
     return JSON.parse(response.text || "null");
   } catch (error) {
+    console.error("Game Update Error:", error);
     return null;
   }
 };

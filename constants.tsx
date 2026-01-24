@@ -1,2 +1,2 @@
-// Re-exporting from constants.ts with explicit extension for ESM compatibility
-export * from './constants.ts';
+// This file is deprecated. Please use constants.ts instead.
+export {};

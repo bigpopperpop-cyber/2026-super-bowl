@@ -1,4 +1,4 @@
-import { initializeApp } from "firebase/app";
+import { initializeApp, getApp, getApps } from "firebase/app";
 import { 
   getFirestore, 
   collection, 
@@ -16,10 +16,6 @@ import {
   getDocs
 } from "firebase/firestore";
 
-/**
- * FIREBASE CONFIGURATION FOR: sblix-6f2a9
- * Successfully linked and verified.
- */
 const firebaseConfig = {
   apiKey: "AIzaSyB0BO9OwaJbevhYKsDb0iNQoaHH1bnD-qw",
   authDomain: "sblix-6f2a9.firebaseapp.com",
@@ -30,22 +26,15 @@ const firebaseConfig = {
   measurementId: "G-XJ9WY2LMSB"
 };
 
-// Check if keys are active and valid
 export const isFirebaseConfigured = 
   !!firebaseConfig.apiKey && 
-  firebaseConfig.apiKey !== "REPLACE_WITH_YOUR_FIREBASE_API_KEY" && 
-  firebaseConfig.apiKey.length > 10;
+  firebaseConfig.apiKey !== "REPLACE_WITH_YOUR_FIREBASE_API_KEY";
 
-let db: any;
-try {
-  const app = initializeApp(firebaseConfig);
-  db = getFirestore(app);
-} catch (e) {
-  console.error("Firebase initialization failed.", e);
-}
+// Use singleton pattern for Firebase app
+const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
+export const db = getFirestore(app);
 
 export { 
-  db,
   collection, 
   doc, 
   onSnapshot, 
@@ -55,8 +44,8 @@ export {
   query, 
   where, 
   serverTimestamp, 
-  orderBy,
-  limit,
-  deleteDoc,
-  getDocs
+  orderBy, 
+  limit, 
+  deleteDoc, 
+  getDocs 
 };
