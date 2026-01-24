@@ -1,17 +1,14 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0, viewport-fit=cover" />
-  <title>SBLIX Party Hub</title>
+  <title>SBLIX Oracle Sync</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
   <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
   <style>
     :root {
-      --stadium-blue: #0ea5e9;
-      --stadium-red: #ef4444;
       --bg-dark: #020617;
     }
     body {
@@ -22,21 +19,22 @@
       -webkit-font-smoothing: antialiased;
     }
     .font-orbitron { font-family: 'Orbitron', sans-serif; }
-    .glass {
-      background: rgba(15, 23, 42, 0.75);
-      backdrop-filter: blur(12px);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-    }
     .no-scrollbar::-webkit-scrollbar { display: none; }
     input, button { font-size: 16px !important; }
     .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
     
-    @keyframes pulse-ring {
-      0% { transform: scale(0.33); opacity: 1; }
-      80%, 100% { opacity: 0; }
+    @keyframes ticker {
+      0% { transform: translateX(0); }
+      100% { transform: translateX(-50%); }
     }
-    .animate-pulse-slow {
-      animation: pulse-ring 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    .animate-ticker {
+      animation: ticker 40s linear infinite;
+    }
+    
+    .glass-card {
+      background: rgba(255, 255, 255, 0.03);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
     }
   </style>
   <script type="importmap">
@@ -47,7 +45,7 @@
     "react-dom/client": "https://esm.sh/react-dom@19.0.0/client",
     "@google/genai": "https://esm.sh/@google/genai@1.38.0",
     "yjs": "https://esm.sh/yjs@13.6.10",
-    "y-webrtc": "https://esm.sh/y-webrtc@10.2.5?deps=yjs@13.6.10",
+    "y-webrtc": "https://esm.sh/y-webrtc@10.3.0?deps=yjs@13.6.10",
     "y-websocket": "https://esm.sh/y-websocket@1.5.4?deps=yjs@13.6.10",
     "y-indexeddb": "https://esm.sh/y-indexeddb@9.0.12?deps=yjs@13.6.10",
     "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
