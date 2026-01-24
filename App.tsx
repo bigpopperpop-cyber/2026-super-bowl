@@ -104,7 +104,7 @@ export default function App() {
     return (
       <div className="h-screen bg-[#020617] flex items-center justify-center p-8 text-center">
         <div className="glass-card p-10 border-emerald-500/30 max-w-md">
-          <h1 className="text-2xl font-orbitron font-black text-white mb-4 italic">SETUP REQUIRED</h1>
+          <h1 className="text-2xl font-orbitron font-black text-white mb-4 italic uppercase">Registry Halted</h1>
           <p className="text-slate-400 text-sm">Update the Firebase credentials in <code>services/firebaseService.ts</code> to initialize the party mesh protocol.</p>
         </div>
       </div>
@@ -135,7 +135,7 @@ export default function App() {
           </button>
           <button 
             onClick={() => roomCode && setView('onboarding')} 
-            className="text-slate-500 font-black uppercase text-[10px] tracking-widest hover:text-white transition-colors"
+            className="text-slate-500 font-black uppercase text-[10px] tracking-widest hover:text-white transition-colors py-2"
           >
             Join Existing Room
           </button>
@@ -150,7 +150,7 @@ export default function App() {
         <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8 sm:gap-12">
           <div className="lg:col-span-5 space-y-8">
             <header className="flex items-center gap-4">
-               <div className="w-12 h-12 bg-emerald-500 rounded-xl flex items-center justify-center shadow-lg">
+               <div className="w-12 h-12 bg-emerald-500 rounded-xl flex items-center justify-center shadow-lg status-pulse">
                  <i className="fas fa-satellite text-black text-xl"></i>
                </div>
                <h1 className="text-4xl font-orbitron font-black italic">SBLIX <span className="text-emerald-500">HUB</span></h1>
@@ -167,7 +167,7 @@ export default function App() {
                <button 
                  onClick={handleAiOperations} 
                  disabled={isAiLoading} 
-                 className="w-full py-6 bg-emerald-600 text-black rounded-3xl font-black uppercase flex items-center justify-center gap-4 active:scale-95 disabled:opacity-50 transition-all shadow-[0_20px_50px_rgba(16,185,129,0.3)] text-lg"
+                 className="w-full py-6 bg-emerald-600 text-black rounded-3xl font-black uppercase flex items-center justify-center gap-4 active:scale-95 disabled:opacity-50 transition-all shadow-[0_20px_50px_rgba(16,185,129,0.3)] text-lg hover:bg-emerald-400"
                >
                  {isAiLoading ? <i className="fas fa-sync fa-spin"></i> : <i className="fas fa-bolt"></i>}
                  {isAiLoading ? 'Syncing Game...' : 'Sync Live Game Data'}
@@ -175,21 +175,21 @@ export default function App() {
             </div>
 
             {gameState && (
-              <div className="p-8 bg-slate-900/80 border border-white/5 rounded-[3rem] text-center shadow-xl relative overflow-hidden">
+              <div className="p-8 bg-slate-900/80 border border-white/5 rounded-[3rem] text-center shadow-xl relative overflow-hidden group">
                 <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-emerald-500 to-transparent animate-pulse"></div>
                 <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-4 flex items-center justify-center gap-2">
                   <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
-                  Live Feed Synchronized
+                  Live Feed Active
                 </div>
-                <div className="text-4xl font-orbitron font-black text-white uppercase italic leading-none mb-4">{gameState.quarter} <span className="text-emerald-500">•</span> {gameState.time}</div>
+                <div className="text-4xl font-orbitron font-black text-white uppercase italic leading-none mb-4 tracking-tighter">{gameState.quarter} <span className="text-emerald-500">•</span> {gameState.time}</div>
                 <div className="flex justify-center items-center gap-10">
                    <div className="text-center">
-                      <div className="text-6xl font-black tracking-tighter">{gameState.scoreHome}</div>
+                      <div className="text-6xl font-black tracking-tighter text-glow">{gameState.scoreHome}</div>
                       <div className="text-[10px] text-slate-500 font-bold uppercase">HOME</div>
                    </div>
-                   <div className="text-3xl text-slate-700 font-black italic">VS</div>
+                   <div className="text-3xl text-slate-800 font-black italic">VS</div>
                    <div className="text-center">
-                      <div className="text-6xl font-black tracking-tighter">{gameState.scoreAway}</div>
+                      <div className="text-6xl font-black tracking-tighter text-glow">{gameState.scoreAway}</div>
                       <div className="text-[10px] text-slate-500 font-bold uppercase">AWAY</div>
                    </div>
                 </div>
@@ -200,10 +200,10 @@ export default function App() {
             <div className="flex justify-between items-end px-4">
                <h2 className="text-2xl font-orbitron font-black uppercase italic tracking-tight">Party <span className="text-slate-600">Leaderboard</span></h2>
                <div className="flex items-center gap-3">
-                 <span className="text-[10px] font-black text-emerald-500 uppercase tracking-widest bg-emerald-500/10 px-3 py-1 rounded-full border border-emerald-500/20">{allUsers.length} Devices Online</span>
+                 <span className="text-[10px] font-black text-emerald-500 uppercase tracking-widest bg-emerald-500/10 px-4 py-1.5 rounded-full border border-emerald-500/20">{allUsers.length} Devices Synced</span>
                </div>
             </div>
-            <div className="bg-slate-900/30 rounded-[3rem] border border-white/5 overflow-hidden h-[600px]">
+            <div className="bg-slate-900/30 rounded-[3rem] border border-white/5 overflow-hidden h-[600px] shadow-inner backdrop-blur-sm">
                <Leaderboard users={allUsers} currentUser={localUser || allUsers[0]} propBets={propBets} userBets={userBets} />
             </div>
           </div>

@@ -40,6 +40,7 @@
     .status-pulse { animation: pulse-emerald 2s infinite; }
     input, button { font-size: 16px !important; }
     .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
+    .text-glow { text-shadow: 0 0 20px rgba(16, 185, 129, 0.5); }
   </style>
   <script>
     // Essential shim for libraries expecting process.env in a browser environment
@@ -56,6 +57,7 @@
     "react": "https://esm.sh/react@19.0.0",
     "react-dom": "https://esm.sh/react-dom@19.0.0",
     "react-dom/client": "https://esm.sh/react-dom@19.0.0/client",
+    "react/jsx-runtime": "https://esm.sh/react@19.0.0/jsx-runtime",
     "firebase/app": "https://esm.sh/firebase@11.2.0/app",
     "firebase/firestore": "https://esm.sh/firebase@11.2.0/firestore",
     "@google/genai": "https://esm.sh/@google/genai@1.38.0",
