@@ -117,38 +117,69 @@ export default function App() {
     sharedUserBets.push([b]);
   };
 
+  const settledResults = useMemo(() => props.filter(p => p.resolved).reverse().slice(0, 10), [props]);
+
   if (!user || !roomCode) return <Login onEnter={(u, r) => { setUser(u); setRoomCode(r.toUpperCase()); localStorage.setItem(STORAGE_KEY, JSON.stringify(u)); window.history.replaceState({}, '', `?room=${r.toUpperCase()}`); }} initialRoom={roomCode} />;
 
   return (
     <div className="flex flex-col h-screen bg-[#050505] text-white max-w-lg mx-auto border-x border-white/5 shadow-2xl overflow-hidden">
-      {/* HUD */}
-      <header className="p-4 bg-slate-900/50 backdrop-blur-xl border-b border-white/10 shrink-0">
-        <div className="flex justify-between items-center mb-4">
-          <div className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_10px_#10b981]" />
-            <h1 className="font-orbitron font-black text-2xl italic tracking-tighter text-emerald-400">ORACLE</h1>
+      {/* HUD / Scoreboard */}
+      <header className="shrink-0 z-50">
+        <div className="p-3 bg-slate-900/50 backdrop-blur-xl border-b border-white/10">
+          <div className="flex justify-between items-center mb-2">
+            <div className="flex items-center gap-2">
+              <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <h1 className="font-orbitron font-black text-xl italic tracking-tighter text-emerald-400">ORACLE LIVE</h1>
+            </div>
+            <div className="flex items-center gap-3">
+               <div className="flex items-center gap-1.5 bg-black/40 px-2 py-1 rounded-md border border-white/5">
+                 <i className="fas fa-users text-[8px] text-slate-500"></i>
+                 <span className="text-[9px] font-black text-slate-300">{users.length}</span>
+               </div>
+               <button onClick={() => setShowQR(true)} className="text-[10px] text-emerald-400 font-black uppercase tracking-widest"><i className="fas fa-qrcode"></i></button>
+            </div>
           </div>
-          <button onClick={() => setShowQR(true)} className="bg-white/5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest flex items-center gap-2 border border-white/10">
-            <i className="fas fa-qrcode text-emerald-400"></i> INVITE
-          </button>
+
+          <div className="bg-gradient-to-b from-slate-800 to-black rounded-xl p-0.5 border border-white/10 shadow-2xl relative overflow-hidden">
+            {gameState.isGameOver && <div className="absolute inset-0 bg-red-600/40 backdrop-blur-[2px] flex items-center justify-center z-10 font-orbitron font-black text-xs tracking-[0.4em] text-white">SESSION TERMINATED</div>}
+            <div className="flex justify-between items-stretch h-14 bg-black/90 rounded-[10px] overflow-hidden">
+              <div className="flex-1 flex items-center justify-between px-4 bg-gradient-to-r from-emerald-950/30 to-transparent">
+                <span className="text-[10px] font-black text-emerald-500 uppercase tracking-widest">HOME</span>
+                <span className="text-3xl font-orbitron font-black text-white">{gameState.scoreHome}</span>
+              </div>
+              <div className="w-24 border-x border-white/5 flex flex-col items-center justify-center bg-white/5">
+                <span className="text-[11px] font-black text-emerald-400 uppercase">{gameState.quarter}</span>
+                <span className="text-[10px] font-bold text-slate-500">{gameState.time}</span>
+              </div>
+              <div className="flex-1 flex items-center justify-between px-4 bg-gradient-to-l from-indigo-950/30 to-transparent flex-row-reverse">
+                <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">AWAY</span>
+                <span className="text-3xl font-orbitron font-black text-white">{gameState.scoreAway}</span>
+              </div>
+            </div>
+          </div>
         </div>
 
-        <div className="bg-black/80 rounded-2xl p-4 border border-white/10 flex justify-between items-center relative overflow-hidden">
-          {gameState.isGameOver && <div className="absolute inset-0 bg-red-600/20 backdrop-blur-[2px] flex items-center justify-center z-10 font-orbitron font-black text-xl tracking-widest text-red-500">GAME OVER</div>}
-          <div className="text-center">
-            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">HOME</p>
-            <p className="text-4xl font-orbitron font-black">{gameState.scoreHome}</p>
-          </div>
-          <div className="text-center px-6 border-x border-white/5">
-            <div className="bg-emerald-500/10 text-emerald-400 text-[10px] font-black px-3 py-1 rounded-full mb-1 border border-emerald-500/20">
-              {gameState.quarter}
-            </div>
-            <p className="text-[10px] font-bold text-slate-500">{gameState.time}</p>
-          </div>
-          <div className="text-center">
-            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">AWAY</p>
-            <p className="text-4xl font-orbitron font-black">{gameState.scoreAway}</p>
-          </div>
+        {/* Results Ticker */}
+        <div className="bg-emerald-950/40 border-b border-emerald-500/20 py-1.5 overflow-hidden whitespace-nowrap">
+           <div className="flex animate-[ticker_30s_linear_infinite] gap-8 items-center">
+             {settledResults.length > 0 ? settledResults.map(p => (
+               <div key={p.id} className="flex items-center gap-2">
+                 <span className="text-[9px] font-black text-slate-500 uppercase">{p.question.length > 20 ? p.question.substring(0,20)+'...' : p.question}:</span>
+                 <span className="text-[9px] font-black text-emerald-400 uppercase">{p.winner}</span>
+                 <span className="w-1 h-1 rounded-full bg-slate-800"></span>
+               </div>
+             )) : (
+               <div className="text-[9px] font-black text-slate-600 uppercase tracking-widest px-4">Waiting for first results... AI Oracle is monitoring play-by-play live...</div>
+             )}
+             {/* Duplicate for seamless scrolling */}
+             {settledResults.map(p => (
+               <div key={p.id+'_dup'} className="flex items-center gap-2">
+                 <span className="text-[9px] font-black text-slate-500 uppercase">{p.question.length > 20 ? p.question.substring(0,20)+'...' : p.question}:</span>
+                 <span className="text-[9px] font-black text-emerald-400 uppercase">{p.winner}</span>
+                 <span className="w-1 h-1 rounded-full bg-slate-800"></span>
+               </div>
+             ))}
+           </div>
         </div>
       </header>
 
@@ -159,11 +190,11 @@ export default function App() {
              <i className={`fas fa-microchip text-xs ${aiStatus !== 'idle' ? 'animate-spin text-indigo-400' : 'text-slate-600'}`}></i>
              <span className="text-[9px] font-black text-indigo-400 uppercase tracking-[0.2em]">Oracle: {aiStatus}</span>
            </div>
-           <span className="text-[8px] text-slate-600 font-black">AI MONITORING LIVE</span>
+           <span className="text-[8px] text-slate-600 font-black">HOST PRIVILEGES ACTIVE</span>
         </div>
       )}
 
-      <main className="flex-1 overflow-y-auto no-scrollbar">
+      <main className="flex-1 overflow-y-auto no-scrollbar bg-gradient-to-b from-slate-950 to-black">
         {activeTab === 'bets' ? (
           <BetsView props={props} allBets={allBets} user={user} onBet={handlePlaceBet} isGameOver={gameState.isGameOver} />
         ) : (
@@ -171,13 +202,20 @@ export default function App() {
         )}
       </main>
 
-      <nav className="bg-slate-900 border-t border-white/10 flex pb-safe shrink-0">
+      <nav className="bg-slate-900 border-t border-white/10 flex pb-safe shrink-0 shadow-[0_-10px_30px_rgba(0,0,0,0.5)]">
         <NavBtn active={activeTab === 'bets'} icon="fa-bolt" label="Live Props" onClick={() => setActiveTab('bets')} />
         <NavBtn active={activeTab === 'leaderboard'} icon="fa-trophy" label="Standings" onClick={() => setActiveTab('leaderboard')} />
         {isHost && <NavBtn active={activeTab === 'admin'} icon="fa-cog" label="System" onClick={() => setActiveTab('admin')} />}
       </nav>
 
       {showQR && <QRModal url={`${window.location.origin}${window.location.pathname}?room=${roomCode}`} onClose={() => setShowQR(false)} />}
+      
+      <style>{`
+        @keyframes ticker {
+          0% { transform: translateX(0); }
+          100% { transform: translateX(-50%); }
+        }
+      `}</style>
     </div>
   );
 }
@@ -185,7 +223,7 @@ export default function App() {
 function NavBtn({ active, icon, label, onClick }: any) {
   return (
     <button onClick={onClick} className={`flex-1 py-5 flex flex-col items-center gap-1 transition-all ${active ? 'text-emerald-400 bg-emerald-400/5' : 'text-slate-500'}`}>
-      <i className={`fas ${icon} text-lg`}></i>
+      <i className={`fas ${icon} text-lg transition-transform ${active ? 'scale-110' : ''}`}></i>
       <span className="text-[9px] font-black uppercase tracking-widest">{label}</span>
     </button>
   );
@@ -203,10 +241,10 @@ function BetsView({ props, allBets, user, onBet, isGameOver }: any) {
       {sortedProps.map(p => {
         const myBet = allBets.find((b: any) => b.userId === user.id && b.betId === p.id);
         return (
-          <div key={p.id} className={`p-5 rounded-2xl border transition-all ${p.resolved ? 'bg-black/40 opacity-40 border-white/5' : myBet ? 'bg-emerald-500/5 border-emerald-500/50' : 'bg-slate-900 border-white/10'}`}>
+          <div key={p.id} className={`p-5 rounded-2xl border transition-all duration-300 ${p.resolved ? 'bg-black/40 opacity-40 border-white/5' : myBet ? 'bg-emerald-500/5 border-emerald-500/50 shadow-[0_0_30px_rgba(16,185,129,0.05)]' : 'bg-slate-900 border-white/10'}`}>
             <div className="flex justify-between items-start mb-2">
-              <span className="text-[9px] font-black px-2 py-0.5 rounded bg-white/5 border border-white/10 text-slate-400 uppercase tracking-widest">{p.category}</span>
-              {p.isAiGenerated && <span className="text-[9px] font-black text-indigo-400"><i className="fas fa-magic mr-1"></i> AI LIVE</span>}
+              <span className={`text-[9px] font-black px-2 py-0.5 rounded uppercase tracking-widest ${p.category === 'PRE-GAME' ? 'bg-indigo-500/20 text-indigo-400 border border-indigo-500/30' : 'bg-white/5 text-slate-400 border border-white/10'}`}>{p.category}</span>
+              {p.isAiGenerated && <span className="text-[9px] font-black text-indigo-400 animate-pulse"><i className="fas fa-magic mr-1"></i> AI LIVE</span>}
             </div>
             <p className="font-bold text-lg mb-4 text-white leading-tight">{p.question}</p>
             {p.resolved ? (
@@ -215,15 +253,16 @@ function BetsView({ props, allBets, user, onBet, isGameOver }: any) {
               </div>
             ) : myBet ? (
               <div className="text-xs font-black text-emerald-400 uppercase flex items-center gap-2 bg-emerald-500/10 p-3 rounded-xl border border-emerald-500/20">
-                <i className="fas fa-lock"></i> PICK: {myBet.selection}
+                <i className="fas fa-lock"></i> PICKED: {myBet.selection}
               </div>
             ) : isGameOver ? (
               <div className="text-xs text-slate-600 font-bold uppercase p-3 border border-white/5 rounded-xl text-center">Bets Locked</div>
             ) : (
               <div className="grid grid-cols-1 gap-2">
                 {p.options.map((opt: string) => (
-                  <button key={opt} onClick={() => onBet(p.id, opt)} className="py-4 bg-white/5 border border-white/10 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-emerald-500 hover:text-black transition-all active:scale-95">
+                  <button key={opt} onClick={() => onBet(p.id, opt)} className="py-4 bg-white/5 border border-white/10 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-emerald-500 hover:text-black transition-all active:scale-95 text-left px-5 flex justify-between items-center">
                     {opt}
+                    <i className="fas fa-chevron-right opacity-30 text-[10px]"></i>
                   </button>
                 ))}
               </div>
@@ -241,7 +280,6 @@ function LeaderboardView({ users, allBets, props }: any) {
       let score = 0;
       let correct = 0;
       let total = 0;
-      let streakCount = 0;
       let maxBadStreak = 0;
       let currentBadStreak = 0;
 
@@ -261,12 +299,12 @@ function LeaderboardView({ users, allBets, props }: any) {
           }
         }
       });
-      return { ...u, score, correct, total, maxBadStreak, isEarly: uBets.length > 0 && uBets[0].timestamp === Math.min(...allBets.map((b: any) => b.timestamp)) };
+      return { ...u, score, correct, total, maxBadStreak };
     }).sort((a: any, b: any) => b.score - a.score);
   }, [users, allBets, props]);
 
   return (
-    <div className="p-4 space-y-4">
+    <div className="p-4 space-y-4 pb-24">
       <h2 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] px-1">Trophy Room</h2>
       <div className="grid grid-cols-2 gap-3 mb-6">
         <TrophyBadge icon="fa-crown" label="THE GOAT" user={leaderboard[0]} type="good" />
@@ -288,7 +326,7 @@ function LeaderboardView({ users, allBets, props }: any) {
               </div>
             </div>
             <div className="text-right">
-               <p className={`font-orbitron font-black ${u.score > 0 ? 'text-emerald-400' : 'text-red-500'}`}>{u.score}</p>
+               <p className={`font-orbitron font-black ${u.score > 0 ? 'text-emerald-400' : u.score < 0 ? 'text-red-500' : 'text-slate-600'}`}>{u.score}</p>
                <p className="text-[8px] font-black text-slate-500 uppercase">{u.correct}/{u.total} CORRECT</p>
             </div>
           </div>
@@ -320,11 +358,11 @@ function Login({ onEnter, initialRoom }: any) {
         <i className="fas fa-eye text-3xl text-black"></i>
       </div>
       <h1 className="text-5xl font-orbitron font-black italic tracking-tighter text-white mb-2">ORACLE</h1>
-      <p className="text-emerald-500 text-[10px] font-black uppercase tracking-[0.4em] mb-12">SBLIX Live Monitoring</p>
+      <p className="text-emerald-500 text-[10px] font-black uppercase tracking-[0.4em] mb-12">SBLIX AI ENGINE</p>
       <div className="w-full max-w-xs space-y-4">
-        <input placeholder="PARTY CODE" value={room} onChange={e => setRoom(e.target.value.toUpperCase())} className="w-full bg-slate-900 border border-white/10 rounded-2xl p-4 text-white font-black text-center" />
-        <input placeholder="YOUR HANDLE" value={handle} onChange={e => setHandle(e.target.value.toUpperCase())} className="w-full bg-slate-900 border border-white/10 rounded-2xl p-4 text-white font-black text-center" />
-        <button disabled={!handle || !room} onClick={() => onEnter({ id: generateId(), handle, name: handle, team: 'KC', credits: 1000, lastSeen: Date.now() }, room)} className="w-full py-5 bg-emerald-600 text-black font-black uppercase tracking-widest rounded-2xl shadow-2xl active:scale-95 disabled:opacity-30">Enter Huddle</button>
+        <input placeholder="PARTY CODE" value={room} onChange={e => setRoom(e.target.value.toUpperCase())} className="w-full bg-slate-900 border border-white/10 rounded-2xl p-4 text-white font-black text-center focus:border-emerald-500 outline-none" />
+        <input placeholder="YOUR HANDLE" value={handle} onChange={e => setHandle(e.target.value.toUpperCase())} className="w-full bg-slate-900 border border-white/10 rounded-2xl p-4 text-white font-black text-center focus:border-emerald-500 outline-none" />
+        <button disabled={!handle || !room} onClick={() => onEnter({ id: generateId(), handle, name: handle, team: 'KC', credits: 1000, lastSeen: Date.now() }, room)} className="w-full py-5 bg-emerald-600 text-black font-black uppercase tracking-widest rounded-2xl shadow-2xl active:scale-95 disabled:opacity-30 transition-all">Enter Huddle</button>
       </div>
     </div>
   );
@@ -332,13 +370,14 @@ function Login({ onEnter, initialRoom }: any) {
 
 function QRModal({ url, onClose }: any) {
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-black/90 backdrop-blur-md">
-      <div className="bg-slate-900 border border-white/10 p-8 rounded-[2.5rem] w-full max-w-xs text-center flex flex-col items-center gap-6">
-        <h2 className="font-orbitron font-black text-emerald-400 uppercase text-xs tracking-widest">Join the Game</h2>
-        <div className="bg-white p-4 rounded-3xl">
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-black/95 backdrop-blur-md">
+      <div className="bg-slate-900 border border-white/10 p-10 rounded-[2.5rem] w-full max-w-xs text-center flex flex-col items-center gap-6 shadow-2xl">
+        <h2 className="font-orbitron font-black text-emerald-400 uppercase text-xs tracking-[0.3em]">Broadcast Link</h2>
+        <div className="bg-white p-4 rounded-3xl shadow-2xl shadow-emerald-500/20">
           <img src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(url)}&color=050505`} alt="QR" className="w-44 h-44" />
         </div>
-        <button onClick={onClose} className="text-slate-500 font-black text-[10px] uppercase tracking-widest">Close</button>
+        <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Scanning adds guests to the huddle</p>
+        <button onClick={onClose} className="bg-white/5 w-full py-4 rounded-xl text-slate-300 font-black text-[10px] uppercase tracking-widest border border-white/10">Close</button>
       </div>
     </div>
   );
