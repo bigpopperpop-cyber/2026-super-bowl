@@ -10,14 +10,14 @@ import {
   orderBy,
   limit,
   isFirebaseConfigured 
-} from './services/firebaseService.ts';
-import { User, PropBet, UserBet, ChatMessage, GameState } from './types.ts';
-import { NFL_TEAMS } from './constants.ts';
-import BettingPanel from './components/BettingPanel.tsx';
-import ChatRoom from './components/ChatRoom.tsx';
-import Leaderboard from './components/Leaderboard.tsx';
-import TeamHelmet from './components/TeamHelmet.tsx';
-import { generateLiveProps, resolveProps, getGameUpdate } from './services/geminiService.ts';
+} from './services/firebaseService';
+import { User, PropBet, UserBet, ChatMessage, GameState } from './types';
+import { NFL_TEAMS } from './constants';
+import BettingPanel from './components/BettingPanel';
+import ChatRoom from './components/ChatRoom';
+import Leaderboard from './components/Leaderboard';
+import TeamHelmet from './components/TeamHelmet';
+import { generateLiveProps, resolveProps, getGameUpdate } from './services/geminiService';
 
 const generateId = () => Math.random().toString(36).substring(2, 11);
 
