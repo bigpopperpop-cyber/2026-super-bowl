@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import * as Y from 'yjs';
 // @ts-ignore
 import { WebrtcProvider } from 'y-webrtc';
@@ -7,12 +7,11 @@ import { WebrtcProvider } from 'y-webrtc';
 import { WebsocketProvider } from 'y-websocket';
 // @ts-ignore
 import { IndexeddbPersistence } from 'y-indexeddb';
-import { User, ChatMessage, PropBet, UserBet, GameState } from './types';
-import { NFL_TEAMS, INITIAL_PROPS } from './constants';
-import { GoogleGenAI } from '@google/genai';
+import { User, PropBet, UserBet, GameState } from './types';
+import { INITIAL_PROPS } from './constants';
+import { generateLiveProps, resolveProps, checkGameEnd } from './services/geminiService';
 
-const STORAGE_KEY = 'sblix_profile_v4';
-
+const STORAGE_KEY = 'sblix_v6_engine';
 const generateId = () => Math.random().toString(36).substring(2, 11);
 
 export default function App() {
@@ -26,379 +25,205 @@ export default function App() {
     return saved ? JSON.parse(saved) : null;
   });
 
-  const [activeTab, setActiveTab] = useState<'chat' | 'bets' | 'leaderboard' | 'host'>('chat');
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [gameState, setGameState] = useState<GameState>({ scoreHome: 0, scoreAway: 0, quarter: '1st', time: '15:00', possession: 'home' });
+  const [activeTab, setActiveTab] = useState<'bets' | 'leaderboard' | 'admin'>('bets');
+  const [gameState, setGameState] = useState<GameState>({ scoreHome: 0, scoreAway: 0, quarter: '1st', time: '15:00', possession: 'home', isGameOver: false });
   const [props, setProps] = useState<PropBet[]>(INITIAL_PROPS);
   const [allBets, setAllBets] = useState<UserBet[]>([]);
   const [users, setUsers] = useState<User[]>([]);
-  const [peerCount, setPeerCount] = useState(0);
-  const [wsStatus, setWsStatus] = useState('connecting');
-  const [isHost, setIsHost] = useState(() => localStorage.getItem('sblix_host') === 'true');
+  const [isHost] = useState(() => localStorage.getItem('sblix_host') === 'true');
+  const [showQR, setShowQR] = useState(false);
+  const [aiStatus, setAiStatus] = useState<'idle' | 'searching' | 'settling'>('idle');
 
-  // Shared Doc - Core Sync Data Structure
   const doc = useMemo(() => new Y.Doc(), []);
-  const sharedMessages = useMemo(() => doc.getArray<ChatMessage>('messages'), [doc]);
-  const sharedGame = useMemo(() => doc.getMap('gameState'), [doc]);
-  const sharedProps = useMemo(() => doc.getMap('props'), [doc]);
-  const sharedUserBets = useMemo(() => doc.getArray<UserBet>('userBets'), [doc]);
-  const sharedUsers = useMemo(() => doc.getMap('users'), [doc]);
+  const sharedGame = doc.getMap('gameState');
+  const sharedProps = doc.getMap('props');
+  const sharedUserBets = doc.getArray<UserBet>('userBets');
+  const sharedUsers = doc.getMap('users');
 
   useEffect(() => {
     if (!user || !roomCode) return;
-
-    // Unique room name to avoid crosstalk with other parties
-    const fullRoomName = `sblix-stadium-${roomCode.trim()}`;
-    
-    // 1. Persistence - survive page refreshes
-    const persistence = new IndexeddbPersistence(fullRoomName, doc);
-    
-    // 2. WebRTC - Direct Device-to-Device Sync
-    const webrtc = new WebrtcProvider(fullRoomName, doc, { 
-      signaling: [
-        'wss://signaling.yjs.dev', 
-        'wss://y-webrtc-signaling-us.herokuapp.com',
-        'wss://y-webrtc-signaling-eu.herokuapp.com'
-      ] 
-    });
-
-    // 3. WebSocket - Cloud Backup Sync
+    const fullRoomName = `sblix-party-${roomCode}`;
+    new IndexeddbPersistence(fullRoomName, doc);
+    const webrtc = new WebrtcProvider(fullRoomName, doc, { signaling: ['wss://signaling.yjs.dev'] });
     const ws = new WebsocketProvider('wss://demos.yjs.dev', fullRoomName, doc);
 
     const syncUI = () => {
-      setMessages(sharedMessages.toArray());
       setGameState(sharedGame.toJSON() as GameState);
       setAllBets(sharedUserBets.toArray());
-      
       const pData = sharedProps.toJSON();
-      setProps(prev => prev.map(p => pData[p.id] ? { ...p, ...pData[p.id] } : p));
-      
-      const uMap = sharedUsers.toJSON();
-      const now = Date.now();
-      const active = Object.values(uMap) as User[];
-      setUsers(active.filter(u => now - u.lastSeen < 60000));
-      
-      setPeerCount(webrtc.room ? webrtc.room.webrtcConns.size : 0);
-      setWsStatus(ws.wsconnected ? 'online' : 'reconnecting');
+      setProps(prev => {
+        const base = prev.map(p => pData[p.id] ? { ...p, ...pData[p.id] } : p);
+        const dynamic = Object.values(pData).filter((p: any) => p.isAiGenerated && !prev.find(x => x.id === p.id));
+        return [...base, ...(dynamic as PropBet[])];
+      });
+      setUsers(Object.values(sharedUsers.toJSON()) as User[]);
     };
 
-    // Watch for remote changes
-    sharedMessages.observe(syncUI);
     sharedGame.observe(syncUI);
     sharedProps.observe(syncUI);
     sharedUserBets.observe(syncUI);
     sharedUsers.observe(syncUI);
 
-    // Initial heartbeat
     const heartbeat = setInterval(() => {
       sharedUsers.set(user.id, { ...user, lastSeen: Date.now() });
-      setPeerCount(webrtc.room ? webrtc.room.webrtcConns.size : 0);
     }, 10000);
 
-    webrtc.on('status', syncUI);
-    ws.on('status', syncUI);
-
-    // Forced sync after 1s to catch up
-    setTimeout(syncUI, 1000);
-
-    return () => {
-      webrtc.destroy();
-      ws.destroy();
-      persistence.destroy();
-      clearInterval(heartbeat);
-    };
+    return () => { webrtc.destroy(); ws.destroy(); clearInterval(heartbeat); };
   }, [user, doc, roomCode]);
 
-  const handleSendMessage = (text: string) => {
-    if (!user || !text.trim()) return;
-    try {
-      const msg: ChatMessage = { 
-        id: generateId(), 
-        userId: user.id, 
-        userName: user.handle, 
-        text: text.trim(), 
-        timestamp: Date.now() 
-      };
-      sharedMessages.push([msg]);
-    } catch (err) {
-      console.error("Chat push failed:", err);
-    }
-  };
+  // AI Oracle Automation (Only runs on Host device)
+  useEffect(() => {
+    if (!isHost || gameState.isGameOver) return;
+
+    const runOracle = async () => {
+      setAiStatus('searching');
+      const gameCheck = await checkGameEnd();
+      
+      if (gameCheck.is3rdQuarterOver) {
+        sharedGame.set('isGameOver', true);
+        sharedGame.set('quarter', 'Final (3rd Q End)');
+        sharedGame.set('scoreHome', gameCheck.homeScore);
+        sharedGame.set('scoreAway', gameCheck.awayScore);
+        setAiStatus('idle');
+        return;
+      }
+
+      // Automatically Settle Finished Props
+      setAiStatus('settling');
+      const resolutions = await resolveProps(props);
+      resolutions.forEach(res => {
+        sharedProps.set(res.id, { ...sharedProps.get(res.id), resolved: true, winner: res.winner });
+      });
+
+      // Generate New Live Props if needed
+      if (props.filter(p => !p.resolved).length < 4) {
+        setAiStatus('searching');
+        const newProps = await generateLiveProps(gameState);
+        newProps.forEach(np => {
+          const id = generateId();
+          sharedProps.set(id, { ...np, id, resolved: false, isAiGenerated: true });
+        });
+      }
+      setAiStatus('idle');
+    };
+
+    const interval = setInterval(runOracle, 45000); // Check every 45s
+    return () => clearInterval(interval);
+  }, [isHost, gameState, props]);
 
   const handlePlaceBet = (betId: string, selection: string) => {
-    if (!user) return;
-    const existing = allBets.find(b => b.userId === user.id && b.betId === betId);
-    if (existing) return;
-    const b: UserBet = { id: generateId(), userId: user.id, betId, selection, timestamp: Date.now() };
+    if (gameState.isGameOver) return;
+    const b: UserBet = { id: generateId(), userId: user!.id, betId, selection, timestamp: Date.now() };
     sharedUserBets.push([b]);
   };
 
-  const updateGame = (updates: Partial<GameState>) => {
-    if (!isHost) return;
-    Object.entries(updates).forEach(([k, v]) => sharedGame.set(k, v));
-  };
-
-  const settleBet = (betId: string, winner: string) => {
-    if (!isHost) return;
-    sharedProps.set(betId, { resolved: true, winner });
-  };
-
-  const triggerAI = async () => {
-    if (!isHost) return;
-    try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
-      const context = `Score: Home ${gameState.scoreHome} - Away ${gameState.scoreAway}. Chat: ${messages.slice(-3).map(m => m.text).join(', ')}`;
-      const res = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents: `You are Gerry the Gambler, a wild high-stakes Super Bowl analyst. Score: ${context}. Give a snappy 1-sentence commentary on the huddle and game.`,
-      });
-      const text = res.text || "THE ACTION IS ELECTRIC!";
-      sharedMessages.push([{ 
-        id: generateId(), 
-        userId: 'AI', 
-        userName: 'GERRY THE GAMBLER', 
-        text, 
-        timestamp: Date.now(), 
-        isAI: true 
-      }]);
-    } catch (error) {
-      console.error("AI Fetch Failure:", error);
-      // Fail silently to the user so the chat doesn't feel 'broken'
-    }
-  };
-
-  const copyInvite = () => {
-    const url = `${window.location.origin}${window.location.pathname}?room=${roomCode}`;
-    navigator.clipboard.writeText(url).then(() => {
-      alert("Huddle Invite Copied!");
-    });
-  };
-
-  if (!user || !roomCode) {
-    return (
-      <Login 
-        initialRoom={roomCode} 
-        onEnter={(u, r) => { 
-          setUser(u); 
-          setRoomCode(r.toUpperCase());
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(u)); 
-          window.history.replaceState({}, '', `?room=${r.toUpperCase()}`);
-        }} 
-      />
-    );
-  }
+  if (!user || !roomCode) return <Login onEnter={(u, r) => { setUser(u); setRoomCode(r.toUpperCase()); localStorage.setItem(STORAGE_KEY, JSON.stringify(u)); window.history.replaceState({}, '', `?room=${r.toUpperCase()}`); }} initialRoom={roomCode} />;
 
   return (
-    <div className="flex flex-col h-screen bg-slate-950 max-w-lg mx-auto overflow-hidden border-x border-white/5 shadow-2xl">
-      {/* Header HUD */}
-      <header className="glass p-4 border-b border-white/10 shrink-0 z-50">
-        <div className="flex justify-between items-center mb-3">
+    <div className="flex flex-col h-screen bg-[#050505] text-white max-w-lg mx-auto border-x border-white/5 shadow-2xl overflow-hidden">
+      {/* HUD */}
+      <header className="p-4 bg-slate-900/50 backdrop-blur-xl border-b border-white/10 shrink-0">
+        <div className="flex justify-between items-center mb-4">
           <div className="flex items-center gap-2">
-             <div className="relative flex items-center justify-center w-3 h-3">
-                <div className={`absolute inset-0 rounded-full animate-ping opacity-75 ${wsStatus === 'online' ? 'bg-emerald-500' : 'bg-red-500'}`} />
-                <div className={`relative w-2 h-2 rounded-full ${wsStatus === 'online' ? 'bg-emerald-400' : 'bg-red-400'}`} />
-             </div>
-             <h1 className="font-orbitron font-black text-2xl tracking-tighter text-sky-400 italic">SBLIX</h1>
+            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_10px_#10b981]" />
+            <h1 className="font-orbitron font-black text-2xl italic tracking-tighter text-emerald-400">ORACLE</h1>
           </div>
-          <div className="flex items-center gap-3">
-             <button onClick={copyInvite} className="bg-white/5 border border-white/10 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-white/10 active:scale-95 transition-all">
-                Invite Squad
-             </button>
-             <div className="flex items-center gap-1.5 bg-sky-500/10 border border-sky-500/20 px-2 py-1 rounded-lg">
-                <i className="fas fa-users text-sky-500 text-[10px]"></i>
-                <span className="text-[10px] font-black text-sky-500">{users.length}</span>
-             </div>
-          </div>
+          <button onClick={() => setShowQR(true)} className="bg-white/5 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest flex items-center gap-2 border border-white/10">
+            <i className="fas fa-qrcode text-emerald-400"></i> INVITE
+          </button>
         </div>
-        
-        <div className="bg-black/60 rounded-[1.25rem] p-4 border border-white/5 flex items-center justify-between shadow-inner">
+
+        <div className="bg-black/80 rounded-2xl p-4 border border-white/10 flex justify-between items-center relative overflow-hidden">
+          {gameState.isGameOver && <div className="absolute inset-0 bg-red-600/20 backdrop-blur-[2px] flex items-center justify-center z-10 font-orbitron font-black text-xl tracking-widest text-red-500">GAME OVER</div>}
           <div className="text-center">
-            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">HOME</p>
-            <p className="text-4xl font-orbitron font-black leading-none">{gameState.scoreHome}</p>
+            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">HOME</p>
+            <p className="text-4xl font-orbitron font-black">{gameState.scoreHome}</p>
           </div>
-          <div className="text-center px-4 border-x border-white/5">
-            <div className="bg-sky-500/20 text-sky-400 text-[11px] font-black px-3 py-1 rounded-full mb-1 inline-block">
-              {gameState.quarter} · {gameState.time}
+          <div className="text-center px-6 border-x border-white/5">
+            <div className="bg-emerald-500/10 text-emerald-400 text-[10px] font-black px-3 py-1 rounded-full mb-1 border border-emerald-500/20">
+              {gameState.quarter}
             </div>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">POSS: {gameState.possession}</p>
+            <p className="text-[10px] font-bold text-slate-500">{gameState.time}</p>
           </div>
           <div className="text-center">
-            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">AWAY</p>
-            <p className="text-4xl font-orbitron font-black leading-none">{gameState.scoreAway}</p>
+            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">AWAY</p>
+            <p className="text-4xl font-orbitron font-black">{gameState.scoreAway}</p>
           </div>
         </div>
       </header>
 
-      {/* Main Content */}
-      <main className="flex-1 overflow-hidden relative bg-slate-950/50">
-        {activeTab === 'chat' && <ChatView messages={messages} user={user} onSend={handleSendMessage} />}
-        {activeTab === 'bets' && <BetsView props={props} allBets={allBets} user={user} onBet={handlePlaceBet} />}
-        {activeTab === 'leaderboard' && <LeaderboardView users={users} allBets={allBets} props={props} />}
-        {activeTab === 'host' && isHost && (
-          <HostConsole state={gameState} update={updateGame} props={props} settle={settleBet} ai={triggerAI} roomCode={roomCode} />
+      {/* AI Pulse */}
+      {isHost && (
+        <div className="bg-indigo-600/10 border-b border-indigo-500/20 px-4 py-2 flex items-center justify-between">
+           <div className="flex items-center gap-2">
+             <i className={`fas fa-microchip text-xs ${aiStatus !== 'idle' ? 'animate-spin text-indigo-400' : 'text-slate-600'}`}></i>
+             <span className="text-[9px] font-black text-indigo-400 uppercase tracking-[0.2em]">Oracle: {aiStatus}</span>
+           </div>
+           <span className="text-[8px] text-slate-600 font-black">AI MONITORING LIVE</span>
+        </div>
+      )}
+
+      <main className="flex-1 overflow-y-auto no-scrollbar">
+        {activeTab === 'bets' ? (
+          <BetsView props={props} allBets={allBets} user={user} onBet={handlePlaceBet} isGameOver={gameState.isGameOver} />
+        ) : (
+          <LeaderboardView users={users} allBets={allBets} props={props} />
         )}
       </main>
 
-      {/* Navigation */}
-      <nav className="glass border-t border-white/10 flex pb-safe shrink-0">
-        <NavBtn active={activeTab === 'chat'} icon="fa-comments" label="Chat" onClick={() => setActiveTab('chat')} />
-        <NavBtn active={activeTab === 'bets'} icon="fa-ticket-alt" label="Props" onClick={() => setActiveTab('bets')} />
+      <nav className="bg-slate-900 border-t border-white/10 flex pb-safe shrink-0">
+        <NavBtn active={activeTab === 'bets'} icon="fa-bolt" label="Live Props" onClick={() => setActiveTab('bets')} />
         <NavBtn active={activeTab === 'leaderboard'} icon="fa-trophy" label="Standings" onClick={() => setActiveTab('leaderboard')} />
-        {isHost && <NavBtn active={activeTab === 'host'} icon="fa-shield-halved" label="Command" onClick={() => setActiveTab('host')} />}
+        {isHost && <NavBtn active={activeTab === 'admin'} icon="fa-cog" label="System" onClick={() => setActiveTab('admin')} />}
       </nav>
+
+      {showQR && <QRModal url={`${window.location.origin}${window.location.pathname}?room=${roomCode}`} onClose={() => setShowQR(false)} />}
     </div>
   );
 }
 
 function NavBtn({ active, icon, label, onClick }: any) {
   return (
-    <button onClick={onClick} className={`flex-1 py-4 flex flex-col items-center gap-1 transition-all ${active ? 'text-sky-400 bg-sky-400/5' : 'text-slate-500'}`}>
-      <i className={`fas ${icon} text-lg transition-transform ${active ? 'scale-110' : ''}`}></i>
+    <button onClick={onClick} className={`flex-1 py-5 flex flex-col items-center gap-1 transition-all ${active ? 'text-emerald-400 bg-emerald-400/5' : 'text-slate-500'}`}>
+      <i className={`fas ${icon} text-lg`}></i>
       <span className="text-[9px] font-black uppercase tracking-widest">{label}</span>
     </button>
   );
 }
 
-function Login({ onEnter, initialRoom }: { onEnter: (u: User, r: string) => void, initialRoom: string }) {
-  const [handle, setHandle] = useState('');
-  const [room, setRoom] = useState(initialRoom || '');
-  const [team, setTeam] = useState('KC');
+function BetsView({ props, allBets, user, onBet, isGameOver }: any) {
+  const sortedProps = useMemo(() => [...props].sort((a, b) => (a.resolved ? 1 : -1)), [props]);
   
   return (
-    <div className="fixed inset-0 bg-slate-950 flex flex-col items-center justify-center p-8 text-center overflow-y-auto">
-      <div className="w-24 h-24 bg-sky-500 rounded-[2rem] flex items-center justify-center mb-8 shadow-2xl shadow-sky-500/30 rotate-3 border-4 border-sky-400/50">
-        <i className="fas fa-football-ball text-4xl text-white"></i>
+    <div className="p-4 space-y-4 pb-20">
+      <div className="flex justify-between items-center px-1">
+        <h2 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em]">Huddle Predictions</h2>
+        {isGameOver && <span className="text-[10px] font-black text-red-500 uppercase">Pool Locked</span>}
       </div>
-      <h1 className="text-5xl font-orbitron font-black mb-1 italic tracking-tighter text-white">SBLIX</h1>
-      <p className="text-sky-500 text-[11px] mb-12 uppercase font-black tracking-[0.4em]">Gridiron Synchronization</p>
-      
-      <div className="w-full max-w-xs space-y-5">
-        <div className="space-y-2 text-left">
-          <label className="text-[10px] font-black text-slate-500 uppercase ml-2 tracking-widest">Huddle Code</label>
-          <input 
-            placeholder="PARTY59"
-            className="w-full bg-slate-900/50 border border-white/10 rounded-2xl p-4 text-white font-bold placeholder:text-slate-800 focus:border-sky-500 outline-none uppercase transition-colors"
-            value={room}
-            onChange={e => setRoom(e.target.value)}
-          />
-        </div>
-        <div className="space-y-2 text-left">
-          <label className="text-[10px] font-black text-slate-500 uppercase ml-2 tracking-widest">Your Handle</label>
-          <input 
-            placeholder="FAN_ONE"
-            className="w-full bg-slate-900/50 border border-white/10 rounded-2xl p-4 text-white font-bold placeholder:text-slate-800 focus:border-sky-500 outline-none uppercase transition-colors"
-            value={handle}
-            onChange={e => setHandle(e.target.value.toUpperCase().slice(0, 15))}
-          />
-        </div>
-        
-        <div className="space-y-2 text-left">
-          <label className="text-[10px] font-black text-slate-500 uppercase ml-2 tracking-widest">Team Allegiance</label>
-          <div className="grid grid-cols-4 gap-2">
-            {['KC', 'PHI', 'SF', 'DET', 'DAL', 'BAL', 'BUF', 'CIN'].map(t => (
-              <button 
-                key={t}
-                onClick={() => setTeam(t)}
-                className={`p-2 rounded-xl border text-[10px] font-black transition-all ${team === t ? 'bg-sky-500 text-white border-sky-400 shadow-lg' : 'bg-slate-900/50 border-white/5 text-slate-600'}`}
-              >
-                {t}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <button 
-          disabled={!handle || !room}
-          onClick={() => onEnter({ id: generateId(), handle, name: handle, team, credits: 1000, lastSeen: Date.now() }, room)}
-          className="w-full py-5 bg-sky-600 text-white rounded-2xl font-black uppercase tracking-widest shadow-2xl active:scale-95 disabled:opacity-30 transition-all mt-6 border-b-4 border-sky-800"
-        >
-          Enter Huddle
-        </button>
-
-        <button 
-          onClick={() => { const p = prompt("ACCESS CODE:"); if(p === 'SB59') { localStorage.setItem('sblix_host', 'true'); window.location.reload(); } }}
-          className="text-[10px] font-black text-slate-800 uppercase pt-8 hover:text-slate-600 transition-colors tracking-widest"
-        >
-          Commish Login
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function ChatView({ messages, user, onSend }: any) {
-  const [input, setInput] = useState('');
-  const endRef = useRef<HTMLDivElement>(null);
-  useEffect(() => endRef.current?.scrollIntoView({ behavior: 'smooth' }), [messages]);
-  
-  return (
-    <div className="flex flex-col h-full bg-slate-950">
-      <div className="flex-1 overflow-y-auto p-4 space-y-4 no-scrollbar">
-        {messages.length === 0 && (
-          <div className="h-full flex flex-col items-center justify-center opacity-10">
-             <i className="fas fa-comment-slash text-6xl mb-4"></i>
-             <p className="text-[12px] font-black uppercase tracking-[0.2em]">Crickets in the Huddle...</p>
-          </div>
-        )}
-        {messages.map((m: ChatMessage) => (
-          <div key={m.id} className={`flex flex-col ${m.userId === user.id ? 'items-end' : 'items-start'} animate-in slide-in-from-bottom-2 duration-300`}>
-            <span className="text-[9px] font-black text-slate-500 mb-1 uppercase px-1 tracking-widest">{m.userName}</span>
-            <div className={`max-w-[85%] px-4 py-3 rounded-2xl text-[14px] shadow-xl ${m.isAI ? 'bg-indigo-600/20 border border-indigo-500/50 text-indigo-100 font-bold italic' : m.userId === user.id ? 'bg-sky-600 text-white rounded-tr-none' : 'bg-slate-900 border border-white/5 text-slate-200 rounded-tl-none'}`}>
-              {m.text}
-            </div>
-          </div>
-        ))}
-        <div ref={endRef} />
-      </div>
-      <form onSubmit={e => { e.preventDefault(); if(input.trim()){ onSend(input); setInput(''); }}} className="p-4 glass border-t border-white/10 flex gap-2">
-        <input 
-          className="flex-1 bg-black/40 border border-white/10 rounded-2xl px-5 py-4 text-sm focus:border-sky-500 outline-none placeholder:text-slate-800 font-bold text-white transition-all"
-          placeholder="SEND TO SQUAD..."
-          value={input}
-          onChange={e => setInput(e.target.value)}
-        />
-        <button type="submit" className="w-14 h-14 bg-sky-500 rounded-2xl flex items-center justify-center active:scale-95 transition-all shadow-xl text-white">
-          <i className="fas fa-paper-plane text-xl"></i>
-        </button>
-      </form>
-    </div>
-  );
-}
-
-function BetsView({ props, allBets, user, onBet }: any) {
-  return (
-    <div className="h-full overflow-y-auto p-4 space-y-4 no-scrollbar pb-32">
-      <div className="flex justify-between items-center mb-2 px-1">
-        <h2 className="font-orbitron font-black text-[11px] uppercase text-slate-500 tracking-[0.2em]">Prop Pool</h2>
-        <span className="text-[9px] font-black text-sky-500 uppercase tracking-widest">Locked Sync</span>
-      </div>
-      {props.map((p: PropBet) => {
+      {sortedProps.map(p => {
         const myBet = allBets.find((b: any) => b.userId === user.id && b.betId === p.id);
-        const stats = allBets.filter((b: any) => b.betId === p.id).length;
         return (
-          <div key={p.id} className={`p-6 rounded-[1.75rem] border transition-all duration-300 ${p.resolved ? 'opacity-40 bg-slate-900 border-white/5' : myBet ? 'border-sky-500 bg-sky-500/5 shadow-[0_0_30px_rgba(14,165,233,0.05)]' : 'bg-slate-900 border-white/10 shadow-lg'}`}>
-            <div className="flex justify-between items-start mb-3">
-              <span className="text-[10px] font-black bg-slate-800 text-slate-400 px-3 py-1 rounded-full uppercase tracking-widest">{p.category}</span>
-              <div className="flex items-center gap-1.5 text-slate-500">
-                 <i className="fas fa-user-check text-[10px]"></i>
-                 <span className="text-[11px] font-black">{stats}</span>
-              </div>
+          <div key={p.id} className={`p-5 rounded-2xl border transition-all ${p.resolved ? 'bg-black/40 opacity-40 border-white/5' : myBet ? 'bg-emerald-500/5 border-emerald-500/50' : 'bg-slate-900 border-white/10'}`}>
+            <div className="flex justify-between items-start mb-2">
+              <span className="text-[9px] font-black px-2 py-0.5 rounded bg-white/5 border border-white/10 text-slate-400 uppercase tracking-widest">{p.category}</span>
+              {p.isAiGenerated && <span className="text-[9px] font-black text-indigo-400"><i className="fas fa-magic mr-1"></i> AI LIVE</span>}
             </div>
-            <p className="font-bold text-xl leading-snug mb-5 text-white">{p.question}</p>
+            <p className="font-bold text-lg mb-4 text-white leading-tight">{p.question}</p>
             {p.resolved ? (
-              <div className="text-sm font-black text-emerald-400 uppercase flex items-center gap-2 bg-emerald-400/10 p-3 rounded-xl border border-emerald-400/20">
+              <div className="text-xs font-black text-emerald-400 uppercase flex items-center gap-2 bg-emerald-500/10 p-3 rounded-xl border border-emerald-500/20">
                 <i className="fas fa-check-circle"></i> WINNER: {p.winner}
               </div>
             ) : myBet ? (
-              <div className="text-sm font-black text-sky-400 uppercase flex items-center gap-2 bg-sky-400/10 p-3 rounded-xl border border-sky-400/20">
+              <div className="text-xs font-black text-emerald-400 uppercase flex items-center gap-2 bg-emerald-500/10 p-3 rounded-xl border border-emerald-500/20">
                 <i className="fas fa-lock"></i> PICK: {myBet.selection}
               </div>
+            ) : isGameOver ? (
+              <div className="text-xs text-slate-600 font-bold uppercase p-3 border border-white/5 rounded-xl text-center">Bets Locked</div>
             ) : (
-              <div className="flex flex-col gap-3">
-                {p.options.map(opt => (
-                  <button key={opt} onClick={() => onBet(p.id, opt)} className="w-full py-4 bg-slate-800 hover:bg-sky-600 hover:text-white border border-white/5 rounded-2xl text-[13px] font-black uppercase transition-all active:scale-95 text-left px-5 flex justify-between items-center shadow-md">
+              <div className="grid grid-cols-1 gap-2">
+                {p.options.map((opt: string) => (
+                  <button key={opt} onClick={() => onBet(p.id, opt)} className="py-4 bg-white/5 border border-white/10 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-emerald-500 hover:text-black transition-all active:scale-95">
                     {opt}
-                    <i className="fas fa-chevron-right opacity-30"></i>
                   </button>
                 ))}
               </div>
@@ -411,124 +236,109 @@ function BetsView({ props, allBets, user, onBet }: any) {
 }
 
 function LeaderboardView({ users, allBets, props }: any) {
-  const standings = useMemo(() => {
-    return users.map((u: User) => {
+  const leaderboard = useMemo(() => {
+    return users.map((u: any) => {
       let score = 0;
-      const uBets = allBets.filter((b: UserBet) => b.userId === u.id);
-      uBets.forEach((b: UserBet) => {
-        const prop = props.find((p: PropBet) => p.id === b.betId);
+      let correct = 0;
+      let total = 0;
+      let streakCount = 0;
+      let maxBadStreak = 0;
+      let currentBadStreak = 0;
+
+      const uBets = allBets.filter((b: any) => b.userId === u.id).sort((a: any, b: any) => a.timestamp - b.timestamp);
+      uBets.forEach((b: any) => {
+        const prop = props.find((p: any) => p.id === b.betId);
         if (prop?.resolved) {
-          if (prop.winner === b.selection) score += 100;
-          else score -= 50;
+          total++;
+          if (prop.winner === b.selection) {
+            score += 100;
+            correct++;
+            currentBadStreak = 0;
+          } else {
+            score -= 50;
+            currentBadStreak++;
+            maxBadStreak = Math.max(maxBadStreak, currentBadStreak);
+          }
         }
       });
-      return { ...u, score };
+      return { ...u, score, correct, total, maxBadStreak, isEarly: uBets.length > 0 && uBets[0].timestamp === Math.min(...allBets.map((b: any) => b.timestamp)) };
     }).sort((a: any, b: any) => b.score - a.score);
   }, [users, allBets, props]);
 
   return (
-    <div className="h-full p-4 space-y-4 overflow-y-auto no-scrollbar pb-32">
-      <h2 className="font-orbitron font-black text-[11px] uppercase text-slate-500 mb-4 tracking-[0.2em] px-1">Standings</h2>
-      {standings.length === 0 && (
-         <div className="py-20 text-center opacity-10">
-            <i className="fas fa-medal text-6xl mb-4"></i>
-            <p className="text-[12px] font-black uppercase">Waiting for player data...</p>
-         </div>
-      )}
-      {standings.map((u: any, i: number) => (
-        <div key={u.id} className={`flex items-center gap-4 p-5 rounded-2xl border transition-all ${i === 0 ? 'bg-amber-500/10 border-amber-500/30' : 'bg-slate-900 border-white/5'}`}>
-          <span className={`w-8 font-orbitron font-black text-2xl ${i === 0 ? 'text-amber-500' : 'text-slate-700'}`}>#{i+1}</span>
-          <div className="w-12 h-12 rounded-full bg-slate-800 border-2 border-white/10 flex items-center justify-center text-[10px] font-black shadow-inner">
-             {u.team}
+    <div className="p-4 space-y-4">
+      <h2 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] px-1">Trophy Room</h2>
+      <div className="grid grid-cols-2 gap-3 mb-6">
+        <TrophyBadge icon="fa-crown" label="THE GOAT" user={leaderboard[0]} type="good" />
+        <TrophyBadge icon="fa-skull" label="FUMBLED BAG" user={[...leaderboard].reverse()[0]} type="bad" />
+        <TrophyBadge icon="fa-crosshairs" label="SNIPER" user={leaderboard.find((u: any) => u.total >= 3 && u.correct === u.total)} type="good" />
+        <TrophyBadge icon="fa-snowflake" label="ICE COLD" user={leaderboard.sort((a: any, b: any) => b.maxBadStreak - a.maxBadStreak)[0]} type="bad" />
+      </div>
+
+      <div className="space-y-3">
+        {leaderboard.map((u: any, i: number) => (
+          <div key={u.id} className="flex items-center gap-4 p-4 bg-slate-900 rounded-2xl border border-white/5">
+            <span className="font-orbitron font-black text-2xl text-slate-700 w-8">#{i+1}</span>
+            <div className="flex-1">
+              <p className="font-black text-sm uppercase text-white">{u.handle}</p>
+              <div className="flex gap-2 mt-1">
+                {u.total >= 3 && u.correct === u.total && <i className="fas fa-crosshairs text-emerald-400 text-[10px]"></i>}
+                {i === 0 && u.score > 0 && <i className="fas fa-crown text-yellow-500 text-[10px]"></i>}
+                {u.maxBadStreak >= 2 && <i className="fas fa-snowflake text-blue-400 text-[10px]"></i>}
+              </div>
+            </div>
+            <div className="text-right">
+               <p className={`font-orbitron font-black ${u.score > 0 ? 'text-emerald-400' : 'text-red-500'}`}>{u.score}</p>
+               <p className="text-[8px] font-black text-slate-500 uppercase">{u.correct}/{u.total} CORRECT</p>
+            </div>
           </div>
-          <div className="flex-1">
-            <p className="font-black text-sm uppercase text-white tracking-tight">{u.handle}</p>
-            <p className="text-[9px] text-slate-600 font-bold uppercase tracking-widest">Points earned</p>
-          </div>
-          <div className="text-right">
-            <p className={`text-2xl font-orbitron font-black ${u.score > 0 ? 'text-emerald-500' : u.score < 0 ? 'text-rose-500' : 'text-slate-600'}`}>
-              {u.score > 0 ? `+${u.score}` : u.score}
-            </p>
-          </div>
-        </div>
-      ))}
+        ))}
+      </div>
     </div>
   );
 }
 
-function HostConsole({ state, update, props, settle, ai, roomCode }: any) {
+function TrophyBadge({ icon, label, user, type }: any) {
+  if (!user || user.total === 0) return null;
   return (
-    <div className="h-full p-6 space-y-10 overflow-y-auto no-scrollbar pb-40">
-      <div className="space-y-5">
-        <div className="flex justify-between items-center border-b border-white/5 pb-2">
-          <h3 className="font-orbitron font-black text-sky-400 text-[12px] tracking-widest uppercase italic">Game Master</h3>
-          <span className="text-[10px] font-black text-slate-700 uppercase">Huddle: {roomCode}</span>
-        </div>
-        
-        <div className="grid grid-cols-2 gap-6">
-          <div className="space-y-4">
-            <p className="text-[10px] font-black text-slate-500 text-center uppercase tracking-widest">HOME SCORE</p>
-            <div className="flex gap-2">
-              <button onClick={() => update({ scoreHome: state.scoreHome + 3 })} className="flex-1 py-4 bg-slate-800 hover:bg-sky-600 rounded-2xl text-[11px] font-black transition-all">+3</button>
-              <button onClick={() => update({ scoreHome: state.scoreHome + 7 })} className="flex-1 py-4 bg-slate-800 hover:bg-sky-600 rounded-2xl text-[11px] font-black transition-all">+7</button>
-            </div>
-            <button onClick={() => update({ scoreHome: Math.max(0, state.scoreHome - 1) })} className="w-full py-2 bg-slate-900/50 border border-white/5 rounded-xl text-[10px] font-black text-slate-600">-1 Adjust</button>
-          </div>
-          <div className="space-y-4">
-            <p className="text-[10px] font-black text-slate-500 text-center uppercase tracking-widest">AWAY SCORE</p>
-            <div className="flex gap-2">
-              <button onClick={() => update({ scoreAway: state.scoreAway + 3 })} className="flex-1 py-4 bg-slate-800 hover:bg-sky-600 rounded-2xl text-[11px] font-black transition-all">+3</button>
-              <button onClick={() => update({ scoreAway: state.scoreAway + 7 })} className="flex-1 py-4 bg-slate-800 hover:bg-sky-600 rounded-2xl text-[11px] font-black transition-all">+7</button>
-            </div>
-            <button onClick={() => update({ scoreAway: Math.max(0, state.scoreAway - 1) })} className="w-full py-2 bg-slate-900/50 border border-white/5 rounded-xl text-[10px] font-black text-slate-600">-1 Adjust</button>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-1">
-             <label className="text-[9px] font-black text-slate-600 ml-2 uppercase">Time Remaining</label>
-             <input className="w-full bg-slate-900 border border-white/10 p-4 rounded-2xl text-sm font-black text-white focus:border-sky-500 outline-none" value={state.time} onChange={e => update({ time: e.target.value })} />
-          </div>
-          <div className="space-y-1">
-             <label className="text-[9px] font-black text-slate-600 ml-2 uppercase">Current Quarter</label>
-             <select className="w-full bg-slate-900 border border-white/10 p-4 rounded-2xl text-sm font-black text-white focus:border-sky-500 outline-none" value={state.quarter} onChange={e => update({ quarter: e.target.value })}>
-                <option>1st</option><option>2nd</option><option>Half</option><option>3rd</option><option>4th</option><option>Final</option>
-             </select>
-          </div>
-        </div>
-
-        <button onClick={ai} className="w-full py-5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl font-black uppercase tracking-widest shadow-2xl transition-all border-b-4 border-indigo-800 active:scale-95 active:border-b-0 active:mt-1">
-           <i className="fas fa-bolt mr-2"></i> Summon AI Commentary
-        </button>
+    <div className={`p-4 rounded-2xl border flex flex-col items-center gap-2 text-center shadow-xl ${type === 'good' ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-red-500/5 border-red-500/20'}`}>
+      <i className={`fas ${icon} text-xl ${type === 'good' ? 'text-emerald-400' : 'text-red-500'}`}></i>
+      <div>
+        <p className={`text-[8px] font-black uppercase tracking-widest ${type === 'good' ? 'text-emerald-400' : 'text-red-500'}`}>{label}</p>
+        <p className="text-[10px] font-black text-white uppercase mt-1">{user.handle}</p>
       </div>
+    </div>
+  );
+}
 
-      <div className="space-y-5">
-        <h3 className="font-orbitron font-black text-rose-500 text-[12px] tracking-widest uppercase">Settle Props</h3>
-        <div className="space-y-4">
-          {props.map((p: PropBet) => (
-            <div key={p.id} className="p-5 bg-slate-950 rounded-2xl border border-white/5 space-y-4 shadow-xl">
-              <p className="text-[13px] font-bold text-slate-300 leading-tight">{p.question}</p>
-              {!p.resolved ? (
-                <div className="flex gap-2">
-                  {p.options.map(opt => (
-                    <button key={opt} onClick={() => { if(confirm(`Settle '${opt}' for this prop?`)) settle(p.id, opt); }} className="flex-1 py-4 bg-emerald-600/10 text-emerald-400 border border-emerald-600/30 rounded-xl text-[10px] font-black uppercase hover:bg-emerald-600 hover:text-white transition-all">
-                      {opt} Wins
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <div className="flex justify-between items-center bg-slate-900 px-4 py-3 rounded-xl border border-white/5">
-                   <span className="text-[10px] font-black text-slate-600 uppercase">Settled</span>
-                   <span className="text-[11px] font-black text-emerald-400 uppercase tracking-widest">{p.winner}</span>
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
+function Login({ onEnter, initialRoom }: any) {
+  const [handle, setHandle] = useState('');
+  const [room, setRoom] = useState(initialRoom || '');
+  return (
+    <div className="fixed inset-0 bg-[#050505] flex flex-col items-center justify-center p-8 text-center">
+      <div className="w-20 h-20 bg-emerald-500 rounded-[2rem] flex items-center justify-center mb-10 shadow-[0_0_40px_rgba(16,185,129,0.3)] rotate-6">
+        <i className="fas fa-eye text-3xl text-black"></i>
       </div>
+      <h1 className="text-5xl font-orbitron font-black italic tracking-tighter text-white mb-2">ORACLE</h1>
+      <p className="text-emerald-500 text-[10px] font-black uppercase tracking-[0.4em] mb-12">SBLIX Live Monitoring</p>
+      <div className="w-full max-w-xs space-y-4">
+        <input placeholder="PARTY CODE" value={room} onChange={e => setRoom(e.target.value.toUpperCase())} className="w-full bg-slate-900 border border-white/10 rounded-2xl p-4 text-white font-black text-center" />
+        <input placeholder="YOUR HANDLE" value={handle} onChange={e => setHandle(e.target.value.toUpperCase())} className="w-full bg-slate-900 border border-white/10 rounded-2xl p-4 text-white font-black text-center" />
+        <button disabled={!handle || !room} onClick={() => onEnter({ id: generateId(), handle, name: handle, team: 'KC', credits: 1000, lastSeen: Date.now() }, room)} className="w-full py-5 bg-emerald-600 text-black font-black uppercase tracking-widest rounded-2xl shadow-2xl active:scale-95 disabled:opacity-30">Enter Huddle</button>
+      </div>
+    </div>
+  );
+}
 
-      <div className="pt-10 text-center">
-         <button onClick={() => { if(confirm("Log out of Commissioner access?")) { localStorage.removeItem('sblix_host'); window.location.reload(); } }} className="text-[10px] font-black text-rose-500/50 uppercase tracking-widest hover:text-rose-500 transition-colors">Terminate Commish Access</button>
+function QRModal({ url, onClose }: any) {
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-black/90 backdrop-blur-md">
+      <div className="bg-slate-900 border border-white/10 p-8 rounded-[2.5rem] w-full max-w-xs text-center flex flex-col items-center gap-6">
+        <h2 className="font-orbitron font-black text-emerald-400 uppercase text-xs tracking-widest">Join the Game</h2>
+        <div className="bg-white p-4 rounded-3xl">
+          <img src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(url)}&color=050505`} alt="QR" className="w-44 h-44" />
+        </div>
+        <button onClick={onClose} className="text-slate-500 font-black text-[10px] uppercase tracking-widest">Close</button>
       </div>
     </div>
   );

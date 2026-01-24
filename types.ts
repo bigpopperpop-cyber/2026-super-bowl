@@ -8,6 +8,7 @@ export interface User {
   lastSeen: number;
 }
 
+// Added ChatMessage interface to fix import error in ChatRoom.tsx
 export interface ChatMessage {
   id: string;
   userId: string;
@@ -17,6 +18,14 @@ export interface ChatMessage {
   isAI?: boolean;
 }
 
+export interface Trophy {
+  id: string;
+  name: string;
+  icon: string;
+  description: string;
+  type: 'good' | 'bad';
+}
+
 export interface PropBet {
   id: string;
   question: string;
@@ -24,6 +33,7 @@ export interface PropBet {
   options: string[];
   resolved: boolean;
   winner?: string;
+  isAiGenerated?: boolean;
 }
 
 export interface UserBet {
@@ -40,4 +50,5 @@ export interface GameState {
   quarter: string;
   time: string;
   possession: 'home' | 'away';
+  isGameOver: boolean;
 }
