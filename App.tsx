@@ -1,377 +1,245 @@
 
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import * as Y from 'yjs';
-// @ts-ignore
-import { WebsocketProvider } from 'y-websocket';
-// @ts-ignore
-import { WebrtcProvider } from 'y-webrtc';
-// @ts-ignore
-import { IndexeddbPersistence } from 'y-indexeddb';
-import { User } from './types';
+import React, { useState, useEffect } from 'react';
+import { 
+  db, 
+  collection, 
+  doc, 
+  onSnapshot, 
+  setDoc, 
+  updateDoc, 
+  query, 
+  orderBy,
+  limit,
+  isFirebaseConfigured 
+} from './services/firebaseService';
+import { User, PropBet, UserBet, ChatMessage, GameState } from './types';
+import { NFL_TEAMS } from './constants';
+import BettingPanel from './components/BettingPanel';
+import ChatRoom from './components/ChatRoom';
+import Leaderboard from './components/Leaderboard';
+import TeamHelmet from './components/TeamHelmet';
+import { generateLiveProps, resolveProps, getGameUpdate } from './services/geminiService';
 
 const generateId = () => Math.random().toString(36).substring(2, 11);
 
 export default function App() {
-  const [roomCode, setRoomCode] = useState(() => {
-    return new URLSearchParams(window.location.search).get('room')?.toUpperCase() || '';
-  });
-
-  const [localUser, setLocalUser] = useState<User | null>(() => {
-    const params = new URLSearchParams(window.location.search);
-    const uId = params.get('u');
-    const uName = params.get('n');
-    if (uId && uName) {
-      return { 
-        id: uId, 
-        name: uName, 
-        handle: uName, 
-        deviceType: 'mobile', 
-        score: 0, 
-        lastPulse: Date.now(),
-        isVerified: false,
-        pingCount: 0
-      };
-    }
-    return null;
-  });
-
-  const [view, setView] = useState<'landing' | 'host' | 'guest'>(() => {
-    if (localUser) return 'guest';
+  const [roomCode, setRoomCode] = useState(() => new URLSearchParams(window.location.search).get('room')?.toUpperCase() || '');
+  const [view, setView] = useState<'landing' | 'onboarding' | 'main' | 'host'>(() => {
+    if (new URLSearchParams(window.location.search).get('room')) return 'onboarding';
     return 'landing';
   });
 
-  // --- SYNC ENGINE ---
-  const doc = useMemo(() => new Y.Doc(), []);
-  const usersMap = useMemo(() => doc.getMap<User>('registry'), [doc]);
-  const configMap = useMemo(() => doc.getMap<any>('config'), [doc]);
-  
+  const [localUser, setLocalUser] = useState<User | null>(() => {
+    const uId = localStorage.getItem('sblix_uid');
+    const uName = localStorage.getItem('sblix_uname');
+    const uTeam = localStorage.getItem('sblix_uteam');
+    if (uId && uName) return { id: uId, name: uName, handle: uName, team: uTeam || 'KC', deviceType: 'mobile', score: 0, lastPulse: Date.now(), isVerified: true, pingCount: 0 };
+    return null;
+  });
+
+  const [activeTab, setActiveTab] = useState<'bets' | 'chat' | 'scores'>('bets');
   const [allUsers, setAllUsers] = useState<User[]>([]);
-  const [wsConnected, setWsConnected] = useState(false);
-  const [rtcConnected, setRtcConnected] = useState(false);
-  const [autoVerify, setAutoVerify] = useState(true);
-  const [hostReaction, setHostReaction] = useState<string | null>(null);
+  const [propBets, setPropBets] = useState<PropBet[]>([]);
+  const [userBets, setUserBets] = useState<UserBet[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [gameState, setGameState] = useState<GameState | null>(null);
+  const [isAiLoading, setIsAiLoading] = useState(false);
+
+  // --- CONFIGURATION HELPER ---
+  if (!isFirebaseConfigured) {
+    return (
+      <div className="h-screen bg-[#020617] flex items-center justify-center p-8 text-center">
+        <div className="max-w-md space-y-8 glass-card p-10 border-emerald-500/30">
+          <div className="w-20 h-20 bg-emerald-600 rounded-3xl mx-auto flex items-center justify-center status-pulse">
+            <i className="fas fa-key text-white text-3xl"></i>
+          </div>
+          <div className="space-y-4">
+            <h1 className="text-3xl font-orbitron font-black text-white italic">SETUP REQUIRED</h1>
+            <p className="text-slate-400 text-sm leading-relaxed">
+              Your site is almost ready! To sync with your 20 guests, you need to add your <span className="text-emerald-500 font-bold">API Key</span> to the code.
+            </p>
+          </div>
+          <div className="bg-slate-900 rounded-2xl p-6 text-left space-y-4 border border-white/5">
+            <div className="flex gap-4">
+              <span className="bg-emerald-500 text-black w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black shrink-0">1</span>
+              <p className="text-[12px] text-slate-300">Click the <b>Gear icon</b> (Settings) in your Firebase console.</p>
+            </div>
+            <div className="flex gap-4">
+              <span className="bg-emerald-500 text-black w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black shrink-0">2</span>
+              <p className="text-[12px] text-slate-300">Register a <b>Web App</b> and copy the <b>apiKey</b> and <b>appId</b>.</p>
+            </div>
+            <div className="flex gap-4">
+              <span className="bg-emerald-500 text-black w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black shrink-0">3</span>
+              <p className="text-[12px] text-slate-300">Paste them into <code>services/firebaseService.ts</code>.</p>
+            </div>
+          </div>
+          <p className="text-[10px] font-black text-slate-600 uppercase tracking-widest">Waiting for Cloud Credentials...</p>
+        </div>
+      </div>
+    );
+  }
 
   useEffect(() => {
-    if (!roomCode) return;
+    if (!roomCode || !db) return;
 
-    const roomId = `sblix-v9-final-${roomCode}`;
-    
-    // 1. Local Persistence: Saves verified status on the device even if they refresh
-    const indexeddbProvider = new IndexeddbPersistence(roomId, doc);
-    
-    // 2. Redundant Cloud Providers
-    const wsProvider = new WebsocketProvider('wss://demos.yjs.dev', roomId, doc);
-    const rtcProvider = new WebrtcProvider(roomId, doc, {
-      signaling: ['wss://signaling.yjs.dev', 'wss://y-webrtc-signaling-us.herokuapp.com']
-    });
+    const unsubUsers = onSnapshot(collection(db, "rooms", roomCode, "users"), (s) => setAllUsers(s.docs.map(d => d.data() as User)));
+    const unsubProps = onSnapshot(query(collection(db, "rooms", roomCode, "props"), orderBy("id", "desc")), (s) => setPropBets(s.docs.map(d => d.data() as PropBet)));
+    const unsubBets = onSnapshot(collection(db, "rooms", roomCode, "bets"), (s) => setUserBets(s.docs.map(d => d.data() as UserBet)));
+    const unsubChat = onSnapshot(query(collection(db, "rooms", roomCode, "messages"), orderBy("timestamp", "desc"), limit(50)), (s) => setMessages(s.docs.map(d => d.data() as ChatMessage).reverse()));
+    const unsubGame = onSnapshot(doc(db, "rooms", roomCode, "state", "live"), (d) => d.exists() && setGameState(d.data() as GameState));
 
-    wsProvider.on('status', (e: any) => setWsConnected(e.status === 'connected'));
-    rtcProvider.on('status', (e: any) => setRtcConnected(e.connected));
+    return () => { unsubUsers(); unsubProps(); unsubBets(); unsubChat(); unsubGame(); };
+  }, [roomCode]);
 
-    const sync = () => {
-      const data = Object.values(usersMap.toJSON()) as User[];
-      setAllUsers(data);
-      
-      const config = configMap.toJSON();
-      if (config.autoVerify !== undefined) setAutoVerify(config.autoVerify);
-
-      // Host Auto-Verification Logic
-      if (view === 'host' && config.autoVerify) {
-        data.forEach(u => {
-          if (u.id !== 'host' && !u.isVerified) {
-            usersMap.set(u.id, { ...u, isVerified: true });
-          }
-        });
-      }
-
-      // Guest Feedback
-      const hostState = usersMap.get('host');
-      if (hostState && Date.now() - hostState.lastPulse < 1500) {
-        setHostReaction('SIGNAL_IN');
-        setTimeout(() => setHostReaction(null), 800);
-      }
-    };
-
-    usersMap.observe(sync);
-    configMap.observe(sync);
-
-    const heartbeat = setInterval(() => {
-      const timestamp = Date.now();
-      if (localUser) {
-        const current = usersMap.get(localUser.id) || localUser;
-        usersMap.set(localUser.id, { ...current, lastPulse: timestamp });
-      } else if (view === 'host') {
-        usersMap.set('host', { 
-          id: 'host', 
-          name: 'HUB', 
-          handle: 'HUB', 
-          deviceType: 'desktop', 
-          score: 0, 
-          lastPulse: timestamp,
-          isVerified: true,
-          pingCount: 0
-        });
-      }
-    }, 2000);
-
-    return () => {
-      clearInterval(heartbeat);
-      wsProvider.destroy();
-      rtcProvider.destroy();
-      indexeddbProvider.destroy();
-    };
-  }, [roomCode, doc, usersMap, configMap, view, localUser?.id]);
-
-  const toggleAutoVerify = () => {
-    configMap.set('autoVerify', !autoVerify);
+  const handleJoin = async (name: string, team: string) => {
+    const id = generateId();
+    const user: User = { id, name, handle: name, team, deviceType: 'mobile', score: 0, lastPulse: Date.now(), isVerified: true, pingCount: 0 };
+    localStorage.setItem('sblix_uid', id);
+    localStorage.setItem('sblix_uname', name);
+    localStorage.setItem('sblix_uteam', team);
+    setLocalUser(user);
+    if (db) await setDoc(doc(db, "rooms", roomCode, "users", id), user);
+    setView('main');
   };
 
-  const forceHandshake = () => {
-    if (localUser) {
-      const current = usersMap.get(localUser.id) || localUser;
-      usersMap.set(localUser.id, { 
-        ...current, 
-        lastPulse: Date.now(),
-        pingCount: (current.pingCount || 0) + 1 
-      });
+  const handleAiOperations = async () => {
+    if (!roomCode || !db) return;
+    setIsAiLoading(true);
+    try {
+      const freshGame = await getGameUpdate();
+      if (freshGame) await setDoc(doc(db, "rooms", roomCode, "state", "live"), freshGame);
+
+      const results = await resolveProps(propBets);
+      for (const res of results) {
+        await updateDoc(doc(db, "rooms", roomCode, "props", res.id), { resolved: true, winner: res.winner });
+      }
+
+      if (freshGame) {
+        const newProps = await generateLiveProps(freshGame);
+        for (const p of newProps) {
+          const id = `p-ai-${generateId()}`;
+          await setDoc(doc(db, "rooms", roomCode, "props", id), { ...p, id, resolved: false });
+        }
+      }
+    } finally {
+      setIsAiLoading(false);
     }
   };
-
-  const verifyUser = (userId: string) => {
-    const u = usersMap.get(userId);
-    if (u) usersMap.set(userId, { ...u, isVerified: true });
-  };
-
-  // --- VIEWS ---
 
   if (view === 'landing') {
     return (
       <div className="h-screen bg-[#020617] flex items-center justify-center p-8">
         <div className="max-w-xs w-full space-y-12 text-center">
-          <div className="w-24 h-24 bg-emerald-600 rounded-[2.5rem] mx-auto flex items-center justify-center shadow-[0_0_50px_rgba(16,185,129,0.3)]">
-            <i className="fas fa-bolt-lightning text-white text-4xl"></i>
+          <div className="w-24 h-24 bg-emerald-600 rounded-[2.5rem] mx-auto flex items-center justify-center shadow-[0_0_60px_rgba(16,185,129,0.3)] status-pulse">
+            <i className="fas fa-football text-white text-4xl"></i>
           </div>
           <div className="space-y-4">
-            <h1 className="text-5xl font-orbitron font-black text-white italic tracking-tighter uppercase">SBLIX<br/>MESH</h1>
-            <p className="text-[10px] font-black text-slate-500 tracking-[0.4em] uppercase">Persistent Link Protocol</p>
+            <h1 className="text-5xl font-orbitron font-black text-white italic tracking-tighter uppercase">SBLIX</h1>
+            <p className="text-[10px] font-black text-slate-500 tracking-[0.4em] uppercase">Super Bowl LIX Mesh</p>
           </div>
-          <button 
-            onClick={() => setView('host')}
-            className="w-full py-6 bg-white text-black font-black uppercase tracking-widest rounded-3xl shadow-2xl active:scale-95 transition-all"
-          >
-            Deploy Host
-          </button>
+          <div className="space-y-3">
+             <input placeholder="ROOM CODE" className="w-full bg-slate-900 border border-white/5 rounded-2xl px-6 py-4 font-bold text-center text-white outline-none focus:border-emerald-500" onChange={(e) => setRoomCode(e.target.value.toUpperCase())} />
+             <button onClick={() => roomCode && setView('host')} className="w-full py-6 bg-white text-black font-black uppercase tracking-widest rounded-3xl shadow-2xl active:scale-95 transition-all">Launch Hub</button>
+          </div>
         </div>
       </div>
     );
   }
 
   if (view === 'host') {
-    const guests = allUsers.filter(u => u.id !== 'host');
-    
     return (
       <div className="min-h-screen bg-[#020410] text-white p-6 lg:p-12 font-inter">
         <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-12">
-          
           <div className="lg:col-span-4 space-y-8">
-            <div className="space-y-2">
-              <h1 className="text-5xl font-orbitron font-black italic tracking-tighter leading-none">MASTER<br/><span className="text-emerald-500">SYNC</span></h1>
-              <div className="flex flex-wrap gap-2">
-                 <div className={`px-3 py-1 rounded-full text-[8px] font-black ${wsConnected ? 'bg-green-500/20 text-green-500' : 'bg-red-500/20 text-red-500'}`}>WS: {wsConnected ? 'UP' : 'DOWN'}</div>
-                 <div className={`px-3 py-1 rounded-full text-[8px] font-black ${rtcConnected ? 'bg-indigo-500/20 text-indigo-500' : 'bg-red-500/20 text-red-500'}`}>RTC: {rtcConnected ? 'UP' : 'DOWN'}</div>
+            <h1 className="text-5xl font-orbitron font-black italic leading-none">HUB<br/><span className="text-emerald-500">MASTER</span></h1>
+            <div className="glass-card p-8 bg-slate-900/50 space-y-6">
+               <div className="bg-white p-4 rounded-3xl mx-auto max-w-[200px]">
+                  <img src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(window.location.origin + '?room=' + roomCode)}`} className="w-full" />
+               </div>
+               <div className="text-center font-orbitron text-3xl font-black">{roomCode}</div>
+               <button onClick={handleAiOperations} disabled={isAiLoading} className="w-full py-5 bg-emerald-600 text-black rounded-2xl font-black uppercase flex items-center justify-center gap-3 active:scale-95 disabled:opacity-50">
+                 {isAiLoading ? <i className="fas fa-spinner fa-spin"></i> : <i className="fas fa-bolt"></i>}
+                 Sync Game & Resolves
+               </button>
+            </div>
+            {gameState && (
+              <div className="p-6 bg-slate-900 border border-white/5 rounded-3xl text-center">
+                <div className="text-[10px] font-black text-slate-500 uppercase">Live Update</div>
+                <div className="text-2xl font-orbitron font-black text-emerald-500 uppercase">{gameState.quarter} - {gameState.time}</div>
+                <div className="text-3xl font-black mt-2">{gameState.scoreHome} - {gameState.scoreAway}</div>
               </div>
-            </div>
-
-            <div className="glass-card p-2 bg-slate-900/50 flex gap-2">
-              <input 
-                placeholder="ROOM ID" 
-                value={roomCode}
-                onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
-                className="bg-transparent px-5 py-3 text-2xl font-black outline-none w-full placeholder:text-slate-800"
-              />
-            </div>
-
-            <div className="glass-card p-8 space-y-6">
-               <div className="flex justify-between items-center">
-                 <h2 className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-600">Global Settings</h2>
-                 <button 
-                  onClick={toggleAutoVerify}
-                  className={`px-3 py-1.5 rounded-lg text-[9px] font-black uppercase transition-all ${autoVerify ? 'bg-emerald-500 text-black' : 'bg-slate-800 text-slate-500'}`}
-                 >
-                   {autoVerify ? 'Auto-Verify: ON' : 'Auto-Verify: OFF'}
-                 </button>
-               </div>
-               
-               <div className="space-y-3">
-                 <input id="guestIn" placeholder="Manual Guest Name" className="w-full bg-black/40 border border-white/10 rounded-2xl px-5 py-4 font-bold text-white outline-none focus:border-emerald-500 transition-all" />
-                 <button 
-                  onClick={() => {
-                    const el = document.getElementById('guestIn') as HTMLInputElement;
-                    if (!el.value || !roomCode) return;
-                    const id = generateId();
-                    const url = `${window.location.origin}${window.location.pathname}?room=${roomCode}&u=${id}&n=${encodeURIComponent(el.value)}`;
-                    (window as any).guestList = [...((window as any).guestList || []), { id, name: el.value.toUpperCase(), url }];
-                    el.value = '';
-                    setAllUsers([...allUsers]);
-                  }}
-                  className="w-full bg-emerald-500 text-black py-4 rounded-2xl font-black uppercase tracking-widest text-xs active:scale-95 transition-all shadow-xl shadow-emerald-600/20"
-                 >
-                   Create Ticket
-                 </button>
-               </div>
-               
-               <div className="grid grid-cols-2 gap-3 pt-4">
-                 {((window as any).guestList || []).map((g: any) => (
-                    <div key={g.id} className="bg-white p-2 rounded-2xl flex flex-col items-center gap-2 group cursor-pointer hover:scale-105 transition-all">
-                      <img src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(g.url)}&color=020617`} className="w-full aspect-square rounded-xl" />
-                      <span className="text-[7px] font-black text-black uppercase truncate w-full text-center">{g.name}</span>
-                    </div>
-                 ))}
-               </div>
-            </div>
+            )}
           </div>
-
-          <div className="lg:col-span-8 space-y-12">
-             <div className="flex justify-between items-end px-2">
-                <h2 className="text-3xl font-orbitron font-black italic uppercase text-white">Registry Matrix</h2>
-                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Peers Found: {guests.length}</span>
-             </div>
-
-             <div className="grid grid-cols-1 gap-4">
-               {guests.map((u, i) => (
-                 <div key={u.id} className={`glass-card p-8 flex items-center justify-between transition-all duration-500 border-l-[6px] ${u.isVerified ? 'border-l-emerald-500 bg-emerald-500/5' : 'border-l-yellow-500 bg-yellow-500/5'}`}>
-                    <div className="flex items-center gap-6">
-                       <div className={`w-14 h-14 rounded-2xl flex items-center justify-center text-xl ${u.isVerified ? 'bg-emerald-600 text-white' : 'bg-yellow-500 text-black animate-pulse'}`}>
-                          <i className={`fas fa-${u.isVerified ? 'check-double' : 'clock'}`}></i>
-                       </div>
-                       <div>
-                          <div className="flex items-center gap-3">
-                            <h3 className="text-2xl font-black uppercase tracking-tight text-white">{u.name}</h3>
-                            {!u.isVerified && (
-                              <button 
-                                onClick={() => verifyUser(u.id)}
-                                className="bg-yellow-500 text-black text-[9px] font-black px-3 py-1.5 rounded-lg uppercase tracking-widest hover:scale-105 transition-all shadow-lg"
-                              >
-                                Manual Verify
-                              </button>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-3 mt-2">
-                            <div className={`w-2 h-2 rounded-full ${Date.now() - u.lastPulse < 5000 ? 'bg-green-500' : 'bg-red-500'}`}></div>
-                            <span className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">
-                              {Date.now() - u.lastPulse < 5000 ? 'ONLINE' : 'STALE'} | CLICKS: {u.pingCount}
-                            </span>
-                          </div>
-                       </div>
-                    </div>
-                    
-                    <div className="flex items-center gap-10">
-                       <div className="text-5xl font-orbitron font-black text-white w-24 text-right">{u.score}</div>
-                    </div>
-                 </div>
-               ))}
-
-               {guests.length === 0 && (
-                 <div className="py-32 border-2 border-dashed border-white/5 rounded-[4rem] text-center flex flex-col items-center justify-center gap-6 opacity-30">
-                    <i className="fas fa-satellite text-5xl"></i>
-                    <p className="text-[10px] font-black uppercase tracking-[0.6em]">Awaiting Peer Handshakes...</p>
-                 </div>
-               )}
-             </div>
+          <div className="lg:col-span-8">
+            <Leaderboard users={allUsers} currentUser={allUsers[0] || localUser} propBets={propBets} userBets={userBets} />
           </div>
-
         </div>
       </div>
     );
   }
 
-  if (view === 'guest' && localUser) {
-    const remoteSelf = allUsers.find(u => u.id === localUser.id);
-    const score = remoteSelf?.score || 0;
-    const isVerified = remoteSelf?.isVerified || false;
-
+  if (view === 'main' && localUser) {
     return (
-      <div className={`h-screen flex flex-col transition-all duration-700 overflow-hidden relative ${isVerified ? 'bg-[#010614]' : 'bg-[#0f101a]'} ${hostReaction ? 'brightness-150' : ''}`}>
-        
-        {/* Connection Diagnostics Overlay */}
-        {!isVerified && (
-          <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center p-8 text-center bg-black/60 backdrop-blur-xl">
-            <div className="w-24 h-24 bg-yellow-500 rounded-3xl flex items-center justify-center mb-8 shadow-[0_0_50px_rgba(234,179,8,0.4)] animate-pulse">
-               <i className="fas fa-hourglass-half text-black text-4xl"></i>
-            </div>
-            <h2 className="text-3xl font-orbitron font-black text-white uppercase italic leading-none mb-4">Awaiting<br/>Verification</h2>
-            <p className="text-slate-400 text-xs font-bold uppercase tracking-widest max-w-xs mb-10 leading-relaxed">
-              Tell the Host to authorize <span className="text-yellow-500">"{localUser.name}"</span> on the main dashboard.
-            </p>
-            
-            <div className="grid grid-cols-2 gap-4 w-full max-w-xs mb-8">
-               <div className={`p-4 rounded-2xl border text-[9px] font-black uppercase ${wsConnected ? 'bg-green-500/10 border-green-500/30 text-green-500' : 'bg-red-500/10 border-red-500/30 text-red-500'}`}>
-                 WebSocket: {wsConnected ? 'UP' : 'DOWN'}
-               </div>
-               <div className={`p-4 rounded-2xl border text-[9px] font-black uppercase ${rtcConnected ? 'bg-indigo-500/10 border-indigo-500/30 text-indigo-500' : 'bg-red-500/10 border-red-500/30 text-red-500'}`}>
-                 P2P-Mesh: {rtcConnected ? 'UP' : 'DOWN'}
-               </div>
-            </div>
-
-            <button 
-              onClick={forceHandshake}
-              className="px-8 py-5 bg-white text-black rounded-2xl font-black uppercase tracking-widest text-xs active:scale-95 transition-all shadow-xl"
-            >
-              Force Sync Re-Handshake
-            </button>
+      <div className="h-screen flex flex-col bg-[#020617] overflow-hidden">
+        <header className="px-6 pt-12 pb-6 flex justify-between items-center bg-slate-900/40 shrink-0">
+          <div className="flex items-center gap-3">
+             <TeamHelmet teamId={localUser.team} size="md" />
+             <div>
+                <h1 className="font-orbitron font-black text-xl italic leading-none text-white">SBLIX</h1>
+                <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">{roomCode}</span>
+             </div>
           </div>
-        )}
-
-        <header className="p-8 pt-12 flex justify-between items-start shrink-0 z-10">
-          <div>
-            <h1 className="font-orbitron font-black text-3xl italic tracking-tighter leading-none text-white">SBLIX</h1>
-            <div className="flex items-center gap-2 mt-2">
-               <div className={`w-2 h-2 rounded-full ${wsConnected || rtcConnected ? 'bg-green-500 shadow-[0_0_10px_#22c55e]' : 'bg-red-500'}`}></div>
-               <span className="text-[8px] font-black uppercase tracking-widest text-slate-500">ACTIVE LINK</span>
-            </div>
-          </div>
-          <div className="bg-slate-900/50 border border-white/5 px-4 py-2 rounded-xl text-center">
-             <div className="text-[8px] font-black text-slate-600 uppercase tracking-widest">SESSION</div>
-             <div className="text-sm font-orbitron font-black text-emerald-500">{roomCode}</div>
-          </div>
+          {gameState && (
+             <div className="px-3 py-1 bg-emerald-500/10 border border-emerald-500/20 rounded-lg text-center">
+                <div className="text-[7px] font-black text-emerald-500 uppercase">Live</div>
+                <div className="text-[10px] font-orbitron font-black text-white">{gameState.scoreHome}-{gameState.scoreAway}</div>
+             </div>
+          )}
         </header>
 
-        <main className="flex-1 flex flex-col items-center justify-center p-10 space-y-12 z-10">
-          
-          <div className="relative" onClick={forceHandshake}>
-             <div className="w-48 h-48 rounded-[4rem] bg-emerald-600 flex items-center justify-center shadow-2xl transition-all duration-500 border-2 border-emerald-400 text-white rotate-12">
-                <i className="fas fa-fingerprint text-8xl"></i>
-             </div>
-             <div className="absolute -top-4 -right-4 bg-white text-black w-12 h-12 rounded-2xl flex items-center justify-center font-black shadow-xl border-4 border-[#010614]">
-                <i className="fas fa-check text-xl"></i>
-             </div>
-          </div>
-
-          <div className="text-center space-y-3">
-             <div className="text-[11px] font-black uppercase tracking-[0.6em] text-slate-600">Identity Verified</div>
-             <h2 className="text-5xl font-orbitron font-black uppercase italic text-white tracking-tighter leading-none">{localUser.name}</h2>
-          </div>
-
-          <div className="w-full max-w-xs space-y-4">
-             <button 
-               onClick={forceHandshake}
-               className="w-full py-7 bg-white text-black rounded-[2.5rem] font-black uppercase tracking-widest shadow-2xl active:scale-95 transition-all text-sm flex items-center justify-center gap-3"
-             >
-               <i className="fas fa-wifi"></i>
-               Send Room Ping
-             </button>
-
-             <div className="p-8 rounded-[3rem] bg-slate-900/50 border border-white/5 text-center shadow-inner relative overflow-hidden">
-                <div className="text-[10px] font-black uppercase tracking-widest text-slate-600 mb-1">Your Total Score</div>
-                <div className="text-6xl font-orbitron font-black text-emerald-500">{score}</div>
-                <div className="absolute bottom-0 left-0 w-full h-1 bg-emerald-600/20"></div>
-             </div>
-          </div>
+        <main className="flex-1 overflow-hidden relative">
+          {activeTab === 'bets' && <BettingPanel propBets={propBets} user={localUser} onPlaceBet={async (bid, sel) => {
+            const bet: UserBet = { id: generateId(), userId: localUser.id, betId: bid, selection: sel, timestamp: Date.now() };
+            if (db) await setDoc(doc(db, "rooms", roomCode, "bets", bet.id), bet);
+          }} allBets={userBets} />}
+          {activeTab === 'chat' && <ChatRoom user={localUser} messages={messages} onSendMessage={async (txt) => {
+             const msg: ChatMessage = { id: generateId(), userId: localUser.id, userName: localUser.name, text: txt, timestamp: Date.now() };
+             if (db) await setDoc(doc(db, "rooms", roomCode, "messages", msg.id), msg);
+          }} users={allUsers} />}
+          {activeTab === 'scores' && <Leaderboard users={allUsers} currentUser={localUser} propBets={propBets} userBets={userBets} />}
         </main>
 
-        <footer className="p-10 text-center flex flex-col items-center gap-2 opacity-30">
-           <p className="text-[9px] font-black uppercase tracking-[0.4em] text-slate-700">PERSISTENT NODE: {localUser.id.toUpperCase()}</p>
-        </footer>
+        <nav className="shrink-0 bg-slate-900/90 backdrop-blur-xl border-t border-white/5 flex justify-around pb-safe">
+           {[{id:'bets',i:'ticket-alt',l:'Props'},{id:'chat',i:'comment-alt',l:'Chat'},{id:'scores',i:'trophy',l:'Rank'}].map(t => (
+             <button key={t.id} onClick={() => setActiveTab(t.id as any)} className={`flex flex-col items-center py-4 px-8 gap-1 transition-all ${activeTab === t.id ? 'text-emerald-500' : 'text-slate-500'}`}>
+               <i className={`fas fa-${t.i} text-lg`}></i>
+               <span className="text-[8px] font-black uppercase">{t.l}</span>
+             </button>
+           ))}
+        </nav>
+      </div>
+    );
+  }
+
+  if (view === 'onboarding') {
+    return (
+      <div className="h-screen bg-[#020617] p-8 flex flex-col justify-center max-w-md mx-auto">
+        <h2 className="text-3xl font-orbitron font-black italic mb-8 uppercase text-white">Huddle <span className="text-emerald-500">Up</span></h2>
+        <div className="space-y-6">
+           <input id="joinName" placeholder="ENTER NAME" className="w-full bg-slate-900 border border-white/5 rounded-2xl px-6 py-4 font-bold text-white outline-none focus:border-emerald-500" />
+           <div className="grid grid-cols-3 gap-3">
+             {NFL_TEAMS.map(t => (
+               <button key={t.id} onClick={() => (window as any).selectedTeam = t.id} className="p-4 bg-slate-900 rounded-2xl border border-white/5 hover:border-emerald-500 flex flex-col items-center gap-2 focus:bg-emerald-500/10 focus:border-emerald-500 transition-all">
+                 <TeamHelmet teamId={t.id} size="md" />
+                 <span className="text-[8px] font-black uppercase text-slate-400">{t.name}</span>
+               </button>
+             ))}
+           </div>
+           <button onClick={() => {
+             const n = (document.getElementById('joinName') as HTMLInputElement).value;
+             if (n) handleJoin(n, (window as any).selectedTeam || 'KC');
+           }} className="w-full py-6 bg-emerald-500 text-black font-black uppercase tracking-widest rounded-3xl shadow-xl active:scale-95 transition-all">Join Game</button>
+        </div>
       </div>
     );
   }

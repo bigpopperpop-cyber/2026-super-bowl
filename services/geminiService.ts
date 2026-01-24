@@ -2,14 +2,14 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { PropBet, GameState } from "../types";
 
 export const generateLiveProps = async (gameState: GameState): Promise<Partial<PropBet>[]> => {
-  // Always create a fresh instance of GoogleGenAI before making an API call
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-3-pro-preview",
+      model: "gemini-3-flash-preview",
       contents: `Current Super Bowl State: ${gameState.quarter}, ${gameState.time}. Score: ${gameState.scoreHome}-${gameState.scoreAway}.
-      Use Google Search to find exactly what is happening in the game right now (drive details, player stats). 
-      Generate 3 new, exciting LIVE prop bets that will be decided within the next 10-15 minutes of play.`,
+      1. Use Google Search to find exactly what just happened in the game (current drive, recent plays).
+      2. Generate 3 exciting, short-term prop bets for guests.
+      3. Return ONLY valid JSON.`,
       config: {
         tools: [{ googleSearch: {} }],
         responseMimeType: "application/json",
@@ -19,7 +19,7 @@ export const generateLiveProps = async (gameState: GameState): Promise<Partial<P
             type: Type.OBJECT,
             properties: {
               question: { type: Type.STRING },
-              category: { type: Type.STRING },
+              category: { type: Type.STRING, description: "One of: Game, Player, Stats" },
               options: { type: Type.ARRAY, items: { type: Type.STRING } }
             },
             required: ["question", "category", "options"]
@@ -28,9 +28,7 @@ export const generateLiveProps = async (gameState: GameState): Promise<Partial<P
       }
     });
 
-    // Safely extract text from the response property (not method)
-    const text = response.text;
-    return JSON.parse(text || "[]");
+    return JSON.parse(response.text || "[]");
   } catch (error) {
     console.error("Prop Generation Error:", error);
     return [];
@@ -38,17 +36,16 @@ export const generateLiveProps = async (gameState: GameState): Promise<Partial<P
 };
 
 export const resolveProps = async (props: PropBet[]): Promise<{ id: string, winner: string }[]> => {
-  // Always create a fresh instance of GoogleGenAI before making an API call
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const unresolved = props.filter(p => !p.resolved);
   if (unresolved.length === 0) return [];
 
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-3-pro-preview",
-      contents: `Use Google Search to find the outcome of these Super Bowl prop bets:
-      ${unresolved.map(p => `ID: ${p.id} - Question: ${p.question} (Options: ${p.options.join(', ')})`).join('\n')}
-      Only return a winner if the event is definitively finished.`,
+      model: "gemini-3-flash-preview",
+      contents: `Search Google for the outcomes of these Super Bowl LIX events:
+      ${unresolved.map(p => `ID: ${p.id} | Question: ${p.question} | Options: ${p.options.join(', ')}`).join('\n')}
+      Determine which option happened. If the event hasn't finished, do not return it.`,
       config: {
         tools: [{ googleSearch: {} }],
         responseMimeType: "application/json",
@@ -66,39 +63,37 @@ export const resolveProps = async (props: PropBet[]): Promise<{ id: string, winn
       }
     });
 
-    const text = response.text;
-    return JSON.parse(text || "[]");
+    return JSON.parse(response.text || "[]");
   } catch (error) {
-    console.error("Prop Resolution Error:", error);
+    console.error("Resolution Error:", error);
     return [];
   }
 };
 
-export const checkGameEnd = async (): Promise<{ is3rdQuarterOver: boolean, homeScore: number, awayScore: number }> => {
-  // Always create a fresh instance of GoogleGenAI before making an API call
+export const getGameUpdate = async (): Promise<GameState | null> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-3-pro-preview",
-      contents: "Use Google Search to check the current score and quarter of Super Bowl LIX. Is the 3rd quarter finished yet?",
+      model: "gemini-3-flash-preview",
+      contents: "What is the current score and game clock of Super Bowl LIX? (Chiefs vs 49ers/Eagles etc)",
       config: {
         tools: [{ googleSearch: {} }],
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
           properties: {
-            is3rdQuarterOver: { type: Type.BOOLEAN },
-            homeScore: { type: Type.NUMBER },
-            awayScore: { type: Type.NUMBER }
+            quarter: { type: Type.STRING },
+            time: { type: Type.STRING },
+            scoreHome: { type: Type.NUMBER },
+            scoreAway: { type: Type.NUMBER },
+            isActive: { type: Type.BOOLEAN }
           },
-          required: ["is3rdQuarterOver", "homeScore", "awayScore"]
+          required: ["quarter", "time", "scoreHome", "scoreAway", "isActive"]
         }
       }
     });
-    
-    const text = response.text;
-    return JSON.parse(text || '{"is3rdQuarterOver": false, "homeScore": 0, "awayScore": 0}');
+    return JSON.parse(response.text || "null");
   } catch (error) {
-    return { is3rdQuarterOver: false, homeScore: 0, awayScore: 0 };
+    return null;
   }
 };
