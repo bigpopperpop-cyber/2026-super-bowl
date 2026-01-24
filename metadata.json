@@ -1,5 +1,5 @@
 {
-  "name": "SBLIX Handshake",
-  "description": "Core connection layer for multi-device Super Bowl party synchronization.",
+  "name": "SBLIX Registry",
+  "description": "Hard-state synchronization protocol for Super Bowl party management.",
   "requestFramePermissions": []
 }
