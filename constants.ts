@@ -18,9 +18,9 @@ export const NFL_TEAMS: NFLTeam[] = [
 ];
 
 export const INITIAL_PROPS: PropBet[] = [
-  { id: 'start-1', category: 'PRE-GAME', question: 'Coin Toss Outcome?', options: ['Heads', 'Tails'], resolved: false },
-  { id: 'start-2', category: 'PRE-GAME', question: 'Length of National Anthem?', options: ['Over 120s', 'Under 120s'], resolved: false },
-  { id: 'start-3', category: 'GAME', question: 'First Team to Score?', options: ['Home', 'Away'], resolved: false }
+  { id: '1', question: "Coin Toss Outcome?", category: 'Game', resolved: false, options: ['Heads', 'Tails'] },
+  { id: '2', question: "First Team to Score?", category: 'Game', resolved: false, options: ['Home', 'Away'] },
+  { id: '3', question: "Total Points: Over 44.5?", category: 'Stats', resolved: false, options: ['Over', 'Under'] }
 ];
 
 export const AVATARS = NFL_TEAMS.map(t => t.id);
