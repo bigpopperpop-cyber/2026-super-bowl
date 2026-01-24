@@ -2,15 +2,30 @@
 export interface User {
   id: string;
   name: string;
-  handle?: string;
+  // Added handle property for leaderboard display
+  handle: string;
   team?: string;
   deviceType: 'mobile' | 'desktop';
   lastSeen: number;
+  score: number;
+  isOnline: boolean;
 }
 
-export interface ConnectionState {
-  users: User[];
-  roomCode: string;
+// Added ChatMessage interface to resolve missing export error
+export interface ChatMessage {
+  id: string;
+  userId: string;
+  userName: string;
+  text: string;
+  timestamp: number;
+  isAI?: boolean;
+}
+
+export interface ConnectionEvent {
+  type: 'ping';
+  fromId: string;
+  targetId: string;
+  timestamp: number;
 }
 
 export interface PropBet {
@@ -23,22 +38,18 @@ export interface PropBet {
 }
 
 export interface UserBet {
+  id: string;
   betId: string;
   userId: string;
   selection: string;
-}
-
-export interface ChatMessage {
-  id: string;
-  userId: string;
-  userName: string;
-  text: string;
-  isAI?: boolean;
+  timestamp: number;
 }
 
 export interface GameState {
-  quarter: string;
-  time: string;
   scoreHome: number;
   scoreAway: number;
+  quarter: string;
+  time: string;
+  possession: string;
+  isGameOver: boolean;
 }
