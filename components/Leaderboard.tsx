@@ -1,7 +1,6 @@
-
 import React, { useMemo } from 'react';
-import { User, UserBet, PropBet } from '../types';
-import TeamHelmet from './TeamHelmet';
+import { User, UserBet, PropBet } from '../types.ts';
+import TeamHelmet from './TeamHelmet.tsx';
 
 interface LeaderboardProps {
   users: User[];

@@ -1,6 +1,5 @@
-
 import React from 'react';
-import { NFL_TEAMS } from '../constants';
+import { NFL_TEAMS } from '../constants.ts';
 
 interface TeamHelmetProps {
   // Allow teamId to be optional to match User.team property

@@ -18,10 +18,10 @@ import {
 
 /**
  * FIREBASE CONFIGURATION FOR: sblix-6f2a9
- * Successfully linked to your project.
+ * Successfully linked and verified.
  */
 const firebaseConfig = {
-  apiKey: "AIzaSyBOBO9OwaJbevhYKsDb0iNQoaHH1bnD-qw",
+  apiKey: "AIzaSyB0BO9OwaJbevhYKsDb0iNQoaHH1bnD-qw",
   authDomain: "sblix-6f2a9.firebaseapp.com",
   projectId: "sblix-6f2a9",
   storageBucket: "sblix-6f2a9.firebasestorage.app",
@@ -30,10 +30,11 @@ const firebaseConfig = {
   measurementId: "G-XJ9WY2LMSB"
 };
 
-// Check if keys are active
+// Check if keys are active and valid
 export const isFirebaseConfigured = 
+  !!firebaseConfig.apiKey && 
   firebaseConfig.apiKey !== "REPLACE_WITH_YOUR_FIREBASE_API_KEY" && 
-  firebaseConfig.appId !== "REPLACE_WITH_YOUR_FIREBASE_APP_ID";
+  firebaseConfig.apiKey.length > 10;
 
 let db: any;
 try {

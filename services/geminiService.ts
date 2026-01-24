@@ -1,5 +1,5 @@
 import { GoogleGenAI, Type } from "@google/genai";
-import { PropBet, GameState } from "../types";
+import { PropBet, GameState } from "../types.ts";
 
 export const generateLiveProps = async (gameState: GameState): Promise<Partial<PropBet>[]> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
