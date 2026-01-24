@@ -1,14 +1,12 @@
-
 export interface User {
   id: string;
   name: string;
   handle: string;
   team: string;
   credits: number;
-  lastSeen: number;
 }
 
-// Added ChatMessage interface to fix import error in ChatRoom.tsx
+// Added ChatMessage interface to fix the import error in ChatRoom.tsx
 export interface ChatMessage {
   id: string;
   userId: string;
@@ -16,14 +14,6 @@ export interface ChatMessage {
   text: string;
   timestamp: number;
   isAI?: boolean;
-}
-
-export interface Trophy {
-  id: string;
-  name: string;
-  icon: string;
-  description: string;
-  type: 'good' | 'bad';
 }
 
 export interface PropBet {

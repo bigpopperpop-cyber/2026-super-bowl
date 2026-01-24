@@ -1,10 +1,9 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
 import { PropBet, GameState } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-
 export const generateLiveProps = async (gameState: GameState): Promise<Partial<PropBet>[]> => {
+  // Always create a fresh instance of GoogleGenAI before making an API call
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   try {
     const response = await ai.models.generateContent({
       model: "gemini-3-pro-preview",
@@ -29,6 +28,7 @@ export const generateLiveProps = async (gameState: GameState): Promise<Partial<P
       }
     });
 
+    // Safely extract text from the response property (not method)
     const text = response.text;
     return JSON.parse(text || "[]");
   } catch (error) {
@@ -38,6 +38,8 @@ export const generateLiveProps = async (gameState: GameState): Promise<Partial<P
 };
 
 export const resolveProps = async (props: PropBet[]): Promise<{ id: string, winner: string }[]> => {
+  // Always create a fresh instance of GoogleGenAI before making an API call
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const unresolved = props.filter(p => !p.resolved);
   if (unresolved.length === 0) return [];
 
@@ -64,7 +66,8 @@ export const resolveProps = async (props: PropBet[]): Promise<{ id: string, winn
       }
     });
 
-    return JSON.parse(response.text || "[]");
+    const text = response.text;
+    return JSON.parse(text || "[]");
   } catch (error) {
     console.error("Prop Resolution Error:", error);
     return [];
@@ -72,6 +75,8 @@ export const resolveProps = async (props: PropBet[]): Promise<{ id: string, winn
 };
 
 export const checkGameEnd = async (): Promise<{ is3rdQuarterOver: boolean, homeScore: number, awayScore: number }> => {
+  // Always create a fresh instance of GoogleGenAI before making an API call
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   try {
     const response = await ai.models.generateContent({
       model: "gemini-3-pro-preview",
@@ -90,7 +95,9 @@ export const checkGameEnd = async (): Promise<{ is3rdQuarterOver: boolean, homeS
         }
       }
     });
-    return JSON.parse(response.text || '{"is3rdQuarterOver": false, "homeScore": 0, "awayScore": 0}');
+    
+    const text = response.text;
+    return JSON.parse(text || '{"is3rdQuarterOver": false, "homeScore": 0, "awayScore": 0}');
   } catch (error) {
     return { is3rdQuarterOver: false, homeScore: 0, awayScore: 0 };
   }
