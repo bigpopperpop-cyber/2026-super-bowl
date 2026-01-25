@@ -10,24 +10,22 @@ import {
   serverTimestamp 
 } from 'firebase/firestore';
 
-// Note: Using process.env.API_KEY which is expected to be provided by the environment.
 const firebaseConfig = {
   apiKey: (process.env as any).API_KEY,
-  authDomain: "sblix-chat.firebaseapp.com",
-  projectId: "sblix-chat",
-  storageBucket: "sblix-chat.appspot.com",
+  authDomain: "sblix-party.firebaseapp.com",
+  projectId: "sblix-party",
+  storageBucket: "sblix-party.appspot.com",
   messagingSenderId: "987654321",
   appId: "1:987654321:web:sblix"
 };
 
-let app;
 let db: any = null;
 
 try {
-  app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+  const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
   db = getFirestore(app);
 } catch (error) {
-  console.error("Firebase/Firestore setup failed:", error);
+  console.warn("Firestore initialization failed. App will run in Party Demo mode.", error);
 }
 
 export { 
