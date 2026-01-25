@@ -5,6 +5,7 @@ import {
   doc, 
   onSnapshot, 
   setDoc, 
+  updateDoc,
   addDoc,
   serverTimestamp,
   query,
@@ -44,16 +45,21 @@ export default function App() {
   // Sync Data
   useEffect(() => {
     if (view === 'game' && roomCode && db) {
-      const unsubUsers = onSnapshot(collection(db, "rooms", roomCode, "users"), (s) => 
+      // Sync Users sorted by score for the leaderboard
+      const usersQuery = query(collection(db, "rooms", roomCode, "users"), orderBy("score", "desc"));
+      const unsubUsers = onSnapshot(usersQuery, (s) => 
         setRoomUsers(s.docs.map(d => d.data() as User))
       );
+
       const unsubProps = onSnapshot(collection(db, "rooms", roomCode, "props"), (s) => {
         const p = s.docs.map(d => ({ ...d.data(), id: d.id } as PropBet));
         setRoomProps(p.length ? p : INITIAL_PROPS);
       });
+
       const unsubBets = onSnapshot(collection(db, "rooms", roomCode, "bets"), (s) =>
         setRoomBets(s.docs.map(d => d.data() as UserBet))
       );
+
       const q = query(collection(db, "rooms", roomCode, "messages"), orderBy("timestamp", "asc"), limit(50));
       const unsubChat = onSnapshot(q, (snapshot) => {
         setMessages(snapshot.docs.map(d => ({ ...d.data(), id: d.id } as ChatMessage)));
@@ -68,6 +74,28 @@ export default function App() {
     }
   }, [view, roomCode]);
 
+  // Local Score Synchronizer: Updates the DB score whenever props are resolved
+  useEffect(() => {
+    if (localUser && roomProps.length > 0 && roomBets.length > 0) {
+      const myBets = roomBets.filter(b => b.userId === localUser.id);
+      let calculatedScore = 0;
+      
+      myBets.forEach(bet => {
+        const prop = roomProps.find(p => p.id === bet.betId);
+        if (prop?.resolved && prop.winner === bet.selection) {
+          calculatedScore += (prop.points || 10);
+        }
+      });
+
+      const currentUserInList = roomUsers.find(u => u.id === localUser.id);
+      if (currentUserInList && currentUserInList.score !== calculatedScore) {
+        updateDoc(doc(db, "rooms", roomCode, "users", localUser.id), {
+          score: calculatedScore
+        });
+      }
+    }
+  }, [roomProps, roomBets, localUser, roomCode, roomUsers]);
+
   const handleJoin = () => {
     if (!roomCode) return;
     localUser ? setView('game') : setView('onboarding');
@@ -80,7 +108,7 @@ export default function App() {
     
     if (db) {
       await setDoc(doc(db, "rooms", roomCode, "users", u.id), u);
-      // Seed props for new room
+      // Seed props for new room if empty
       const propsRef = collection(db, "rooms", roomCode, "props");
       INITIAL_PROPS.forEach(p => setDoc(doc(propsRef, p.id), p));
     }
@@ -106,6 +134,14 @@ export default function App() {
     } catch (err) {
       console.error("Chat Error:", err);
     }
+  };
+
+  const handleResolveProp = async (propId: string, winner: string) => {
+    if (!db) return;
+    await updateDoc(doc(db, "rooms", roomCode, "props", propId), {
+      resolved: true,
+      winner: winner
+    });
   };
 
   if (!isFirebaseConfigured) {
@@ -164,7 +200,7 @@ export default function App() {
           </div>
         </div>
         <div className="flex flex-col items-end">
-          <span className="text-[10px] font-black text-emerald-500">{roomUsers.length} ONLINE</span>
+          <span className="text-[10px] font-black text-emerald-500 uppercase tracking-widest">{roomUsers.length} ONLINE</span>
         </div>
       </header>
 
@@ -174,6 +210,7 @@ export default function App() {
             propBets={roomProps} 
             user={localUser!} 
             onPlaceBet={handlePick} 
+            onResolveProp={handleResolveProp}
             allBets={roomBets} 
           />
         )}
@@ -188,8 +225,6 @@ export default function App() {
           <Leaderboard 
             users={roomUsers} 
             currentUser={localUser!} 
-            propBets={roomProps} 
-            userBets={roomBets} 
           />
         )}
       </main>
