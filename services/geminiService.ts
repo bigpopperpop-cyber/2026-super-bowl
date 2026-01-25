@@ -1,12 +1,19 @@
 import { GoogleGenAI } from "@google/genai";
 
+const getApiKey = (): string | undefined => {
+  if (typeof process !== 'undefined' && (process as any).env?.API_KEY) {
+    return (process as any).env.API_KEY;
+  }
+  const metaEnv = (import.meta as any).env;
+  return metaEnv?.VITE_API_KEY;
+};
+
 export async function getCoachResponse(prompt: string) {
-  // Guidelines require using process.env.API_KEY
-  const apiKey = (process.env as any).API_KEY || (import.meta as any).env?.VITE_API_KEY;
+  const apiKey = getApiKey();
   
   if (!apiKey) {
     console.error("Gemini API Key missing.");
-    return "Coach is currently reviewing the playbook (API Key missing).";
+    return "Coach is looking for his glasses... (API Key missing).";
   }
 
   const ai = new GoogleGenAI({ apiKey });
@@ -23,6 +30,6 @@ export async function getCoachResponse(prompt: string) {
     return response.text;
   } catch (err) {
     console.error("Gemini Error:", err);
-    return "The signal is fuzzy, but the hype is real! Touchdown! 🏈";
+    return "The stadium signal is weak, but the fans are loud! Touchdown! 🏈";
   }
 }

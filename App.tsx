@@ -11,54 +11,62 @@ export default function App() {
   const [inputName, setInputName] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputText, setInputText] = useState('');
-  const [status, setStatus] = useState<'Live' | 'Syncing' | 'Party Mode'>('Syncing');
+  const [status, setStatus] = useState<'Live' | 'Syncing' | 'Party Mode'>(db ? 'Syncing' : 'Party Mode');
   const [isCoachThinking, setIsCoachThinking] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Connection Handler with Timeout to prevent "Awaiting Verification" stalls
+  // Connection Handler
   useEffect(() => {
     if (!user) return;
 
-    let syncTimeout = setTimeout(() => {
-      if (status === 'Syncing') setStatus('Party Mode');
-    }, 3500);
-
-    if (db) {
-      try {
-        const q = query(
-          collection(db, 'party_hub'),
-          orderBy('timestamp', 'asc'),
-          limit(60)
-        );
-
-        const unsubscribe = onSnapshot(q, (snapshot) => {
-          clearTimeout(syncTimeout);
-          const msgs = snapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data(),
-            // Handle Firestore timestamps vs local dates
-            timestamp: doc.data().timestamp?.toDate?.() || new Date(doc.data().timestamp)
-          })) as ChatMessage[];
-          setMessages(msgs);
-          setStatus('Live');
-        }, (err) => {
-          console.error("Firestore error:", err);
-          setStatus('Party Mode');
-        });
-
-        return () => {
-          unsubscribe();
-          clearTimeout(syncTimeout);
-        };
-      } catch (e) {
-        setStatus('Party Mode');
-      }
-    } else {
+    // Fast-fail if no DB
+    if (!db) {
       setStatus('Party Mode');
       const saved = JSON.parse(localStorage.getItem('local_chat_history') || '[]');
       setMessages(saved);
+      return;
     }
-  }, [user, status]);
+
+    let isMounted = true;
+    const syncTimeout = setTimeout(() => {
+      if (isMounted && status === 'Syncing') {
+        console.warn("Syncing timed out. Switching to Party Mode.");
+        setStatus('Party Mode');
+      }
+    }, 4000);
+
+    try {
+      const q = query(
+        collection(db, 'party_hub'),
+        orderBy('timestamp', 'asc'),
+        limit(60)
+      );
+
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        if (!isMounted) return;
+        clearTimeout(syncTimeout);
+        const msgs = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data(),
+          timestamp: doc.data().timestamp?.toDate?.() || new Date(doc.data().timestamp)
+        })) as ChatMessage[];
+        setMessages(msgs);
+        setStatus('Live');
+      }, (err) => {
+        if (!isMounted) return;
+        console.error("Firestore error:", err);
+        setStatus('Party Mode');
+      });
+
+      return () => {
+        isMounted = false;
+        unsubscribe();
+        clearTimeout(syncTimeout);
+      };
+    } catch (e) {
+      setStatus('Party Mode');
+    }
+  }, [user]); // Only run once when user logs in
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -98,7 +106,6 @@ export default function App() {
         setMessages(prev => [...prev, newMsg]);
       }
     } else {
-      // Local fall-through for instant feedback if cloud is slow
       const updated = [...messages, newMsg].slice(-100);
       setMessages(updated);
       localStorage.setItem('local_chat_history', JSON.stringify(updated));
@@ -133,7 +140,7 @@ export default function App() {
       <div className="flex items-center justify-center min-h-screen p-6 bg-slate-950 relative overflow-hidden">
         <div className="scanline"></div>
         <div className="w-full max-w-md p-10 glass rounded-[2.5rem] shadow-2xl relative z-10 border border-white/10 text-center">
-          <div className="w-20 h-20 bg-emerald-500/20 rounded-3xl flex items-center justify-center mx-auto mb-8 neon-border border border-emerald-500/30">
+          <div className="w-20 h-20 bg-emerald-500/20 rounded-3xl flex items-center justify-center mx-auto mb-8 border border-emerald-500/30">
             <i className="fas fa-football-ball text-3xl text-emerald-400"></i>
           </div>
           <h1 className="font-orbitron text-5xl font-black italic text-white mb-2 tracking-tighter">SBLIX</h1>
@@ -171,13 +178,6 @@ export default function App() {
           </div>
         </div>
         <div className="flex gap-2">
-           <button 
-            onClick={() => { window.location.reload(); }}
-            className="w-9 h-9 rounded-xl bg-white/5 flex items-center justify-center text-slate-500 hover:text-emerald-400 transition-colors"
-            title="Refresh Connection"
-          >
-            <i className="fas fa-sync-alt text-xs"></i>
-          </button>
           <button 
             onClick={() => { localStorage.removeItem('chat_user'); setUser(null); }}
             className="w-9 h-9 rounded-xl bg-white/5 flex items-center justify-center text-slate-500 hover:text-red-400 transition-colors"
@@ -188,30 +188,15 @@ export default function App() {
       </header>
 
       <div className="flex-1 overflow-y-auto p-4 space-y-5 custom-scrollbar bg-[radial-gradient(circle_at_top,rgba(16,185,129,0.03),transparent_40%)]">
-        <div className="text-center py-6">
-          <span className="text-[9px] font-black text-emerald-500/40 border border-emerald-500/20 px-4 py-1.5 rounded-full uppercase tracking-[0.3em] bg-emerald-500/5">
-            Stadium Channel Open
-          </span>
-        </div>
-
-        {messages.length === 0 && (
-          <div className="text-center py-20 opacity-20 flex flex-col items-center">
-            <i className="fas fa-comments text-4xl mb-4"></i>
-            <p className="font-black text-[10px] uppercase tracking-widest">Waiting for first play...</p>
-          </div>
-        )}
-
         {messages.map((msg) => {
           const isMe = msg.senderId === user.id;
           const isCoach = msg.senderId === 'coach_ai';
           return (
             <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} msg-animate`}>
               <div className="flex items-center gap-2 mb-1 px-1">
-                 {!isMe && !isCoach && <div className="w-1 h-1 bg-slate-700 rounded-full"></div>}
                  <span className={`text-[8px] font-black uppercase tracking-wider ${isCoach ? 'text-emerald-400' : 'text-slate-500'}`}>
                   {msg.senderName}
                 </span>
-                {isMe && <div className="w-1 h-1 bg-emerald-500 rounded-full"></div>}
               </div>
               <div className={`max-w-[88%] px-4 py-3 rounded-2xl text-sm leading-snug shadow-sm ${
                 isMe ? 'bg-emerald-500 text-slate-950 font-bold rounded-tr-none' : 
@@ -248,9 +233,6 @@ export default function App() {
             <i className="fas fa-paper-plane"></i>
           </button>
         </form>
-        <div className="mt-2 flex justify-center">
-            <p className="text-[7px] font-black text-slate-700 uppercase tracking-widest">Type <span className="text-emerald-500/40">/coach</span> for AI analysis</p>
-        </div>
       </div>
     </div>
   );

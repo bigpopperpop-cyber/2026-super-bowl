@@ -10,11 +10,16 @@ import {
   serverTimestamp 
 } from 'firebase/firestore';
 
-// Safer environment variable access for Vite/Vercel environments
+// Safest way to get environment variables across Vite/Vercel/Production
 const getEnv = (key: string): string | undefined => {
   const metaEnv = (import.meta as any).env;
-  const procEnv = (process as any).env;
-  return metaEnv?.[key] || procEnv?.[key];
+  if (metaEnv && metaEnv[key]) return metaEnv[key];
+  
+  if (typeof process !== 'undefined' && (process as any).env) {
+    return (process as any).env[key];
+  }
+  
+  return undefined;
 };
 
 const firebaseConfig = {
@@ -28,16 +33,23 @@ const firebaseConfig = {
 
 let db: any = null;
 
-// Only initialize if we have the critical bits
-if (firebaseConfig.projectId && firebaseConfig.projectId !== "undefined") {
+// Validate config is not just "undefined" strings or empty
+const isValidConfig = (config: any) => {
+  return config.projectId && 
+         config.projectId !== "undefined" && 
+         config.projectId.trim() !== "";
+};
+
+if (isValidConfig(firebaseConfig)) {
   try {
     const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
     db = getFirestore(app);
+    console.log("Firebase initialized successfully.");
   } catch (error) {
     console.warn("Firestore initialization failed. Running in Local Mode.", error);
   }
 } else {
-  console.log("Firebase config incomplete. Using Local Mode.");
+  console.log("Firebase config incomplete or missing. Running in Local Mode.");
 }
 
 export { 
