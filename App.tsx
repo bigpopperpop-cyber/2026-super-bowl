@@ -27,8 +27,7 @@ export default function App() {
     if (!db) {
       setStatus('Solo');
       setMessages(JSON.parse(localStorage.getItem('local_chat_history') || '[]'));
-      const localSquares = JSON.parse(localStorage.getItem('local_squares') || '{}');
-      setSquares(localSquares);
+      setSquares(JSON.parse(localStorage.getItem('local_squares') || '{}'));
       return;
     }
 
@@ -49,7 +48,6 @@ export default function App() {
       setMessages(msgs);
       setStatus('Live');
     }, (err) => {
-      console.error("Chat Offline:", err);
       setStatus('Solo');
     });
 
@@ -100,6 +98,7 @@ export default function App() {
       senderName: user.name,
       senderTeam: user.team,
       text,
+      reactions: {},
       timestamp: status === 'Live' ? serverTimestamp() : new Date().toISOString()
     };
 
@@ -133,6 +132,17 @@ export default function App() {
     }
   };
 
+  const addReaction = async (msgId: string, emoji: string) => {
+    if (status !== 'Live' || !db) return;
+    const msgRef = doc(db, 'party_hub', msgId);
+    // Simple logic: update doc with reaction. Note: In production we'd use arrayUnion/map update
+    const msg = messages.find(m => m.id === msgId);
+    if (!msg) return;
+    const currentReactions = (msg as any).reactions || {};
+    currentReactions[emoji] = (currentReactions[emoji] || 0) + 1;
+    await setDoc(msgRef, { reactions: currentReactions }, { merge: true });
+  };
+
   const claimSquare = async (idx: number) => {
     if (!user) return;
     const key = `sq_${idx}`;
@@ -154,7 +164,7 @@ export default function App() {
     if (saveManualConfig(manualConfig)) {
       alert("Config saved! Hub restarting...");
     } else {
-      alert("Invalid JSON format. Copy directly from Firebase console.");
+      alert("Invalid JSON format.");
     }
   };
 
@@ -177,27 +187,11 @@ export default function App() {
               placeholder="YOUR HANDLE"
               className="w-full bg-slate-900 border border-white/10 rounded-2xl px-6 py-4 outline-none focus:border-emerald-500 transition-all text-white font-black text-lg uppercase tracking-widest placeholder:text-slate-800 text-center"
             />
-
             <div className="grid grid-cols-2 gap-3">
-              <button 
-                type="button"
-                onClick={() => setSelectedTeam('CHIEFS')}
-                className={`py-4 rounded-2xl border-2 transition-all font-black text-xs tracking-widest ${selectedTeam === 'CHIEFS' ? 'border-red-600 bg-red-600/20 text-red-500' : 'border-white/5 bg-white/5 text-slate-500'}`}
-              >
-                CHIEFS
-              </button>
-              <button 
-                type="button"
-                onClick={() => setSelectedTeam('EAGLES')}
-                className={`py-4 rounded-2xl border-2 transition-all font-black text-xs tracking-widest ${selectedTeam === 'EAGLES' ? 'border-emerald-600 bg-emerald-600/20 text-emerald-500' : 'border-white/5 bg-white/5 text-slate-500'}`}
-              >
-                EAGLES
-              </button>
+              <button type="button" onClick={() => setSelectedTeam('CHIEFS')} className={`py-4 rounded-2xl border-2 transition-all font-black text-xs tracking-widest ${selectedTeam === 'CHIEFS' ? 'border-red-600 bg-red-600/20 text-red-500' : 'border-white/5 bg-white/5 text-slate-500'}`}>CHIEFS</button>
+              <button type="button" onClick={() => setSelectedTeam('EAGLES')} className={`py-4 rounded-2xl border-2 transition-all font-black text-xs tracking-widest ${selectedTeam === 'EAGLES' ? 'border-emerald-600 bg-emerald-600/20 text-emerald-500' : 'border-white/5 bg-white/5 text-slate-500'}`}>EAGLES</button>
             </div>
-
-            <button className="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black uppercase tracking-[0.2em] py-5 rounded-2xl transition-all shadow-xl shadow-emerald-500/30">
-              JOIN STADIUM
-            </button>
+            <button className="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black uppercase tracking-[0.2em] py-5 rounded-2xl transition-all shadow-xl shadow-emerald-500/30">JOIN STADIUM</button>
           </form>
         </div>
       </div>
@@ -218,17 +212,20 @@ export default function App() {
         </div>
         
         <div className="flex justify-between items-center px-4 py-3 bg-black/40 rounded-3xl border border-white/5 shadow-inner">
-          <div className="text-center">
+          <div className="text-center relative">
             <p className="text-[10px] font-black text-red-500 tracking-widest">KC</p>
-            <p className="text-3xl font-orbitron font-black italic">24</p>
+            <p className="text-3xl font-orbitron font-black italic text-white drop-shadow-[0_0_10px_rgba(239,68,68,0.5)]">24</p>
+            <div className="absolute -top-1 -left-1 w-2 h-2 bg-red-500 rounded-full animate-ping"></div>
           </div>
           <div className="text-center">
-            <p className="text-[10px] font-black text-slate-600 mb-1 italic">4TH QUARTER</p>
-            <p className="text-[10px] font-black text-emerald-500 animate-pulse tracking-[0.3em]">LIVE</p>
+            <p className="text-[10px] font-black text-slate-600 mb-1 italic uppercase">4th Quarter</p>
+            <div className="px-3 py-0.5 bg-emerald-500/10 rounded-full border border-emerald-500/20">
+              <p className="text-[9px] font-black text-emerald-500 animate-pulse tracking-[0.3em]">LIVE</p>
+            </div>
           </div>
           <div className="text-center">
             <p className="text-[10px] font-black text-emerald-500 tracking-widest">PHI</p>
-            <p className="text-3xl font-orbitron font-black italic">21</p>
+            <p className="text-3xl font-orbitron font-black italic text-white/50">21</p>
           </div>
         </div>
 
@@ -244,32 +241,18 @@ export default function App() {
 
       <div className="flex-1 overflow-y-auto relative bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')] custom-scrollbar">
         {activeTab === 'chat' ? (
-          <div className="p-4 space-y-4 pb-24">
+          <div className="p-4 space-y-4 pb-32">
             {status !== 'Live' && (
               <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-4 mb-4">
                 <div className="flex justify-between items-center">
-                  <p className="text-[10px] font-black text-red-400 uppercase tracking-widest">
-                    <i className="fas fa-wifi-slash mr-2"></i> STADIUM OFFLINE
-                  </p>
-                  <button onClick={() => setShowDiag(!showDiag)} className="text-[8px] font-bold text-red-400 underline uppercase tracking-widest">
-                    {showDiag ? 'HIDE' : 'DIAGNOSTICS'}
-                  </button>
+                  <p className="text-[10px] font-black text-red-400 uppercase tracking-widest"><i className="fas fa-wifi-slash mr-2"></i> STADIUM OFFLINE</p>
+                  <button onClick={() => setShowDiag(!showDiag)} className="text-[8px] font-bold text-red-400 underline uppercase tracking-widest">{showDiag ? 'HIDE' : 'DIAGNOSTICS'}</button>
                 </div>
                 {showDiag && (
                   <div className="mt-3 space-y-4">
-                    <div className="text-[9px] text-red-300/70 space-y-1 font-mono p-3 bg-black/40 rounded-xl">
-                      <p className="font-bold text-red-500">MISSING BUILD KEYS:</p>
-                      {getMissingKeys().length > 0 ? getMissingKeys().map(k => <p key={k}>- {k}</p>) : <p>None (Keys injected but failing to connect)</p>}
-                    </div>
-                    
                     <form onSubmit={handleManualSync} className="space-y-2">
                       <p className="text-[9px] font-black text-emerald-500 uppercase">Manual Sync Override</p>
-                      <textarea 
-                        value={manualConfig}
-                        onChange={(e) => setManualConfig(e.target.value)}
-                        placeholder='Paste Firebase Config JSON here...'
-                        className="w-full bg-black/60 border border-white/10 rounded-xl p-3 text-[10px] font-mono text-slate-300 outline-none focus:border-emerald-500/50 min-h-[100px]"
-                      />
+                      <textarea value={manualConfig} onChange={(e) => setManualConfig(e.target.value)} placeholder='Paste Firebase Config JSON here...' className="w-full bg-black/60 border border-white/10 rounded-xl p-3 text-[10px] font-mono text-slate-300 outline-none focus:border-emerald-500/50 min-h-[100px]" />
                       <div className="flex gap-2">
                         <button type="submit" className="flex-1 bg-emerald-500 text-slate-950 text-[9px] font-black uppercase py-2 rounded-lg">Apply Config</button>
                         <button type="button" onClick={clearManualConfig} className="bg-white/5 text-slate-500 text-[9px] font-black uppercase py-2 px-4 rounded-lg">Clear</button>
@@ -284,6 +267,7 @@ export default function App() {
               const isMe = msg.senderId === user.id;
               const isCoach = msg.senderId === 'coach_ai';
               const teamColor = (msg as any).senderTeam === 'CHIEFS' ? 'text-red-500' : 'text-emerald-500';
+              const reactions = (msg as any).reactions || {};
               
               return (
                 <div key={msg.id || i} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} msg-animate`}>
@@ -292,17 +276,40 @@ export default function App() {
                       {msg.senderName} {isMe && '(YOU)'}
                     </span>
                   </div>
-                  <div className={`max-w-[85%] px-4 py-3 rounded-2xl text-sm shadow-xl ${
+                  <div 
+                    onClick={() => !isMe && msg.id && activeTab === 'chat' && status === 'Live' && addReaction(msg.id, '🔥')}
+                    className={`group relative max-w-[85%] px-4 py-3 rounded-2xl text-sm shadow-xl transition-all active:scale-[0.98] ${
                     isMe ? 'bg-emerald-500 text-slate-950 font-bold rounded-tr-none' : 
                     isCoach ? 'bg-slate-900 border border-emerald-500/40 text-emerald-50 rounded-tl-none italic' :
                     'bg-slate-900 text-slate-200 rounded-tl-none border border-white/5'
                   }`}>
                     {msg.text}
+                    
+                    {/* Reactions Display */}
+                    <div className="flex gap-1 mt-1.5">
+                      {Object.entries(reactions).map(([emoji, count]) => (
+                        <div key={emoji} className="flex items-center gap-0.5 px-1.5 py-0.5 bg-black/20 rounded-full border border-white/5 text-[10px]">
+                          <span>{emoji}</span>
+                          <span className="font-black opacity-60">{(count as number)}</span>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Quick React Menu for other's messages */}
+                    {!isMe && !isCoach && (
+                      <div className="absolute -right-12 top-0 flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        {['🏈', '🔥', '🚩'].map(e => (
+                          <button key={e} onClick={(ev) => { ev.stopPropagation(); msg.id && addReaction(msg.id, e); }} className="w-8 h-8 rounded-full bg-slate-800 border border-white/10 flex items-center justify-center hover:bg-emerald-500 hover:text-slate-950 transition-colors">
+                            {e}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
               );
             })}
-            {isCoachThinking && <div className="text-[8px] font-black text-emerald-500/50 uppercase tracking-[0.4em] animate-pulse ml-2">Coach is thinking...</div>}
+            {isCoachThinking && <div className="text-[8px] font-black text-emerald-500/50 uppercase tracking-[0.4em] animate-pulse ml-2">Coach is analyzing...</div>}
             <div ref={messagesEndRef} />
           </div>
         ) : (
@@ -313,13 +320,8 @@ export default function App() {
                   const square = squares[`sq_${i}`];
                   const bgColor = square ? (square.team === 'CHIEFS' ? 'bg-red-600' : 'bg-emerald-500') : 'bg-slate-900';
                   const textColor = square ? 'text-white' : 'text-transparent';
-                  
                   return (
-                    <button
-                      key={i}
-                      onClick={() => claimSquare(i)}
-                      className={`aspect-square rounded-[2px] text-[6px] font-black flex items-center justify-center transition-all border border-white/5 ${bgColor} ${textColor} ${!square && 'hover:bg-slate-800'}`}
-                    >
+                    <button key={i} onClick={() => claimSquare(i)} className={`aspect-square rounded-[2px] text-[6px] font-black flex items-center justify-center transition-all border border-white/5 ${bgColor} ${textColor} ${!square && 'hover:bg-slate-800'}`}>
                       {square ? square.name.slice(0, 2) : i}
                     </button>
                   );
@@ -334,19 +336,15 @@ export default function App() {
         )}
       </div>
 
-      <div className="p-4 glass border-t border-white/10 z-50">
+      <div className="absolute bottom-0 w-full p-4 glass border-t border-white/10 z-50">
         <form onSubmit={handleSendMessage} className="flex gap-2">
           <input 
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
             placeholder="Shout to stadium... (/coach)"
-            className="flex-1 bg-slate-900 border border-white/10 rounded-2xl px-5 py-4 outline-none focus:border-emerald-500 transition-all text-white font-medium text-sm placeholder:text-slate-700"
+            className="flex-1 bg-slate-900 border border-white/10 rounded-2xl px-5 py-4 outline-none focus:border-emerald-500 transition-all text-white font-medium text-sm"
           />
-          <button 
-            type="submit"
-            disabled={!inputText.trim()}
-            className="w-14 h-14 bg-emerald-500 rounded-2xl flex items-center justify-center text-slate-950 hover:bg-emerald-400 disabled:opacity-20 shadow-lg shadow-emerald-500/20 active:scale-95 transition-all"
-          >
+          <button type="submit" disabled={!inputText.trim()} className="w-14 h-14 bg-emerald-500 rounded-2xl flex items-center justify-center text-slate-950 hover:bg-emerald-400 disabled:opacity-20 shadow-lg shadow-emerald-500/20 active:scale-95 transition-all">
             <i className="fas fa-paper-plane"></i>
           </button>
         </form>
