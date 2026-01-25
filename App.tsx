@@ -1,20 +1,33 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { db, collection, addDoc, setDoc, doc, query, orderBy, limit, onSnapshot, serverTimestamp, getMissingKeys, saveManualConfig, clearManualConfig } from './services/firebaseService';
-import { getCoachResponse, getPostGameAnalysis } from './services/geminiService';
+import { db, collection, addDoc, setDoc, doc, query, orderBy, limit, onSnapshot, serverTimestamp, getMissingKeys, saveManualConfig, clearManualConfig, getDoc } from './services/firebaseService';
+import { getCoachResponse, getPostGameAnalysis, getSidelineFact, getLiveScoreFromSearch } from './services/geminiService';
 import { ChatMessage, User, TriviaQuestion, ScoreEntry } from './types';
 
-// Updated Trivia to include Over/Under questions
 const INITIAL_TRIVIA: TriviaQuestion[] = [
-  { id: 'beta_v2_q1', text: "Which player spent 10 years as a Seahawk before joining the Rams in 2022 and then returning to Seattle?", options: ["Bobby Wagner", "Richard Sherman", "Russell Wilson", "Cooper Kupp"], correctIndex: 0, points: 100 },
-  { id: 'beta_v2_q2', text: "Over/Under: Matthew Stafford passes for more than 255.5 yards tonight?", options: ["OVER", "UNDER"], correctIndex: 0, points: 120 },
-  { id: 'beta_v2_q3', text: "Over/Under: Seahawks defense records more than 3.5 Sacks tonight?", options: ["OVER", "UNDER"], correctIndex: 1, points: 120 },
-  { id: 'beta_v2_q4', text: "In 2021, the Rams won the Super Bowl. Who was their offensive MVP for that game?", options: ["Matthew Stafford", "Cooper Kupp", "Aaron Donald", "Cam Akers"], correctIndex: 1, points: 200 }
+  { id: 'q1', text: "Where did the Rams play before moving to Los Angeles (first time)?", options: ["Cleveland", "St. Louis", "Anaheim", "San Diego"], correctIndex: 0, points: 100 },
+  { id: 'q2', text: "Which Seahawks player is known as 'Beast Mode'?", options: ["Shaun Alexander", "Marshawn Lynch", "DK Metcalf", "Tyler Lockett"], correctIndex: 1, points: 100 },
+  { id: 'q3', text: "Over/Under: Will Matthew Stafford throw for 2+ Touchdowns tonight?", options: ["OVER", "UNDER"], correctIndex: 0, points: 150 },
+  { id: 'q4', text: "How many Super Bowl titles do the Seattle Seahawks have?", options: ["0", "1", "2", "3"], correctIndex: 1, points: 150 },
+  { id: 'q5', text: "Which Rams defensive player has won 3 NFL Defensive Player of the Year awards?", options: ["Jalen Ramsey", "Aaron Donald", "Bobby Wagner", "Ernest Jones"], correctIndex: 1, points: 200 },
+  { id: 'q6', text: "Over/Under: Total sacks by both teams combined will be 5.5?", options: ["OVER", "UNDER"], correctIndex: 0, points: 150 },
+  { id: 'q7', text: "What is the name of the Seahawks' home stadium?", options: ["Lumen Field", "SoFi Stadium", "Levi's Stadium", "State Farm Stadium"], correctIndex: 0, points: 100 },
+  { id: 'q8', text: "Who is the current head coach of the Los Angeles Rams?", options: ["Sean McVay", "Pete Carroll", "Mike Macdonald", "Kyle Shanahan"], correctIndex: 0, points: 100 },
+  { id: 'q9', text: "Over/Under: DK Metcalf records more than 75.5 receiving yards?", options: ["OVER", "UNDER"], correctIndex: 1, points: 200 },
+  { id: 'q10', text: "Which team won the last head-to-head meeting between these two?", options: ["Rams", "Seahawks"], correctIndex: 0, points: 150 }
+];
+
+const HALFTIME_TRIVIA: TriviaQuestion[] = [
+  { id: 'h1', text: "BONUS: In the 2021 Wild Card game, who threw a pick-six for Seattle against the Rams?", options: ["Russell Wilson", "Geno Smith", "Marshawn Lynch", "Tyler Lockett"], correctIndex: 0, points: 500 },
+  { id: 'h2', text: "BONUS: Who holds the Seahawks record for most career rushing yards?", options: ["Marshawn Lynch", "Shaun Alexander", "Chris Carson", "Curt Warner"], correctIndex: 1, points: 500 },
+  { id: 'h3', text: "ULTIMATE BONUS: Predict the exact point total for the 3rd Quarter (Both Teams).", options: ["0-7", "8-14", "15-21", "22+"], correctIndex: 2, points: 1000 }
 ];
 
 const MSG_COLLECTION = 'hub_rams_sea_beta_v2';
 const RANK_COLLECTION = 'ranks_rams_sea_beta_v2';
 const USER_STORAGE_KEY = 'sblix_user_beta_v2';
 const RECAP_COLLECTION = 'recap_rams_sea_beta_v2';
+const GAME_STATE_DOC = 'state_rams_sea_beta_v2';
+const SIDELINE_BOT_ID = 'sideline_bot_ai';
 
 export default function App() {
   const [user, setUser] = useState<(User & { team?: string }) | null>(() => {
@@ -34,18 +47,68 @@ export default function App() {
   const [showDiag, setShowDiag] = useState(false);
   const [manualConfig, setManualConfig] = useState('');
   const [copyFeedback, setCopyFeedback] = useState(false);
-  const [gameScore, setGameScore] = useState({ rams: 24, seahawks: 21 }); // Mock final or live score
+  const [gameScore, setGameScore] = useState({ rams: 0, seahawks: 0 });
   const [postGameRecap, setPostGameRecap] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isHalftime, setIsHalftime] = useState(false);
+  const [scoreSources, setScoreSources] = useState<string[]>([]);
+  const [isAutoSyncing, setIsAutoSyncing] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Background Automated Systems (Fact Bot & Score Sync)
+  useEffect(() => {
+    if (!user || !db || status !== 'Live') return;
+
+    const backgroundInterval = setInterval(async () => {
+      try {
+        const stateRef = doc(db, GAME_STATE_DOC, 'global');
+        const stateSnap = await getDoc(stateRef);
+        const now = Date.now();
+        const data = stateSnap.exists() ? stateSnap.data() : {};
+        
+        // 1. Fact Bot - Every 8 mins
+        const lastFactTime = data.lastFactTime || 0;
+        if (now - lastFactTime > 480000) {
+          await setDoc(stateRef, { lastFactTime: now }, { merge: true });
+          const fact = await getSidelineFact();
+          const factMsg = {
+            senderId: SIDELINE_BOT_ID,
+            senderName: 'SIDELINE BOT 🤖',
+            text: fact,
+            timestamp: serverTimestamp()
+          };
+          await addDoc(collection(db, MSG_COLLECTION), factMsg);
+        }
+
+        // 2. Score Auto-Sync - Every 5 mins
+        const lastScoreCheckTime = data.lastScoreCheckTime || 0;
+        if (now - lastScoreCheckTime > 300000) {
+          setIsAutoSyncing(true);
+          await setDoc(stateRef, { lastScoreCheckTime: now }, { merge: true });
+          const update = await getLiveScoreFromSearch();
+          if (update && update.rams !== null) {
+            await setDoc(stateRef, { 
+              ramsScore: update.rams, 
+              seahawksScore: update.seahawks,
+              isHalftime: update.isHalftime,
+              scoreSources: update.sources
+            }, { merge: true });
+          }
+          setIsAutoSyncing(false);
+        }
+      } catch (e) {
+        console.error("Background sync error:", e);
+        setIsAutoSyncing(false);
+      }
+    }, 30000); // Poll lock every 30s
+
+    return () => clearInterval(backgroundInterval);
+  }, [user, status]);
 
   useEffect(() => {
     if (!user) return;
-
     if (!db) {
       setStatus('Solo');
-      setMessages(JSON.parse(localStorage.getItem('local_chat_history_v2') || '[]'));
-      setLeaderboard(JSON.parse(localStorage.getItem('local_leaderboard_v2') || '[]'));
       return;
     }
 
@@ -65,7 +128,7 @@ export default function App() {
       })) as ChatMessage[];
       setMessages(msgs);
       setStatus('Live');
-    }, (err) => setStatus('Solo'));
+    });
 
     const unsubscribeLeaderboard = onSnapshot(collection(db, RANK_COLLECTION), (snapshot) => {
       if (!isMounted) return;
@@ -79,11 +142,24 @@ export default function App() {
       }
     });
 
+    const unsubscribeGameState = onSnapshot(doc(db, GAME_STATE_DOC, 'global'), (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        setIsHalftime(data.isHalftime);
+        setGameScore({
+          rams: data.ramsScore ?? 0,
+          seahawks: data.seahawksScore ?? 0
+        });
+        setScoreSources(data.scoreSources ?? []);
+      }
+    });
+
     return () => {
       isMounted = false;
       unsubscribeChat();
       unsubscribeLeaderboard();
       unsubscribeRecap();
+      unsubscribeGameState();
       clearTimeout(syncTimeout);
     };
   }, [user]);
@@ -94,74 +170,27 @@ export default function App() {
     }
   }, [messages, activeTab]);
 
+  const forceScoreSearch = async () => {
+    setIsAutoSyncing(true);
+    const update = await getLiveScoreFromSearch();
+    if (update && update.rams !== null && db) {
+      await setDoc(doc(db, GAME_STATE_DOC, 'global'), { 
+        ramsScore: update.rams, 
+        seahawksScore: update.seahawks,
+        isHalftime: update.isHalftime,
+        lastScoreCheckTime: Date.now(),
+        scoreSources: update.sources
+      }, { merge: true });
+    }
+    setIsAutoSyncing(false);
+  };
+
   const handleJoin = (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputName.trim()) return;
-    const newUser = { 
-      id: 'usr_' + Math.random().toString(36).substr(2, 5), 
-      name: inputName.trim().toUpperCase(),
-      team: selectedTeam 
-    };
+    const newUser = { id: 'usr_' + Math.random().toString(36).substr(2, 5), name: inputName.trim().toUpperCase(), team: selectedTeam };
     setUser(newUser);
     localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(newUser));
-  };
-
-  const handleInvite = async () => {
-    const shareData = {
-      title: 'SBLIX Beta Hub',
-      text: 'Join me for the Rams vs Seahawks game! Hub is reset and ready.',
-      url: window.location.href,
-    };
-    if (navigator.share) {
-      try { await navigator.share(shareData); } catch (err) {}
-    } else {
-      navigator.clipboard.writeText(window.location.href);
-      setCopyFeedback(true);
-      setTimeout(() => setCopyFeedback(false), 2000);
-    }
-  };
-
-  const triggerPostGameAnalysis = async () => {
-    setIsAnalyzing(true);
-    const analysis = await getPostGameAnalysis(gameScore, leaderboard);
-    if (status === 'Live' && db) {
-      await setDoc(doc(db, RECAP_COLLECTION, 'latest'), { text: analysis, timestamp: serverTimestamp() });
-    } else {
-      setPostGameRecap(analysis);
-    }
-    setIsAnalyzing(false);
-  };
-
-  const wipeStadium = () => {
-    if (window.confirm("BETA RESET: This will clear your personal session and scores locally. Proceed?")) {
-      localStorage.clear();
-      window.location.reload();
-    }
-  };
-
-  const updateScore = async (points: number) => {
-    if (!user) return;
-    const currentScore = leaderboard.find(s => s.userId === user.id) || {
-      userId: user.id,
-      userName: user.name,
-      team: user.team || 'RAMS',
-      points: 0,
-      trophies: 0
-    };
-    
-    const newScore = {
-      ...currentScore,
-      points: currentScore.points + points,
-      trophies: Math.floor((currentScore.points + points) / 300)
-    };
-
-    if (status === 'Live' && db) {
-      await setDoc(doc(db, RANK_COLLECTION, user.id), newScore);
-    } else {
-      const newLB = [...leaderboard.filter(s => s.userId !== user.id), newScore];
-      setLeaderboard(newLB.sort((a, b) => b.points - a.points));
-      localStorage.setItem('local_leaderboard_v2', JSON.stringify(newLB));
-    }
   };
 
   const handleSendMessage = async (e: React.FormEvent) => {
@@ -169,38 +198,12 @@ export default function App() {
     if (!inputText.trim() || !user) return;
     const text = inputText.trim();
     setInputText('');
-    
-    const newMsg = {
-      senderId: user.id,
-      senderName: user.name,
-      senderTeam: user.team,
-      text,
-      reactions: {},
-      timestamp: status === 'Live' ? serverTimestamp() : new Date().toISOString()
-    };
-
-    if (status === 'Live' && db) {
-      await addDoc(collection(db, MSG_COLLECTION), newMsg);
-    } else {
-      const updated = [...messages, { ...newMsg, id: Date.now().toString() } as ChatMessage].slice(-50);
-      setMessages(updated);
-      localStorage.setItem('local_chat_history_v2', JSON.stringify(updated));
-    }
-
+    const newMsg = { senderId: user.id, senderName: user.name, senderTeam: user.team, text, timestamp: status === 'Live' ? serverTimestamp() : new Date().toISOString() };
+    if (status === 'Live' && db) await addDoc(collection(db, MSG_COLLECTION), newMsg);
     if (text.toLowerCase().includes('/coach')) {
       setIsCoachThinking(true);
       const coachText = await getCoachResponse(text);
-      const coachMsg = {
-        senderId: 'coach_ai',
-        senderName: 'COACH SBLIX 🏈',
-        text: coachText,
-        timestamp: status === 'Live' ? serverTimestamp() : new Date().toISOString()
-      };
-      if (status === 'Live' && db) {
-        await addDoc(collection(db, MSG_COLLECTION), coachMsg);
-      } else {
-        setMessages(prev => [...prev, { ...coachMsg, id: 'c' + Date.now() } as ChatMessage]);
-      }
+      if (status === 'Live' && db) await addDoc(collection(db, MSG_COLLECTION), { senderId: 'coach_ai', senderName: 'COACH SBLIX 🏈', text: coachText, timestamp: serverTimestamp() });
       setIsCoachThinking(false);
     }
   };
@@ -209,38 +212,33 @@ export default function App() {
     if (answeredQuestions.has(qId)) return;
     setAnsweredQuestions(prev => new Set(prev).add(qId));
     if (idx === correct) {
-      updateScore(pts);
+      if (!user) return;
+      const current = leaderboard.find(s => s.userId === user.id) || { userId: user.id, userName: user.name, team: user.team || 'RAMS', points: 0, trophies: 0 };
+      if (status === 'Live' && db) setDoc(doc(db, RANK_COLLECTION, user.id), { ...current, points: current.points + pts }, { merge: true });
       alert("TOUCHDOWN! + " + pts + " pts");
     } else {
-      alert("INCOMPLETE PASS! Correct answer was: " + INITIAL_TRIVIA.find(q => q.id === qId)?.options[correct]);
+      alert("INCOMPLETE PASS! Better luck next play.");
     }
   };
 
   if (!user) {
     return (
-      <div className="flex items-center justify-center min-h-screen p-6 bg-slate-950 relative overflow-hidden">
+      <div className="flex items-center justify-center min-h-screen p-6 bg-slate-950 relative overflow-hidden text-center">
         <div className="scanline"></div>
-        <div className="w-full max-w-md p-8 glass rounded-[2.5rem] shadow-2xl relative z-10 border border-white/10 text-center">
+        <div className="w-full max-w-md p-8 glass rounded-[2.5rem] shadow-2xl relative z-10 border border-white/10">
           <div className="w-16 h-16 bg-blue-500/20 rounded-2xl flex items-center justify-center mx-auto mb-6 border border-blue-500/30">
-            <i className="fas fa-sync text-2xl text-blue-400"></i>
+            <i className="fas fa-search-location text-2xl text-blue-400"></i>
           </div>
-          <h1 className="font-orbitron text-3xl font-black italic text-white mb-2 uppercase tracking-tighter">BETA: NFC WEST</h1>
-          <p className="text-blue-500/60 text-[10px] mb-8 font-black uppercase tracking-[0.4em]">RAMS vs SEAHAWKS</p>
+          <h1 className="font-orbitron text-3xl font-black italic text-white mb-2 uppercase tracking-tighter">SBLIX AUTO</h1>
+          <p className="text-blue-500/60 text-[10px] mb-8 font-black uppercase tracking-[0.4em]">Live Search Grounding Enabled</p>
           <form onSubmit={handleJoin} className="space-y-6">
-            <input autoFocus value={inputName} onChange={(e) => setInputName(e.target.value.slice(0, 12).toUpperCase())} placeholder="NEW HANDLE" className="w-full bg-slate-900 border border-white/10 rounded-2xl px-6 py-4 outline-none focus:border-blue-500 transition-all text-white font-black text-lg uppercase tracking-widest text-center" />
+            <input autoFocus value={inputName} onChange={(e) => setInputName(e.target.value.slice(0, 12).toUpperCase())} placeholder="HANDLE" className="w-full bg-slate-900 border border-white/10 rounded-2xl px-6 py-4 outline-none focus:border-blue-500 text-white font-black text-lg uppercase tracking-widest text-center" />
             <div className="grid grid-cols-2 gap-3">
               <button type="button" onClick={() => setSelectedTeam('RAMS')} className={`py-4 rounded-2xl border-2 transition-all font-black text-xs tracking-widest ${selectedTeam === 'RAMS' ? 'border-blue-600 bg-blue-600/20 text-blue-400' : 'border-white/5 bg-white/5 text-slate-500'}`}>RAMS</button>
               <button type="button" onClick={() => setSelectedTeam('SEAHAWKS')} className={`py-4 rounded-2xl border-2 transition-all font-black text-xs tracking-widest ${selectedTeam === 'SEAHAWKS' ? 'border-emerald-600 bg-emerald-600/20 text-emerald-400' : 'border-white/5 bg-white/5 text-slate-500'}`}>SEAHAWKS</button>
             </div>
-            <div className="flex flex-col gap-3">
-              <button className="w-full bg-blue-600 hover:bg-blue-500 text-white font-black uppercase tracking-[0.2em] py-5 rounded-2xl transition-all shadow-xl shadow-blue-500/30">JOIN NEW HUB</button>
-              <button type="button" onClick={handleInvite} className="w-full bg-slate-800/50 hover:bg-slate-800 text-slate-400 border border-white/5 font-black uppercase tracking-[0.15em] py-4 rounded-2xl transition-all flex items-center justify-center gap-3">
-                <i className={`fas ${copyFeedback ? 'fa-check text-emerald-500' : 'fa-user-plus'}`}></i>
-                {copyFeedback ? 'LINK COPIED!' : 'INVITE SQUAD'}
-              </button>
-            </div>
+            <button className="w-full bg-blue-600 hover:bg-blue-500 text-white font-black uppercase tracking-[0.2em] py-5 rounded-2xl transition-all shadow-xl shadow-blue-500/30">JOIN GAME HUB</button>
           </form>
-          <p className="mt-8 text-[9px] text-slate-600 font-black uppercase tracking-[0.2em]">Game Hub is cleared for the 5:30 kickoff!</p>
         </div>
       </div>
     );
@@ -254,164 +252,104 @@ export default function App() {
             <div className={`w-2 h-2 rounded-full ${status === 'Live' ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`}></div>
             <span className="text-[9px] font-black text-slate-500 uppercase tracking-tighter">{status} HUB</span>
           </div>
-          <div className="flex items-center gap-3">
-             <button onClick={() => setShowDiag(!showDiag)} className="text-slate-600 hover:text-white transition-colors text-[10px] font-black uppercase">
-               <i className="fas fa-cog"></i>
-             </button>
-             <button onClick={() => { localStorage.clear(); window.location.reload(); }} className="text-slate-600 hover:text-white transition-colors">
-               <i className="fas fa-sign-out-alt text-xs"></i>
-             </button>
+          <div className="flex items-center gap-2">
+            {isAutoSyncing && <i className="fas fa-sync fa-spin text-blue-500 text-[10px]"></i>}
+            <button onClick={() => setShowDiag(!showDiag)} className="text-slate-600 hover:text-white transition-colors text-[10px] font-black uppercase"><i className="fas fa-cog"></i></button>
           </div>
         </div>
         
         {showDiag && (
            <div className="mb-4 p-4 bg-black/80 rounded-2xl border border-white/10 animate-msgPop space-y-4">
-             <div>
-               <p className="text-[9px] font-black text-blue-500 uppercase mb-2">Beta Controls</p>
-               <div className="flex gap-2">
-                 <button onClick={triggerPostGameAnalysis} disabled={isAnalyzing} className="flex-1 bg-yellow-500 text-yellow-950 text-[10px] font-black uppercase py-3 rounded-lg flex items-center justify-center gap-2">
-                   <i className={`fas ${isAnalyzing ? 'fa-spinner fa-spin' : 'fa-flag-checkered'}`}></i>
-                   {isAnalyzing ? 'Analyzing...' : 'Trigger Post-Game Recap'}
-                 </button>
-                 <button onClick={wipeStadium} className="bg-red-600/20 text-red-500 border border-red-500/30 text-[10px] font-black uppercase px-4 rounded-xl">Wipe Local</button>
-               </div>
+             <div className="space-y-4">
+               <p className="text-[10px] font-black text-blue-500 uppercase italic">Admin Sync Controls</p>
+               <button onClick={forceScoreSearch} disabled={isAutoSyncing} className="w-full bg-blue-600 text-white text-[10px] font-black uppercase py-3 rounded-lg flex items-center justify-center gap-2">
+                 <i className={`fas ${isAutoSyncing ? 'fa-spinner fa-spin' : 'fa-satellite'}`}></i>
+                 {isAutoSyncing ? 'Search Grounding Active...' : 'Manual Score Search'}
+               </button>
+               {scoreSources.length > 0 && (
+                 <div className="space-y-1">
+                   <p className="text-[8px] font-black text-slate-600 uppercase">Verification Sources:</p>
+                   {scoreSources.map((src, idx) => (
+                     <a key={idx} href={src} target="_blank" className="block text-[8px] text-blue-400 truncate underline">{src}</a>
+                   ))}
+                 </div>
+               )}
              </div>
-             <textarea value={manualConfig} onChange={(e) => setManualConfig(e.target.value)} placeholder='Paste Firebase JSON...' className="w-full bg-slate-900 border border-white/10 rounded-xl p-3 text-[10px] font-mono text-slate-300 outline-none h-16" />
            </div>
         )}
 
         <div className="flex justify-between items-center px-4 py-3 bg-black/40 rounded-3xl border border-white/5 shadow-inner">
-          <div className="text-center relative">
-            <p className="text-[10px] font-black text-blue-500 tracking-widest">LAR</p>
+          <div className="text-center">
+            <p className="text-[10px] font-black text-blue-500 tracking-widest uppercase">LAR</p>
             <p className="text-3xl font-orbitron font-black italic text-white">{gameScore.rams}</p>
           </div>
           <div className="text-center">
-            <p className="text-[10px] font-black text-slate-600 mb-1 italic uppercase">Beta Testing</p>
-            <div className="px-3 py-0.5 bg-blue-500/10 rounded-full border border-blue-500/20">
-              <p className="text-[9px] font-black text-blue-400 animate-pulse tracking-[0.3em]">LIVE READY</p>
+            <div className={`px-4 py-1 rounded-full border transition-all ${isHalftime ? 'bg-purple-500/20 border-purple-500/40' : 'bg-blue-500/10 border-blue-500/20'}`}>
+              <p className={`text-[10px] font-black uppercase tracking-[0.3em] ${isHalftime ? 'text-purple-400 animate-pulse' : 'text-blue-400'}`}>
+                {isHalftime ? 'HALFTIME' : 'LIVE SCORE'}
+              </p>
             </div>
           </div>
           <div className="text-center">
-            <p className="text-[10px] font-black text-emerald-500 tracking-widest">SEA</p>
+            <p className="text-[10px] font-black text-emerald-500 tracking-widest uppercase">SEA</p>
             <p className="text-3xl font-orbitron font-black italic text-white">{gameScore.seahawks}</p>
           </div>
         </div>
 
         <div className="flex gap-2 mt-4">
-          <button onClick={() => setActiveTab('chat')} className={`flex-1 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-[0.2em] transition-all flex items-center justify-center gap-2 ${activeTab === 'chat' ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20' : 'bg-white/5 text-slate-500'}`}>
-            <i className="fas fa-comment"></i> Chat
-          </button>
-          <button onClick={() => setActiveTab('trivia')} className={`flex-1 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-[0.2em] transition-all flex items-center justify-center gap-2 ${activeTab === 'trivia' ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20' : 'bg-white/5 text-slate-500'}`}>
-            <i className="fas fa-bolt"></i> Trivia
-          </button>
-          <button onClick={() => setActiveTab('ranks')} className={`flex-1 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-[0.2em] transition-all flex items-center justify-center gap-2 ${activeTab === 'ranks' ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20' : 'bg-white/5 text-slate-500'}`}>
-            <i className="fas fa-award"></i> Ranks
-          </button>
+          <button onClick={() => setActiveTab('chat')} className={`flex-1 py-2.5 rounded-xl text-[10px] font-black uppercase transition-all ${activeTab === 'chat' ? 'bg-blue-600 text-white' : 'bg-white/5 text-slate-500'}`}>Chat</button>
+          <button onClick={() => setActiveTab('trivia')} className={`flex-1 py-2.5 rounded-xl text-[10px] font-black uppercase transition-all ${activeTab === 'trivia' ? 'bg-blue-600 text-white' : 'bg-white/5 text-slate-500'}`}>Trivia</button>
+          <button onClick={() => setActiveTab('ranks')} className={`flex-1 py-2.5 rounded-xl text-[10px] font-black uppercase transition-all ${activeTab === 'ranks' ? 'bg-blue-600 text-white' : 'bg-white/5 text-slate-500'}`}>Ranks</button>
         </div>
       </header>
 
       <div className="flex-1 overflow-y-auto relative bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')] custom-scrollbar">
         {activeTab === 'chat' && (
           <div className="p-4 space-y-4 pb-32">
-            <div className="text-center py-4 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl mb-2">
-               <p className="text-[8px] font-black text-emerald-500 uppercase tracking-[0.5em] mb-1">Stadium Link Established</p>
-               <p className="text-[10px] text-emerald-100 font-bold">CHAT IS LIVE FOR RAMS VS SEAHAWKS</p>
-            </div>
-            {messages.map((msg, i) => {
-              const isMe = msg.senderId === user.id;
-              const isCoach = msg.senderId === 'coach_ai';
-              const teamColor = (msg as any).senderTeam === 'RAMS' ? 'text-blue-400' : 'text-emerald-400';
-              return (
-                <div key={msg.id || i} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} msg-animate`}>
-                  <span className={`text-[9px] font-black uppercase tracking-wider mb-1 px-1 ${isCoach ? 'text-yellow-500' : teamColor}`}>
-                    {msg.senderName} {isMe && '(YOU)'}
-                  </span>
-                  <div className={`max-w-[85%] px-4 py-3 rounded-2xl text-sm shadow-xl ${isMe ? 'bg-blue-600 text-white font-bold rounded-tr-none' : isCoach ? 'bg-slate-900 border border-blue-500/40 text-blue-50 rounded-tl-none italic' : 'bg-slate-900 text-slate-200 rounded-tl-none border border-white/5'}`}>
-                    {msg.text}
-                  </div>
+            {messages.map((msg, i) => (
+              <div key={msg.id || i} className={`flex flex-col ${msg.senderId === user.id ? 'items-end' : 'items-start'} msg-animate`}>
+                <span className={`text-[9px] font-black uppercase mb-1 px-1 ${msg.senderId === SIDELINE_BOT_ID ? 'text-emerald-400' : 'text-slate-500'}`}>{msg.senderName}</span>
+                <div className={`max-w-[85%] px-4 py-3 rounded-2xl text-sm shadow-xl ${msg.senderId === user.id ? 'bg-blue-600 text-white rounded-tr-none' : 'bg-slate-900 text-slate-200 border border-white/5 rounded-tl-none'}`}>
+                  {msg.text}
                 </div>
-              );
-            })}
-            {isCoachThinking && <div className="text-[8px] font-black text-blue-500/50 uppercase tracking-[0.4em] animate-pulse ml-2">Coach is scouting...</div>}
+              </div>
+            ))}
             <div ref={messagesEndRef} />
           </div>
         )}
 
         {activeTab === 'trivia' && (
           <div className="p-6 space-y-6 pb-24">
-            <h2 className="text-xl font-orbitron font-black italic text-white flex items-center gap-3">
-              <i className="fas fa-fire text-orange-500"></i> NFC WEST TRIVIA
-            </h2>
-            {INITIAL_TRIVIA.map(q => {
-              const isOU = q.options.includes("OVER");
-              return (
+            {INITIAL_TRIVIA.map(q => (
               <div key={q.id} className={`p-6 rounded-3xl border transition-all ${answeredQuestions.has(q.id) ? 'bg-white/5 border-white/5 opacity-50' : 'bg-slate-900 border-white/10 shadow-2xl'}`}>
-                <div className="flex justify-between items-start mb-4">
-                  <span className={`text-[10px] font-black px-3 py-1 rounded-full border ${isOU ? 'bg-purple-500/10 text-purple-400 border-purple-500/20' : 'bg-blue-500/10 text-blue-400 border-blue-500/20'}`}>
-                    {isOU ? <i className="fas fa-arrows-v mr-1"></i> : null}
-                    {q.points} PTS
-                  </span>
-                  {answeredQuestions.has(q.id) && <i className="fas fa-check-circle text-emerald-500"></i>}
+                <div className="flex justify-between items-center mb-4">
+                  <span className="bg-blue-500/10 text-blue-400 text-[10px] font-black px-3 py-1 rounded-full">{q.points} PTS</span>
                 </div>
                 <p className="text-lg font-bold text-white mb-6 leading-tight">{q.text}</p>
-                <div className={`grid ${isOU ? 'grid-cols-2' : 'grid-cols-1'} gap-2`}>
+                <div className="grid grid-cols-1 gap-2">
                   {q.options.map((opt, idx) => (
-                    <button key={idx} disabled={answeredQuestions.has(q.id)} onClick={() => handleAnswer(q.id, idx, q.correctIndex, q.points)} className="w-full text-center px-5 py-4 rounded-2xl bg-black/40 border border-white/5 text-slate-300 hover:border-blue-500 hover:bg-blue-500/5 transition-all text-sm font-black tracking-widest">
+                    <button key={idx} disabled={answeredQuestions.has(q.id)} onClick={() => handleAnswer(q.id, idx, q.correctIndex, q.points)} className="w-full text-left px-5 py-4 rounded-2xl bg-black/40 border border-white/5 text-slate-300 hover:border-blue-500 hover:text-white transition-all text-sm font-bold uppercase">
                       {opt}
                     </button>
                   ))}
                 </div>
               </div>
-            )})}
+            ))}
           </div>
         )}
 
         {activeTab === 'ranks' && (
           <div className="p-6 pb-24 space-y-8">
-            <div className="text-center">
-              <h2 className="text-2xl font-orbitron font-black italic text-white mb-2 uppercase tracking-tighter">THE LEADERBOARD</h2>
-              <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest italic">Live Rankings | Rams vs Seahawks</p>
-            </div>
-            
-            {postGameRecap && (
-              <div className="p-6 bg-yellow-500/10 border-2 border-yellow-500/30 rounded-[2rem] relative overflow-hidden group">
-                <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-30 transition-opacity">
-                  <i className="fas fa-trophy text-6xl text-yellow-500 rotate-12"></i>
-                </div>
-                <h3 className="text-yellow-500 font-orbitron font-black italic text-sm mb-3 flex items-center gap-2 uppercase">
-                  <i className="fas fa-microphone"></i> Locker Room Recap
-                </h3>
-                <p className="text-slate-100 text-sm italic font-medium leading-relaxed">
-                  {postGameRecap}
-                </p>
-                <div className="mt-4 flex gap-2">
-                  <div className="px-2 py-1 bg-yellow-500 text-yellow-950 text-[8px] font-black uppercase rounded">Top Fan: {leaderboard[0]?.userName || 'N/A'}</div>
-                </div>
-              </div>
-            )}
-
             <div className="space-y-3">
-              {leaderboard.length === 0 ? (
-                <div className="text-center py-20 opacity-30">
-                  <i className="fas fa-user-friends text-4xl mb-4 text-blue-500"></i>
-                  <p className="font-black text-xs uppercase tracking-widest">Board is Clean!</p>
-                </div>
-              ) : leaderboard.map((score, i) => (
-                <div key={score.userId} className={`flex items-center gap-4 p-5 rounded-3xl border transition-all ${score.userId === user.id ? 'bg-blue-600 border-blue-400 shadow-xl shadow-blue-500/20' : 'bg-slate-900 border-white/5'}`}>
-                  <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-orbitron font-black text-xl shadow-inner ${i === 0 ? 'bg-yellow-400 text-yellow-900' : i === 1 ? 'bg-slate-300 text-slate-600' : i === 2 ? 'bg-orange-400 text-orange-900' : 'bg-black/40 text-slate-500'}`}>
-                    {i === 0 ? <i className="fas fa-crown"></i> : i + 1}
-                  </div>
+              {leaderboard.map((score, i) => (
+                <div key={score.userId} className={`flex items-center gap-4 p-5 rounded-3xl border transition-all ${score.userId === user.id ? 'bg-blue-600 border-blue-400' : 'bg-slate-900 border-white/5'}`}>
+                  <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-orbitron font-black text-xl ${i === 0 ? 'bg-yellow-400 text-yellow-900' : 'bg-black/40 text-slate-500'}`}>{i + 1}</div>
                   <div className="flex-1">
-                    <p className={`font-black text-sm uppercase tracking-wider ${score.userId === user.id ? 'text-white' : 'text-white'}`}>{score.userName}</p>
-                    <p className={`text-[9px] font-bold uppercase opacity-60 ${score.userId === user.id ? 'text-blue-100' : 'text-slate-400'}`}>{score.team}</p>
+                    <p className="font-black text-sm uppercase tracking-wider text-white">{score.userName}</p>
+                    <p className="text-[9px] font-bold uppercase opacity-60 text-slate-400">{score.team}</p>
                   </div>
                   <div className="text-right">
-                    <p className={`font-orbitron font-black text-lg ${score.userId === user.id ? 'text-white' : 'text-blue-400'}`}>{score.points}</p>
-                    <div className="flex gap-1 justify-end">
-                      {Array.from({ length: score.trophies || 0 }).map((_, t) => (
-                        <i key={t} className={`fas fa-award text-[10px] ${score.userId === user.id ? 'text-white' : 'text-yellow-500'}`}></i>
-                      ))}
-                    </div>
+                    <p className="font-orbitron font-black text-lg text-white">{score.points}</p>
                   </div>
                 </div>
               ))}
@@ -423,10 +361,8 @@ export default function App() {
       {activeTab === 'chat' && (
         <div className="absolute bottom-0 w-full p-4 glass border-t border-white/10 z-50">
           <form onSubmit={handleSendMessage} className="flex gap-2">
-            <input value={inputText} onChange={(e) => setInputText(e.target.value)} placeholder="Talk to the hub... (/coach)" className="flex-1 bg-slate-900 border border-white/10 rounded-2xl px-5 py-4 outline-none focus:border-blue-500 transition-all text-white font-medium text-sm" />
-            <button type="submit" disabled={!inputText.trim()} className="w-14 h-14 bg-blue-600 rounded-2xl flex items-center justify-center text-white hover:bg-blue-500 disabled:opacity-20 shadow-lg shadow-blue-500/20 active:scale-95 transition-all">
-              <i className="fas fa-paper-plane"></i>
-            </button>
+            <input value={inputText} onChange={(e) => setInputText(e.target.value)} placeholder="Talk to the hub... (/coach)" className="flex-1 bg-slate-900 border border-white/10 rounded-2xl px-5 py-4 outline-none text-white text-sm" />
+            <button type="submit" disabled={!inputText.trim()} className="w-14 h-14 bg-blue-600 rounded-2xl flex items-center justify-center text-white shadow-lg"><i className="fas fa-paper-plane"></i></button>
           </form>
         </div>
       )}

@@ -9,7 +9,8 @@ import {
   orderBy, 
   limit, 
   onSnapshot, 
-  serverTimestamp 
+  serverTimestamp,
+  getDoc
 } from 'firebase/firestore';
 
 // Helper to check for stored override config
@@ -95,6 +96,7 @@ export {
   addDoc, 
   setDoc,
   doc,
+  getDoc,
   query, 
   orderBy, 
   limit, 

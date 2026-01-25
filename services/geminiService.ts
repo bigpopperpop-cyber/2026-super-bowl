@@ -24,6 +24,62 @@ export async function getCoachResponse(prompt: string) {
 }
 
 /**
+ * Uses Google Search to find the current live score of the game.
+ */
+export async function getLiveScoreFromSearch() {
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  
+  try {
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: "What is the current score of the NFL game between the Los Angeles Rams and the Seattle Seahawks right now? Also tell me if it is currently halftime. Format your response exactly like this: RAMS: [score], SEAHAWKS: [score], HALFTIME: [true/false]",
+      config: {
+        tools: [{ googleSearch: {} }],
+      },
+    });
+
+    const text = response.text || "";
+    const sources = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+    
+    // Simple parsing logic
+    const ramsMatch = text.match(/RAMS:?\s*(\d+)/i);
+    const seaMatch = text.match(/SEAHAWKS:?\s*(\d+)/i);
+    const halfMatch = text.match(/HALFTIME:?\s*(true|false)/i);
+
+    return {
+      rams: ramsMatch ? parseInt(ramsMatch[1]) : null,
+      seahawks: seaMatch ? parseInt(seaMatch[1]) : null,
+      isHalftime: halfMatch ? halfMatch[1].toLowerCase() === 'true' : false,
+      sources: sources.map((c: any) => c.web?.uri).filter(Boolean)
+    };
+  } catch (err) {
+    console.error("Search Error:", err);
+    return null;
+  }
+}
+
+/**
+ * Generates a deep-cut historical or statistical fact about the Rams/Seahawks matchup.
+ */
+export async function getSidelineFact() {
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  
+  try {
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: "Give me one interesting, high-energy historical fact or obscure stat about the Rams vs Seahawks rivalry. It could be about a specific player (like Aaron Donald or Marshawn Lynch), a legendary game, or a weird stat. Keep it under 30 words and very hype!",
+      config: {
+        systemInstruction: "You are 'SBLIX SIDELINE BOT'. You provide automated, data-driven nuggets of wisdom during the broadcast. You are punchy, professional, and use lots of tech/data emojis like 📊, 📉, 🤖.",
+        temperature: 0.9,
+      }
+    });
+    return response.text || "Did you know? These two teams always play it close! 🏈";
+  } catch (err) {
+    return "NFC West Fact: The rivalry between these two is one of the most physical in the NFL! 🏟️";
+  }
+}
+
+/**
  * Generates a post-game summary based on the final scores and player rankings.
  */
 export async function getPostGameAnalysis(scoreData: any, leaderboard: any[]) {
