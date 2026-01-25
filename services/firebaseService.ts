@@ -10,22 +10,36 @@ import {
   serverTimestamp 
 } from 'firebase/firestore';
 
+// Helper to safely get environment variables from Vite or Process
+const getEnv = (key: string): string | undefined => {
+  try {
+    return (import.meta as any).env?.[key] || (process.env as any)?.[key];
+  } catch (e) {
+    return (process.env as any)?.[key];
+  }
+};
+
 const firebaseConfig = {
-  apiKey: (process.env as any).API_KEY,
-  authDomain: "sblix-party.firebaseapp.com",
-  projectId: "sblix-party",
-  storageBucket: "sblix-party.appspot.com",
-  messagingSenderId: "987654321",
-  appId: "1:987654321:web:sblix"
+  apiKey: getEnv('VITE_FIREBASE_API_KEY'),
+  authDomain: getEnv('VITE_FIREBASE_AUTH_DOMAIN'),
+  projectId: getEnv('VITE_FIREBASE_PROJECT_ID'),
+  storageBucket: getEnv('VITE_FIREBASE_STORAGE_BUCKET'),
+  messagingSenderId: getEnv('VITE_FIREBASE_MESSAGING_SENDER_ID'),
+  appId: getEnv('VITE_FIREBASE_APP_ID')
 };
 
 let db: any = null;
 
-try {
-  const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
-  db = getFirestore(app);
-} catch (error) {
-  console.warn("Firestore initialization failed. App will run in Party Demo mode.", error);
+// Only initialize if we have at least a Project ID
+if (firebaseConfig.projectId && firebaseConfig.projectId !== "undefined") {
+  try {
+    const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+    db = getFirestore(app);
+  } catch (error) {
+    console.warn("Firestore initialization failed. Falling back to Party Mode.", error);
+  }
+} else {
+  console.log("No Firebase Project ID detected. Running in Local Party Mode.");
 }
 
 export { 
