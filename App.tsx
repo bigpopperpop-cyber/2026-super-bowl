@@ -11,43 +11,54 @@ export default function App() {
   const [inputName, setInputName] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputText, setInputText] = useState('');
-  const [status, setStatus] = useState<'Live' | 'Party Link'>(db ? 'Live' : 'Party Link');
+  const [status, setStatus] = useState<'Live' | 'Syncing' | 'Party Mode'>('Syncing');
   const [isCoachThinking, setIsCoachThinking] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  // Connection Handler with Timeout to prevent "Awaiting Verification" stalls
   useEffect(() => {
     if (!user) return;
+
+    let syncTimeout = setTimeout(() => {
+      if (status === 'Syncing') setStatus('Party Mode');
+    }, 3500);
 
     if (db) {
       try {
         const q = query(
           collection(db, 'party_hub'),
           orderBy('timestamp', 'asc'),
-          limit(50)
+          limit(60)
         );
 
         const unsubscribe = onSnapshot(q, (snapshot) => {
+          clearTimeout(syncTimeout);
           const msgs = snapshot.docs.map(doc => ({
             id: doc.id,
-            ...doc.data()
+            ...doc.data(),
+            // Handle Firestore timestamps vs local dates
+            timestamp: doc.data().timestamp?.toDate?.() || new Date(doc.data().timestamp)
           })) as ChatMessage[];
           setMessages(msgs);
           setStatus('Live');
         }, (err) => {
-          console.error("Firestore sync error:", err);
-          setStatus('Party Link');
+          console.error("Firestore error:", err);
+          setStatus('Party Mode');
         });
 
-        return () => unsubscribe();
+        return () => {
+          unsubscribe();
+          clearTimeout(syncTimeout);
+        };
       } catch (e) {
-        setStatus('Party Link');
+        setStatus('Party Mode');
       }
     } else {
-      // Local recovery
+      setStatus('Party Mode');
       const saved = JSON.parse(localStorage.getItem('local_chat_history') || '[]');
       setMessages(saved);
     }
-  }, [user]);
+  }, [user, status]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -56,7 +67,7 @@ export default function App() {
   const handleJoin = (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputName.trim()) return;
-    const newUser = { id: 'usr_' + Math.random().toString(36).substr(2, 5), name: inputName.trim() };
+    const newUser = { id: 'usr_' + Math.random().toString(36).substr(2, 5), name: inputName.trim().toUpperCase() };
     setUser(newUser);
     localStorage.setItem('chat_user', JSON.stringify(newUser));
   };
@@ -67,7 +78,7 @@ export default function App() {
     if (!text || !user) return;
 
     setInputText('');
-    const isCoach = text.toLowerCase().startsWith('/coach');
+    const isCoachCmd = text.toLowerCase().startsWith('/coach');
 
     const newMsg: ChatMessage = {
       id: 'msg_' + Date.now(),
@@ -77,8 +88,7 @@ export default function App() {
       timestamp: new Date()
     };
 
-    // If Firestore fails or isn't available, handle locally for the guest
-    if (db && status === 'Live') {
+    if (status === 'Live' && db) {
       try {
         await addDoc(collection(db, 'party_hub'), {
           ...newMsg,
@@ -88,14 +98,16 @@ export default function App() {
         setMessages(prev => [...prev, newMsg]);
       }
     } else {
-      const updated = [...messages, newMsg].slice(-50);
+      // Local fall-through for instant feedback if cloud is slow
+      const updated = [...messages, newMsg].slice(-100);
       setMessages(updated);
       localStorage.setItem('local_chat_history', JSON.stringify(updated));
     }
 
-    if (isCoach) {
+    if (isCoachCmd) {
       setIsCoachThinking(true);
-      const response = await getCoachResponse(text.replace('/coach', ''));
+      const prompt = text.replace('/coach', '').trim() || "What's the current game vibe?";
+      const response = await getCoachResponse(prompt);
       const coachMsg: ChatMessage = {
         id: 'coach_' + Date.now(),
         senderId: 'coach_ai',
@@ -104,7 +116,7 @@ export default function App() {
         timestamp: new Date()
       };
       
-      if (db && status === 'Live') {
+      if (status === 'Live' && db) {
         await addDoc(collection(db, 'party_hub'), {
           ...coachMsg,
           timestamp: serverTimestamp()
@@ -120,22 +132,22 @@ export default function App() {
     return (
       <div className="flex items-center justify-center min-h-screen p-6 bg-slate-950 relative overflow-hidden">
         <div className="scanline"></div>
-        <div className="w-full max-w-md p-10 glass rounded-[3rem] shadow-2xl relative z-10 border-t border-white/10 text-center">
-          <div className="w-20 h-20 bg-emerald-500/10 rounded-3xl flex items-center justify-center mx-auto mb-8 neon-border">
-            <i className="fas fa-trophy text-3xl text-emerald-400"></i>
+        <div className="w-full max-w-md p-10 glass rounded-[2.5rem] shadow-2xl relative z-10 border border-white/10 text-center">
+          <div className="w-20 h-20 bg-emerald-500/20 rounded-3xl flex items-center justify-center mx-auto mb-8 neon-border border border-emerald-500/30">
+            <i className="fas fa-football-ball text-3xl text-emerald-400"></i>
           </div>
-          <h1 className="font-orbitron text-4xl font-black italic text-white mb-2">SBLIX</h1>
-          <p className="text-slate-500 text-sm mb-10 font-bold uppercase tracking-widest">Party Connect</p>
+          <h1 className="font-orbitron text-5xl font-black italic text-white mb-2 tracking-tighter">SBLIX</h1>
+          <p className="text-emerald-500/60 text-[10px] mb-10 font-black uppercase tracking-[0.4em]">Gridiron Connect</p>
           <form onSubmit={handleJoin} className="space-y-4">
             <input 
               autoFocus
               value={inputName}
-              onChange={(e) => setInputName(e.target.value)}
-              placeholder="ENTER YOUR HANDLE"
-              className="w-full bg-slate-900 border border-white/5 rounded-2xl px-6 py-4 outline-none focus:border-emerald-500/50 transition-all text-white text-center font-bold"
+              onChange={(e) => setInputName(e.target.value.slice(0, 12))}
+              placeholder="YOUR HANDLE"
+              className="w-full bg-slate-900 border border-white/10 rounded-2xl px-6 py-5 outline-none focus:border-emerald-500 transition-all text-white text-center font-black text-xl uppercase tracking-widest placeholder:text-slate-700"
             />
-            <button className="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black uppercase tracking-[0.2em] py-5 rounded-2xl transition-all shadow-xl shadow-emerald-500/20">
-              JOIN STADIUM
+            <button className="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black uppercase tracking-[0.2em] py-5 rounded-2xl transition-all shadow-xl shadow-emerald-500/20 active:scale-[0.98]">
+              ENTER STADIUM
             </button>
           </form>
         </div>
@@ -144,44 +156,66 @@ export default function App() {
   }
 
   return (
-    <div className="flex flex-col min-h-screen max-w-2xl mx-auto bg-slate-950 border-x border-white/5 relative shadow-2xl">
-      <header className="px-6 py-5 glass sticky top-0 z-30 flex justify-between items-center border-b border-white/5">
-        <div className="flex items-center gap-4">
-          <div className="w-12 h-12 rounded-xl bg-emerald-500/10 flex items-center justify-center border border-emerald-500/20">
-            <i className="fas fa-signal text-emerald-500 animate-pulse"></i>
+    <div className="flex flex-col h-screen max-w-2xl mx-auto bg-slate-950 border-x border-white/5 relative shadow-2xl overflow-hidden">
+      <header className="px-5 py-4 glass sticky top-0 z-30 flex justify-between items-center border-b border-white/10">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-emerald-500/10 flex items-center justify-center border border-emerald-500/20">
+            <i className={`fas ${status === 'Syncing' ? 'fa-spinner fa-spin' : 'fa-bolt'} text-emerald-500 text-sm`}></i>
           </div>
           <div>
-            <h2 className="font-orbitron font-black italic text-lg tracking-tight text-white">SBLIX <span className="text-emerald-500">PRO</span></h2>
-            <div className="flex items-center gap-2">
-              <span className={`w-1.5 h-1.5 rounded-full ${status === 'Live' ? 'bg-emerald-500' : 'bg-orange-500'} animate-pulse`}></span>
-              <p className="text-[9px] text-slate-500 font-black uppercase tracking-widest">{status} CONNECTION</p>
+            <h2 className="font-orbitron font-black italic text-base tracking-tight text-white leading-none">SBLIX <span className="text-emerald-500">HUB</span></h2>
+            <div className="flex items-center gap-1.5 mt-1">
+              <span className={`w-1.5 h-1.5 rounded-full ${status === 'Live' ? 'bg-emerald-500' : status === 'Syncing' ? 'bg-amber-500' : 'bg-red-500'} animate-pulse`}></span>
+              <p className="text-[8px] text-slate-500 font-black uppercase tracking-widest">{status}</p>
             </div>
           </div>
         </div>
-        <button 
-          onClick={() => { localStorage.removeItem('chat_user'); setUser(null); }}
-          className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center text-slate-600 hover:text-red-400"
-        >
-          <i className="fas fa-times"></i>
-        </button>
+        <div className="flex gap-2">
+           <button 
+            onClick={() => { window.location.reload(); }}
+            className="w-9 h-9 rounded-xl bg-white/5 flex items-center justify-center text-slate-500 hover:text-emerald-400 transition-colors"
+            title="Refresh Connection"
+          >
+            <i className="fas fa-sync-alt text-xs"></i>
+          </button>
+          <button 
+            onClick={() => { localStorage.removeItem('chat_user'); setUser(null); }}
+            className="w-9 h-9 rounded-xl bg-white/5 flex items-center justify-center text-slate-500 hover:text-red-400 transition-colors"
+          >
+            <i className="fas fa-sign-out-alt text-xs"></i>
+          </button>
+        </div>
       </header>
 
-      <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar chat-height">
-        <div className="text-center py-4 border-b border-white/5 mb-6">
-          <span className="text-[10px] font-black text-emerald-500/60 uppercase tracking-[0.3em]">Game Channel 01 / Kickoff Countdown</span>
+      <div className="flex-1 overflow-y-auto p-4 space-y-5 custom-scrollbar bg-[radial-gradient(circle_at_top,rgba(16,185,129,0.03),transparent_40%)]">
+        <div className="text-center py-6">
+          <span className="text-[9px] font-black text-emerald-500/40 border border-emerald-500/20 px-4 py-1.5 rounded-full uppercase tracking-[0.3em] bg-emerald-500/5">
+            Stadium Channel Open
+          </span>
         </div>
+
+        {messages.length === 0 && (
+          <div className="text-center py-20 opacity-20 flex flex-col items-center">
+            <i className="fas fa-comments text-4xl mb-4"></i>
+            <p className="font-black text-[10px] uppercase tracking-widest">Waiting for first play...</p>
+          </div>
+        )}
 
         {messages.map((msg) => {
           const isMe = msg.senderId === user.id;
           const isCoach = msg.senderId === 'coach_ai';
           return (
-            <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} animate-in fade-in duration-300`}>
-              <span className={`text-[9px] font-black uppercase tracking-tighter mb-1.5 px-2 ${isCoach ? 'text-emerald-400' : 'text-slate-500'}`}>
-                {msg.senderName}
-              </span>
-              <div className={`max-w-[85%] px-5 py-3.5 rounded-2xl text-sm leading-relaxed shadow-lg ${
+            <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} msg-animate`}>
+              <div className="flex items-center gap-2 mb-1 px-1">
+                 {!isMe && !isCoach && <div className="w-1 h-1 bg-slate-700 rounded-full"></div>}
+                 <span className={`text-[8px] font-black uppercase tracking-wider ${isCoach ? 'text-emerald-400' : 'text-slate-500'}`}>
+                  {msg.senderName}
+                </span>
+                {isMe && <div className="w-1 h-1 bg-emerald-500 rounded-full"></div>}
+              </div>
+              <div className={`max-w-[88%] px-4 py-3 rounded-2xl text-sm leading-snug shadow-sm ${
                 isMe ? 'bg-emerald-500 text-slate-950 font-bold rounded-tr-none' : 
-                isCoach ? 'bg-slate-800 border border-emerald-500/30 text-emerald-50 rounded-tl-none italic font-medium' :
+                isCoach ? 'bg-slate-900 border border-emerald-500/40 text-emerald-50 rounded-tl-none italic font-medium' :
                 'bg-slate-900 text-slate-200 rounded-tl-none border border-white/5'
               }`}>
                 {msg.text}
@@ -190,30 +224,33 @@ export default function App() {
           );
         })}
         {isCoachThinking && (
-          <div className="flex items-center gap-2 text-emerald-500/40 text-[9px] font-black uppercase tracking-widest animate-pulse">
-            <i className="fas fa-football-ball fa-spin"></i> Coach is adjusting the play...
+          <div className="flex items-center gap-2 text-emerald-500/60 text-[8px] font-black uppercase tracking-widest animate-pulse px-1">
+            <i className="fas fa-football-ball fa-spin"></i> Coach is calling a play...
           </div>
         )}
         <div ref={messagesEndRef} />
       </div>
 
-      <div className="p-6 glass border-t border-white/5 sticky bottom-0 z-30">
-        <form onSubmit={handleSendMessage} className="flex gap-3">
+      <div className="p-4 glass border-t border-white/10 pb-8">
+        <form onSubmit={handleSendMessage} className="flex gap-2">
           <input 
             type="text"
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
-            placeholder="Shout to the party... (type /coach for AI)"
-            className="flex-1 bg-slate-900 border border-white/5 rounded-2xl px-6 py-4 outline-none focus:border-emerald-500/50 transition-all text-white font-medium"
+            placeholder="Shout to stadium... (use /coach)"
+            className="flex-1 bg-slate-900 border border-white/10 rounded-2xl px-5 py-4 outline-none focus:border-emerald-500/50 transition-all text-white font-medium text-sm placeholder:text-slate-700"
           />
           <button 
             type="submit"
             disabled={!inputText.trim()}
-            className="w-14 h-14 bg-emerald-500 rounded-2xl flex items-center justify-center text-slate-950 hover:bg-emerald-400 disabled:opacity-30 shadow-lg shadow-emerald-500/10 active:scale-95 transition-all"
+            className="w-14 h-14 bg-emerald-500 rounded-2xl flex items-center justify-center text-slate-950 hover:bg-emerald-400 disabled:opacity-20 shadow-lg shadow-emerald-500/10 active:scale-90 transition-all"
           >
             <i className="fas fa-paper-plane"></i>
           </button>
         </form>
+        <div className="mt-2 flex justify-center">
+            <p className="text-[7px] font-black text-slate-700 uppercase tracking-widest">Type <span className="text-emerald-500/40">/coach</span> for AI analysis</p>
+        </div>
       </div>
     </div>
   );

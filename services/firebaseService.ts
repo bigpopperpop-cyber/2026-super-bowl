@@ -10,13 +10,11 @@ import {
   serverTimestamp 
 } from 'firebase/firestore';
 
-// Helper to safely get environment variables from Vite or Process
+// Safer environment variable access for Vite/Vercel environments
 const getEnv = (key: string): string | undefined => {
-  try {
-    return (import.meta as any).env?.[key] || (process.env as any)?.[key];
-  } catch (e) {
-    return (process.env as any)?.[key];
-  }
+  const metaEnv = (import.meta as any).env;
+  const procEnv = (process as any).env;
+  return metaEnv?.[key] || procEnv?.[key];
 };
 
 const firebaseConfig = {
@@ -30,16 +28,16 @@ const firebaseConfig = {
 
 let db: any = null;
 
-// Only initialize if we have at least a Project ID
+// Only initialize if we have the critical bits
 if (firebaseConfig.projectId && firebaseConfig.projectId !== "undefined") {
   try {
     const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
     db = getFirestore(app);
   } catch (error) {
-    console.warn("Firestore initialization failed. Falling back to Party Mode.", error);
+    console.warn("Firestore initialization failed. Running in Local Mode.", error);
   }
 } else {
-  console.log("No Firebase Project ID detected. Running in Local Party Mode.");
+  console.log("Firebase config incomplete. Using Local Mode.");
 }
 
 export { 
