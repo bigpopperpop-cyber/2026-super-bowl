@@ -1,30 +1,9 @@
+
 export interface User {
   id: string;
   name: string;
-  handle: string;
   team: string;
-  deviceType: 'mobile' | 'desktop';
   score: number;
-  lastPulse: number;
-  isVerified: boolean;
-  pingCount: number;
-}
-
-export interface GameState {
-  quarter: string;
-  time: string;
-  scoreHome: number;
-  scoreAway: number;
-  isActive: boolean;
-}
-
-export interface ChatMessage {
-  id: string;
-  userId: string;
-  userName: string;
-  text: string;
-  timestamp: number;
-  isAI?: boolean;
 }
 
 export interface PropBet {
@@ -34,6 +13,7 @@ export interface PropBet {
   options: string[];
   resolved: boolean;
   winner?: string;
+  points?: number;
 }
 
 export interface UserBet {
@@ -41,5 +21,23 @@ export interface UserBet {
   userId: string;
   betId: string;
   selection: string;
-  timestamp: number;
+}
+
+// Added GameState interface for tracking live sports data (resolves import error in geminiService.ts)
+export interface GameState {
+  quarter: string;
+  time: string;
+  scoreHome: number;
+  scoreAway: number;
+  isActive: boolean;
+}
+
+// Added ChatMessage interface for tactical communication features (resolves import error in ChatRoom.tsx)
+export interface ChatMessage {
+  id: string;
+  userId: string;
+  userName: string;
+  userTeam: string;
+  text: string;
+  timestamp: any;
 }

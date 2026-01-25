@@ -30,7 +30,6 @@ export const isFirebaseConfigured =
   !!firebaseConfig.apiKey && 
   firebaseConfig.apiKey !== "REPLACE_WITH_YOUR_FIREBASE_API_KEY";
 
-// Use singleton pattern for Firebase app to prevent re-initialization errors
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 export const db = getFirestore(app);
 

@@ -3,14 +3,14 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0, viewport-fit=cover" />
-  <title>SBLIX Mesh Protocol</title>
+  <title>SBLIX | Prop Pool</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
   <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
   <style>
     :root {
       --bg-dark: #020617;
-      --accent-green: #10b981;
+      --accent-emerald: #10b981;
     }
     body {
       font-family: 'Inter', sans-serif;
@@ -18,38 +18,26 @@
       color: white;
       overscroll-behavior-y: contain;
       -webkit-font-smoothing: antialiased;
-      overflow-x: hidden;
     }
     .font-orbitron { font-family: 'Orbitron', sans-serif; }
-    .no-scrollbar::-webkit-scrollbar { display: none; }
     .glass-card {
-      background: rgba(255, 255, 255, 0.02);
+      background: rgba(15, 23, 42, 0.6);
       backdrop-filter: blur(20px);
       border: 1px solid rgba(255, 255, 255, 0.05);
-      border-radius: 32px;
     }
-    .custom-scrollbar::-webkit-scrollbar { width: 4px; }
-    .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-    .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
-    
+    .status-pulse {
+      animation: pulse-emerald 2s infinite;
+    }
     @keyframes pulse-emerald {
       0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4); }
-      70% { box-shadow: 0 0 0 15px rgba(16, 185, 129, 0); }
+      70% { box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); }
       100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
     }
-    .status-pulse { animation: pulse-emerald 2s infinite; }
-    input, button { font-size: 16px !important; }
     .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
-    .text-glow { text-shadow: 0 0 20px rgba(16, 185, 129, 0.5); }
+    .no-scrollbar::-webkit-scrollbar { display: none; }
   </style>
   <script>
-    // Runtime shim for process.env (required for Gemini API and other modules)
-    window.process = {
-      env: {
-        NODE_ENV: 'production',
-        API_KEY: '' 
-      }
-    };
+    window.process = { env: { NODE_ENV: 'production' } };
   </script>
   <script type="importmap">
 {

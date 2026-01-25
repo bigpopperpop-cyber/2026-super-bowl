@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { User, UserBet, PropBet } from '../types';
+import { User, PropBet, UserBet } from '../types';
 import TeamHelmet from './TeamHelmet';
 
 interface LeaderboardProps {
@@ -10,90 +10,67 @@ interface LeaderboardProps {
 }
 
 const Leaderboard: React.FC<LeaderboardProps> = ({ users, currentUser, propBets, userBets }) => {
-  const usersWithPoints = useMemo(() => {
-    return users.map(user => {
-      let credits = 0;
-      const myBets = userBets.filter(b => b.userId === user.id);
-      
+  const rankedUsers = useMemo(() => {
+    return users.map(u => {
+      let score = 0;
+      const myBets = userBets.filter(b => b.userId === u.id);
       myBets.forEach(bet => {
         const prop = propBets.find(p => p.id === bet.betId);
-        if (prop?.resolved) {
-          if (prop.winner === bet.selection) {
-            credits += 10; 
-          } else {
-            credits -= 5;
-          }
+        if (prop?.resolved && prop.winner === bet.selection) {
+          score += (prop.points || 10);
         }
       });
-
-      return { ...user, credits };
-    }).sort((a, b) => b.credits - a.credits);
+      return { ...u, score };
+    }).sort((a, b) => b.score - a.score);
   }, [users, userBets, propBets]);
 
   return (
-    <div className="flex flex-col h-full bg-slate-950 overflow-hidden">
-      <div className="p-4 bg-slate-900 border-b border-slate-800 flex justify-between items-center shrink-0 shadow-lg">
-        <h3 className="font-orbitron text-xs flex items-center gap-2 text-white font-black uppercase tracking-widest">
-          <i className="fas fa-trophy text-yellow-500"></i>
-          Gridiron Standings
-        </h3>
-        <span className="text-[10px] text-slate-500 uppercase font-black px-2 py-0.5 rounded-full bg-slate-950 border border-slate-800">
-          {users.length} In Huddle
-        </span>
-      </div>
-      
-      <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-3 pb-24">
-        {usersWithPoints.length === 0 && (
-          <div className="h-full flex flex-col items-center justify-center opacity-20 py-20">
-             <i className="fas fa-users text-4xl mb-4"></i>
-             <p className="text-[10px] font-black uppercase tracking-widest">No Active Players</p>
-          </div>
-        )}
-        {usersWithPoints.map((user, idx) => {
-          const isWinner = idx === 0 && user.credits > 0;
-          const isMe = user.id === currentUser.id;
+    <div className="h-full flex flex-col p-4 space-y-3 overflow-y-auto no-scrollbar pb-24">
+      {rankedUsers.map((user, idx) => {
+        const isMe = user.id === currentUser.id;
+        const rank = idx + 1;
 
-          return (
-            <div key={user.id} className={`flex flex-col p-4 rounded-2xl border transition-all duration-500 ${
-                isWinner ? 'bg-yellow-500/10 border-yellow-500/50 shadow-[0_0_20px_rgba(234,179,8,0.1)]' : 
-                isMe ? 'bg-blue-600/10 border-blue-500/50 shadow-[0_0_20px_rgba(37,99,235,0.1)]' : 
-                'bg-slate-900/50 border-slate-800'
+        return (
+          <div 
+            key={user.id}
+            className={`p-4 rounded-2xl border flex items-center justify-between relative overflow-hidden transition-all ${
+              isMe ? 'bg-emerald-500/10 border-emerald-500/40 shadow-[0_0_20px_rgba(16,185,129,0.05)]' : 'bg-slate-900 border-white/5'
+            }`}
+          >
+            <div className="flex items-center gap-4">
+              <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-orbitron font-black text-xs ${
+                rank === 1 ? 'bg-yellow-500 text-black' : 
+                rank === 2 ? 'bg-slate-300 text-black' : 
+                rank === 3 ? 'bg-amber-700 text-white' : 'bg-slate-800 text-slate-500'
               }`}>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <span className={`w-8 h-8 flex items-center justify-center rounded-lg font-black text-xs ${
-                    isWinner ? 'bg-yellow-500 text-black' : 
-                    idx === 1 ? 'bg-slate-300 text-black' :
-                    idx === 2 ? 'bg-amber-700 text-white' :
-                    'bg-slate-800 text-slate-500'
-                  }`}>
-                    {idx + 1}
-                  </span>
-                  <div className="relative">
-                    <TeamHelmet teamId={user.team} size="lg" />
-                    <div className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-green-500 border-2 border-slate-950"></div>
-                  </div>
-                  <div>
-                    <div className="text-sm font-black flex items-center gap-1.5 text-white">
-                      {user.handle}
-                      {isMe && <span className="text-[7px] bg-blue-600 text-white px-1.5 py-0.5 rounded uppercase font-black tracking-tighter">You</span>}
-                    </div>
-                    <div className="text-[9px] text-slate-500 font-bold uppercase tracking-tight">{user.name}</div>
-                  </div>
-                </div>
-                <div className="text-right">
-                  <div className={`text-xl font-orbitron font-black leading-tight ${
-                    user.credits > 0 ? 'text-green-400' : user.credits < 0 ? 'text-red-500' : 'text-slate-600'
-                  }`}>
-                    {user.credits > 0 ? `+${user.credits}` : user.credits}
-                  </div>
-                  <div className="text-[7px] text-slate-500 uppercase font-black tracking-widest">Score</div>
-                </div>
+                {rank}
+              </div>
+              <TeamHelmet teamId={user.team} size="md" />
+              <div>
+                <h4 className="font-black text-sm flex items-center gap-2 uppercase tracking-tight">
+                  {user.name}
+                  {isMe && <span className="text-[7px] bg-emerald-500/20 text-emerald-500 px-1.5 py-0.5 rounded border border-emerald-500/30 font-black">YOU</span>}
+                </h4>
+                <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">{user.team} SQUAD</span>
               </div>
             </div>
-          );
-        })}
-      </div>
+            
+            <div className="text-right">
+              <span className={`text-2xl font-orbitron font-black italic ${isMe ? 'text-emerald-400' : 'text-white'}`}>
+                {user.score}
+              </span>
+              <p className="text-[7px] font-black text-slate-600 uppercase tracking-widest">PTS</p>
+            </div>
+          </div>
+        );
+      })}
+
+      {rankedUsers.length === 0 && (
+        <div className="flex flex-col items-center justify-center py-20 opacity-20">
+          <i className="fas fa-users text-4xl mb-4"></i>
+          <p className="text-[10px] font-black uppercase tracking-widest">Waiting for players...</p>
+        </div>
+      )}
     </div>
   );
 };

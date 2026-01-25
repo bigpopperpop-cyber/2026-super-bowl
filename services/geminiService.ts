@@ -1,13 +1,16 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
 import { PropBet, GameState } from "../types";
 
+// Always use a function to get a fresh client instance with the environment API key
 const getAi = () => new GoogleGenAI({ apiKey: process.env.API_KEY });
 
+// Generating contextually relevant prop bets is a complex task requiring gemini-3-pro-preview
 export const generateLiveProps = async (gameState: GameState): Promise<Partial<PropBet>[]> => {
   const ai = getAi();
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+      model: "gemini-3-pro-preview",
       contents: `Current Super Bowl State: ${gameState.quarter}, ${gameState.time}. Score: ${gameState.scoreHome}-${gameState.scoreAway}.
       1. Use Google Search to find exactly what just happened in the game (current drive, recent plays).
       2. Generate 3 exciting, short-term prop bets for guests.
@@ -30,13 +33,16 @@ export const generateLiveProps = async (gameState: GameState): Promise<Partial<P
       }
     });
 
-    return JSON.parse(response.text || "[]");
+    // Access the text property directly (not as a function call) and trim for parsing safety
+    const resultText = response.text?.trim() || "[]";
+    return JSON.parse(resultText);
   } catch (error) {
     console.error("Prop Generation Error:", error);
     return [];
   }
 };
 
+// Resolving event outcomes via search results is a complex task requiring gemini-3-pro-preview
 export const resolveProps = async (props: PropBet[]): Promise<{ id: string, winner: string }[]> => {
   const ai = getAi();
   const unresolved = props.filter(p => !p.resolved);
@@ -44,7 +50,7 @@ export const resolveProps = async (props: PropBet[]): Promise<{ id: string, winn
 
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+      model: "gemini-3-pro-preview",
       contents: `Search Google for the outcomes of these Super Bowl LIX events:
       ${unresolved.map(p => `ID: ${p.id} | Question: ${p.question} | Options: ${p.options.join(', ')}`).join('\n')}
       Determine which option happened. If the event hasn't finished, do not return it.`,
@@ -65,13 +71,16 @@ export const resolveProps = async (props: PropBet[]): Promise<{ id: string, winn
       }
     });
 
-    return JSON.parse(response.text || "[]");
+    // Use direct property access for response content
+    const resultText = response.text?.trim() || "[]";
+    return JSON.parse(resultText);
   } catch (error) {
     console.error("Resolution Error:", error);
     return [];
   }
 };
 
+// Extracting game score and clock is a standard task suitable for gemini-3-flash-preview
 export const getGameUpdate = async (): Promise<GameState | null> => {
   const ai = getAi();
   try {
@@ -94,7 +103,9 @@ export const getGameUpdate = async (): Promise<GameState | null> => {
         }
       }
     });
-    return JSON.parse(response.text || "null");
+    // Ensure text property is used correctly for parsing JSON
+    const resultText = response.text?.trim() || "null";
+    return JSON.parse(resultText);
   } catch (error) {
     console.error("Game Update Error:", error);
     return null;
