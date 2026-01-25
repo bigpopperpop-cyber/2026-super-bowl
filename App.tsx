@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { db, collection, addDoc, setDoc, doc, query, orderBy, limit, onSnapshot, serverTimestamp, getMissingKeys } from './services/firebaseService';
+import { db, collection, addDoc, setDoc, doc, query, orderBy, limit, onSnapshot, serverTimestamp, getMissingKeys, saveManualConfig, clearManualConfig } from './services/firebaseService';
 import { getCoachResponse } from './services/geminiService';
 import { ChatMessage, User } from './types';
 
@@ -16,8 +16,9 @@ export default function App() {
   const [inputText, setInputText] = useState('');
   const [status, setStatus] = useState<'Live' | 'Syncing' | 'Solo'>(db ? 'Syncing' : 'Solo');
   const [isCoachThinking, setIsCoachThinking] = useState(false);
-  const [squares, setSquares] = useState<Record<string, string>>({});
+  const [squares, setSquares] = useState<Record<string, {name: string, team: string}>>({});
   const [showDiag, setShowDiag] = useState(false);
+  const [manualConfig, setManualConfig] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -26,7 +27,8 @@ export default function App() {
     if (!db) {
       setStatus('Solo');
       setMessages(JSON.parse(localStorage.getItem('local_chat_history') || '[]'));
-      setSquares(JSON.parse(localStorage.getItem('local_squares') || '{}'));
+      const localSquares = JSON.parse(localStorage.getItem('local_squares') || '{}');
+      setSquares(localSquares);
       return;
     }
 
@@ -35,7 +37,6 @@ export default function App() {
       if (isMounted && status === 'Syncing') setStatus('Solo');
     }, 5000);
 
-    // Chat Subscription
     const q = query(collection(db, 'party_hub'), orderBy('timestamp', 'asc'), limit(60));
     const unsubscribeChat = onSnapshot(q, (snapshot) => {
       if (!isMounted) return;
@@ -48,17 +49,16 @@ export default function App() {
       setMessages(msgs);
       setStatus('Live');
     }, (err) => {
-      console.error("Firestore Chat Error:", err);
+      console.error("Chat Offline:", err);
       setStatus('Solo');
     });
 
-    // Squares Subscription
     const unsubscribeSquares = onSnapshot(collection(db, 'squares_lix'), (snapshot) => {
       if (!isMounted) return;
-      const sqData: Record<string, string> = {};
+      const sqData: Record<string, {name: string, team: string}> = {};
       snapshot.docs.forEach(doc => { 
         const data = doc.data();
-        sqData[data.id] = data.name; 
+        sqData[data.id] = { name: data.name, team: data.team }; 
       });
       setSquares(sqData);
     });
@@ -72,7 +72,9 @@ export default function App() {
   }, [user]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (activeTab === 'chat') {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
   }, [messages, activeTab]);
 
   const handleJoin = (e: React.FormEvent) => {
@@ -105,7 +107,6 @@ export default function App() {
       try {
         await addDoc(collection(db, 'party_hub'), newMsg);
       } catch (err) {
-        console.error("Failed to send:", err);
         setStatus('Solo');
       }
     } else {
@@ -140,13 +141,20 @@ export default function App() {
     if (status === 'Live' && db) {
       try {
         await setDoc(doc(db, 'squares_lix', key), { id: key, name: user.name, team: user.team });
-      } catch (err) {
-        console.error("Square claim failed:", err);
-      }
+      } catch (err) {}
     } else {
-      const newSquares = { ...squares, [key]: user.name };
+      const newSquares = { ...squares, [key]: { name: user.name, team: user.team } };
       setSquares(newSquares);
       localStorage.setItem('local_squares', JSON.stringify(newSquares));
+    }
+  };
+
+  const handleManualSync = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (saveManualConfig(manualConfig)) {
+      alert("Config saved! Hub restarting...");
+    } else {
+      alert("Invalid JSON format. Copy directly from Firebase console.");
     }
   };
 
@@ -155,18 +163,18 @@ export default function App() {
       <div className="flex items-center justify-center min-h-screen p-6 bg-slate-950 relative overflow-hidden">
         <div className="scanline"></div>
         <div className="w-full max-w-md p-8 glass rounded-[2.5rem] shadow-2xl relative z-10 border border-white/10 text-center">
-          <div className="w-16 h-16 bg-emerald-500/20 rounded-2xl flex items-center justify-center mx-auto mb-6 border border-emerald-500/30 shadow-[0_0_30px_rgba(16,185,129,0.1)]">
-            <i className="fas fa-football-ball text-2xl text-emerald-400"></i>
+          <div className="w-16 h-16 bg-emerald-500/20 rounded-2xl flex items-center justify-center mx-auto mb-6 border border-emerald-500/30">
+            <i className="fas fa-bolt text-2xl text-emerald-400"></i>
           </div>
-          <h1 className="font-orbitron text-4xl font-black italic text-white mb-2 tracking-tighter">SBLIX LIX</h1>
-          <p className="text-emerald-500/60 text-[10px] mb-8 font-black uppercase tracking-[0.4em]">STADIUM PARTY HUB</p>
+          <h1 className="font-orbitron text-4xl font-black italic text-white mb-2">SBLIX LIX</h1>
+          <p className="text-emerald-500/60 text-[10px] mb-8 font-black uppercase tracking-[0.4em]">LIVE STADIUM HUB</p>
           
           <form onSubmit={handleJoin} className="space-y-6">
             <input 
               autoFocus
               value={inputName}
               onChange={(e) => setInputName(e.target.value.slice(0, 12).toUpperCase())}
-              placeholder="ENTER NICKNAME"
+              placeholder="YOUR HANDLE"
               className="w-full bg-slate-900 border border-white/10 rounded-2xl px-6 py-4 outline-none focus:border-emerald-500 transition-all text-white font-black text-lg uppercase tracking-widest placeholder:text-slate-800 text-center"
             />
 
@@ -225,28 +233,22 @@ export default function App() {
         </div>
 
         <div className="flex gap-2 mt-4">
-          <button 
-            onClick={() => setActiveTab('chat')}
-            className={`flex-1 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-[0.2em] transition-all flex items-center justify-center gap-2 ${activeTab === 'chat' ? 'bg-emerald-500 text-slate-950' : 'bg-white/5 text-slate-500'}`}
-          >
-            <i className="fas fa-comment-dots text-xs"></i> Chat
+          <button onClick={() => setActiveTab('chat')} className={`flex-1 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-[0.2em] transition-all flex items-center justify-center gap-2 ${activeTab === 'chat' ? 'bg-emerald-500 text-slate-950' : 'bg-white/5 text-slate-500'}`}>
+            <i className="fas fa-comment-dots"></i> Chat
           </button>
-          <button 
-            onClick={() => setActiveTab('squares')}
-            className={`flex-1 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-[0.2em] transition-all flex items-center justify-center gap-2 ${activeTab === 'squares' ? 'bg-emerald-500 text-slate-950' : 'bg-white/5 text-slate-500'}`}
-          >
-            <i className="fas fa-th text-xs"></i> Squares
+          <button onClick={() => setActiveTab('squares')} className={`flex-1 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-[0.2em] transition-all flex items-center justify-center gap-2 ${activeTab === 'squares' ? 'bg-emerald-500 text-slate-950' : 'bg-white/5 text-slate-500'}`}>
+            <i className="fas fa-th"></i> Squares
           </button>
         </div>
       </header>
 
-      <div className="flex-1 overflow-y-auto relative bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')]">
+      <div className="flex-1 overflow-y-auto relative bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')] custom-scrollbar">
         {activeTab === 'chat' ? (
           <div className="p-4 space-y-4 pb-24">
             {status !== 'Live' && (
               <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-4 mb-4">
                 <div className="flex justify-between items-center">
-                   <p className="text-[10px] font-black text-red-400 uppercase tracking-widest">
+                  <p className="text-[10px] font-black text-red-400 uppercase tracking-widest">
                     <i className="fas fa-wifi-slash mr-2"></i> STADIUM OFFLINE
                   </p>
                   <button onClick={() => setShowDiag(!showDiag)} className="text-[8px] font-bold text-red-400 underline uppercase tracking-widest">
@@ -254,10 +256,25 @@ export default function App() {
                   </button>
                 </div>
                 {showDiag && (
-                  <div className="mt-3 text-[9px] text-red-300/70 space-y-1 font-mono p-3 bg-black/40 rounded-xl">
-                    <p className="font-bold text-red-500">MISSING BUILD KEYS:</p>
-                    {getMissingKeys().map(k => <p key={k} className="flex items-center gap-2"><i className="fas fa-times text-red-500 text-[6px]"></i> {k}</p>)}
-                    <p className="mt-3 text-slate-500 leading-relaxed italic">To chat with 20 guests, add these to your hosting provider's Environment Variables and re-deploy.</p>
+                  <div className="mt-3 space-y-4">
+                    <div className="text-[9px] text-red-300/70 space-y-1 font-mono p-3 bg-black/40 rounded-xl">
+                      <p className="font-bold text-red-500">MISSING BUILD KEYS:</p>
+                      {getMissingKeys().length > 0 ? getMissingKeys().map(k => <p key={k}>- {k}</p>) : <p>None (Keys injected but failing to connect)</p>}
+                    </div>
+                    
+                    <form onSubmit={handleManualSync} className="space-y-2">
+                      <p className="text-[9px] font-black text-emerald-500 uppercase">Manual Sync Override</p>
+                      <textarea 
+                        value={manualConfig}
+                        onChange={(e) => setManualConfig(e.target.value)}
+                        placeholder='Paste Firebase Config JSON here...'
+                        className="w-full bg-black/60 border border-white/10 rounded-xl p-3 text-[10px] font-mono text-slate-300 outline-none focus:border-emerald-500/50 min-h-[100px]"
+                      />
+                      <div className="flex gap-2">
+                        <button type="submit" className="flex-1 bg-emerald-500 text-slate-950 text-[9px] font-black uppercase py-2 rounded-lg">Apply Config</button>
+                        <button type="button" onClick={clearManualConfig} className="bg-white/5 text-slate-500 text-[9px] font-black uppercase py-2 px-4 rounded-lg">Clear</button>
+                      </div>
+                    </form>
                   </div>
                 )}
               </div>
@@ -285,55 +302,55 @@ export default function App() {
                 </div>
               );
             })}
-            {isCoachThinking && <div className="text-[8px] font-black text-emerald-500/50 uppercase tracking-[0.4em] animate-pulse ml-2 mt-2">Coach is calling a timeout...</div>}
+            {isCoachThinking && <div className="text-[8px] font-black text-emerald-500/50 uppercase tracking-[0.4em] animate-pulse ml-2">Coach is thinking...</div>}
             <div ref={messagesEndRef} />
           </div>
         ) : (
           <div className="p-4 pb-24">
-            <div className="bg-black/40 p-1 rounded-2xl border border-white/5 mb-6">
+            <div className="bg-black/40 p-1 rounded-2xl border border-white/5 mb-6 shadow-inner">
                <div className="grid grid-cols-10 gap-1 aspect-square bg-slate-950 p-1 rounded-xl">
-                {Array.from({ length: 100 }).map((_, i) => (
-                  <button
-                    key={i}
-                    onClick={() => claimSquare(i)}
-                    className={`aspect-square rounded-[2px] text-[6px] font-black flex items-center justify-center transition-all ${
-                      squares[`sq_${i}`] 
-                        ? 'bg-emerald-500 text-slate-950 shadow-[0_0_10px_rgba(16,185,129,0.2)]' 
-                        : 'bg-slate-900 hover:bg-slate-800 text-transparent border border-white/5'
-                    }`}
-                  >
-                    {squares[`sq_${i}`]?.slice(0, 2) || i}
-                  </button>
-                ))}
+                {Array.from({ length: 100 }).map((_, i) => {
+                  const square = squares[`sq_${i}`];
+                  const bgColor = square ? (square.team === 'CHIEFS' ? 'bg-red-600' : 'bg-emerald-500') : 'bg-slate-900';
+                  const textColor = square ? 'text-white' : 'text-transparent';
+                  
+                  return (
+                    <button
+                      key={i}
+                      onClick={() => claimSquare(i)}
+                      className={`aspect-square rounded-[2px] text-[6px] font-black flex items-center justify-center transition-all border border-white/5 ${bgColor} ${textColor} ${!square && 'hover:bg-slate-800'}`}
+                    >
+                      {square ? square.name.slice(0, 2) : i}
+                    </button>
+                  );
+                })}
               </div>
             </div>
-            <div className="text-center px-6">
-              <h4 className="text-[10px] font-black text-emerald-500 uppercase tracking-widest mb-1">STADIUM SQUARES</h4>
-              <p className="text-[9px] text-slate-600 uppercase tracking-[0.2em] leading-relaxed">Tap a square to stake your claim. All 20 guests will see your name instantly in LIVE mode.</p>
+            <div className="text-center space-y-2">
+              <h4 className="text-[10px] font-black text-emerald-500 uppercase tracking-widest">STADIUM SQUARES</h4>
+              <p className="text-[9px] text-slate-600 uppercase tracking-[0.2em] px-8 italic">Claim your spot! Sync with 20 guests instantly in LIVE mode.</p>
             </div>
           </div>
         )}
       </div>
 
-      {activeTab === 'chat' && (
-        <div className="absolute bottom-0 w-full p-4 glass border-t border-white/10">
-          <form onSubmit={handleSendMessage} className="flex gap-2">
-            <input 
-              value={inputText}
-              onChange={(e) => setInputText(e.target.value)}
-              placeholder="Shout to stadium... (use /coach)"
-              className="flex-1 bg-slate-900 border border-white/10 rounded-2xl px-5 py-4 outline-none focus:border-emerald-500 transition-all text-white font-medium text-sm placeholder:text-slate-700"
-            />
-            <button 
-              type="submit"
-              disabled={!inputText.trim()}
-              className="w-14 h-14 bg-emerald-500 rounded-2xl flex items-center justify-center text-slate-950 hover:bg-emerald-400 disabled:opacity-20 shadow-lg shadow-emerald-500/20 active:scale-95 transition-all"
-            >
-              <i className="fas fa-bolt"></i>
-            </button>
-          </form>
-        </div>
-      )}
+      <div className="p-4 glass border-t border-white/10 z-50">
+        <form onSubmit={handleSendMessage} className="flex gap-2">
+          <input 
+            value={inputText}
+            onChange={(e) => setInputText(e.target.value)}
+            placeholder="Shout to stadium... (/coach)"
+            className="flex-1 bg-slate-900 border border-white/10 rounded-2xl px-5 py-4 outline-none focus:border-emerald-500 transition-all text-white font-medium text-sm placeholder:text-slate-700"
+          />
+          <button 
+            type="submit"
+            disabled={!inputText.trim()}
+            className="w-14 h-14 bg-emerald-500 rounded-2xl flex items-center justify-center text-slate-950 hover:bg-emerald-400 disabled:opacity-20 shadow-lg shadow-emerald-500/20 active:scale-95 transition-all"
+          >
+            <i className="fas fa-paper-plane"></i>
+          </button>
+        </form>
+      </div>
     </div>
   );
 }
