@@ -11,26 +11,22 @@ import {
 } from 'firebase/firestore';
 
 const getEnv = (key: string): string | undefined => {
-  // 1. Try process.env (Vite 'define' replacements)
   try {
+    // 1. Check process.env (Vite 'define' injected)
     if (typeof process !== 'undefined' && process.env) {
       const val = (process.env as any)[key];
-      if (val && val !== "undefined") return val;
+      if (val && val !== "undefined" && val !== "") return val;
     }
-  } catch (e) {
-    // Ignore reference errors
-  }
+  } catch (e) {}
 
-  // 2. Try import.meta.env (Vite standard)
   try {
+    // 2. Check import.meta.env
     const meta = import.meta as any;
     if (meta && meta.env) {
-      const metaVal = meta.env[key];
-      if (metaVal && metaVal !== "undefined") return metaVal;
+      const val = meta.env[key];
+      if (val && val !== "undefined" && val !== "") return val;
     }
-  } catch (e) {
-    // Ignore reference errors
-  }
+  } catch (e) {}
   
   return undefined;
 };
@@ -47,18 +43,19 @@ const firebaseConfig = {
 let db: any = null;
 
 const isValidConfig = (config: any) => {
-  return !!(config.projectId && config.projectId.length > 4 && config.apiKey);
+  return !!(config.projectId && config.projectId.length > 5 && config.apiKey);
 };
 
 if (isValidConfig(firebaseConfig)) {
   try {
     const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
     db = getFirestore(app);
+    console.log("Firebase Live: Connected to Stadium Grid.");
   } catch (error) {
-    console.warn("Firestore failed to initialize:", error);
+    console.warn("Firestore initialization failed. Running local mode.");
   }
 } else {
-  console.log("Firebase config incomplete. Hub running in Local Mode.");
+  console.log("Firebase keys missing. Defaulting to Local Party Mode.");
 }
 
 export { 
