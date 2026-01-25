@@ -1,17 +1,24 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { db, collection, addDoc, setDoc, doc, query, orderBy, limit, onSnapshot, serverTimestamp, getMissingKeys, saveManualConfig, clearManualConfig } from './services/firebaseService';
-import { getCoachResponse } from './services/geminiService';
+import { getCoachResponse, getPostGameAnalysis } from './services/geminiService';
 import { ChatMessage, User, TriviaQuestion, ScoreEntry } from './types';
 
+// Updated Trivia to include Over/Under questions
 const INITIAL_TRIVIA: TriviaQuestion[] = [
-  { id: 'ramsea_1', text: "Which player spent 10 years as a Seahawk before joining the Rams in 2022 and then returning to Seattle?", options: ["Bobby Wagner", "Richard Sherman", "Russell Wilson", "Cooper Kupp"], correctIndex: 0, points: 100 },
-  { id: 'ramsea_2', text: "What is the nickname for the Seahawks' home stadium crowd in Seattle?", options: ["The Legion", "The 12th Man", "Sack City", "The Blue Crew"], correctIndex: 1, points: 150 },
-  { id: 'ramsea_3', text: "In 2021, the Rams won the Super Bowl. Who was their offensive MVP for that game?", options: ["Matthew Stafford", "Cooper Kupp", "Aaron Donald", "Cam Akers"], correctIndex: 1, points: 200 }
+  { id: 'beta_v2_q1', text: "Which player spent 10 years as a Seahawk before joining the Rams in 2022 and then returning to Seattle?", options: ["Bobby Wagner", "Richard Sherman", "Russell Wilson", "Cooper Kupp"], correctIndex: 0, points: 100 },
+  { id: 'beta_v2_q2', text: "Over/Under: Matthew Stafford passes for more than 255.5 yards tonight?", options: ["OVER", "UNDER"], correctIndex: 0, points: 120 },
+  { id: 'beta_v2_q3', text: "Over/Under: Seahawks defense records more than 3.5 Sacks tonight?", options: ["OVER", "UNDER"], correctIndex: 1, points: 120 },
+  { id: 'beta_v2_q4', text: "In 2021, the Rams won the Super Bowl. Who was their offensive MVP for that game?", options: ["Matthew Stafford", "Cooper Kupp", "Aaron Donald", "Cam Akers"], correctIndex: 1, points: 200 }
 ];
+
+const MSG_COLLECTION = 'hub_rams_sea_beta_v2';
+const RANK_COLLECTION = 'ranks_rams_sea_beta_v2';
+const USER_STORAGE_KEY = 'sblix_user_beta_v2';
+const RECAP_COLLECTION = 'recap_rams_sea_beta_v2';
 
 export default function App() {
   const [user, setUser] = useState<(User & { team?: string }) | null>(() => {
-    const saved = localStorage.getItem('chat_user');
+    const saved = localStorage.getItem(USER_STORAGE_KEY);
     return saved ? JSON.parse(saved) : null;
   });
   
@@ -27,6 +34,9 @@ export default function App() {
   const [showDiag, setShowDiag] = useState(false);
   const [manualConfig, setManualConfig] = useState('');
   const [copyFeedback, setCopyFeedback] = useState(false);
+  const [gameScore, setGameScore] = useState({ rams: 24, seahawks: 21 }); // Mock final or live score
+  const [postGameRecap, setPostGameRecap] = useState<string | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -34,8 +44,8 @@ export default function App() {
 
     if (!db) {
       setStatus('Solo');
-      setMessages(JSON.parse(localStorage.getItem('local_chat_history') || '[]'));
-      setLeaderboard(JSON.parse(localStorage.getItem('local_leaderboard') || '[]'));
+      setMessages(JSON.parse(localStorage.getItem('local_chat_history_v2') || '[]'));
+      setLeaderboard(JSON.parse(localStorage.getItem('local_leaderboard_v2') || '[]'));
       return;
     }
 
@@ -44,7 +54,7 @@ export default function App() {
       if (isMounted && status === 'Syncing') setStatus('Solo');
     }, 5000);
 
-    const q = query(collection(db, 'party_hub'), orderBy('timestamp', 'asc'), limit(60));
+    const q = query(collection(db, MSG_COLLECTION), orderBy('timestamp', 'asc'), limit(60));
     const unsubscribeChat = onSnapshot(q, (snapshot) => {
       if (!isMounted) return;
       clearTimeout(syncTimeout);
@@ -57,16 +67,23 @@ export default function App() {
       setStatus('Live');
     }, (err) => setStatus('Solo'));
 
-    const unsubscribeLeaderboard = onSnapshot(collection(db, 'leaderboard_lix'), (snapshot) => {
+    const unsubscribeLeaderboard = onSnapshot(collection(db, RANK_COLLECTION), (snapshot) => {
       if (!isMounted) return;
       const scores = snapshot.docs.map(doc => doc.data() as ScoreEntry);
       setLeaderboard(scores.sort((a, b) => b.points - a.points));
+    });
+
+    const unsubscribeRecap = onSnapshot(doc(db, RECAP_COLLECTION, 'latest'), (snapshot) => {
+      if (snapshot.exists()) {
+        setPostGameRecap(snapshot.data().text);
+      }
     });
 
     return () => {
       isMounted = false;
       unsubscribeChat();
       unsubscribeLeaderboard();
+      unsubscribeRecap();
       clearTimeout(syncTimeout);
     };
   }, [user]);
@@ -86,32 +103,37 @@ export default function App() {
       team: selectedTeam 
     };
     setUser(newUser);
-    localStorage.setItem('chat_user', JSON.stringify(newUser));
+    localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(newUser));
   };
 
   const handleInvite = async () => {
     const shareData = {
       title: 'SBLIX Beta Hub',
-      text: 'Join me for the Rams vs Seahawks game! Test the hub load now.',
+      text: 'Join me for the Rams vs Seahawks game! Hub is reset and ready.',
       url: window.location.href,
     };
-
     if (navigator.share) {
-      try {
-        await navigator.share(shareData);
-      } catch (err) {
-        console.log('Share failed', err);
-      }
+      try { await navigator.share(shareData); } catch (err) {}
     } else {
-      // Fallback: Copy to clipboard
       navigator.clipboard.writeText(window.location.href);
       setCopyFeedback(true);
       setTimeout(() => setCopyFeedback(false), 2000);
     }
   };
 
+  const triggerPostGameAnalysis = async () => {
+    setIsAnalyzing(true);
+    const analysis = await getPostGameAnalysis(gameScore, leaderboard);
+    if (status === 'Live' && db) {
+      await setDoc(doc(db, RECAP_COLLECTION, 'latest'), { text: analysis, timestamp: serverTimestamp() });
+    } else {
+      setPostGameRecap(analysis);
+    }
+    setIsAnalyzing(false);
+  };
+
   const wipeStadium = () => {
-    if (window.confirm("BETA RESET: This will clear your local session and scores. Proceed?")) {
+    if (window.confirm("BETA RESET: This will clear your personal session and scores locally. Proceed?")) {
       localStorage.clear();
       window.location.reload();
     }
@@ -134,11 +156,11 @@ export default function App() {
     };
 
     if (status === 'Live' && db) {
-      await setDoc(doc(db, 'leaderboard_lix', user.id), newScore);
+      await setDoc(doc(db, RANK_COLLECTION, user.id), newScore);
     } else {
       const newLB = [...leaderboard.filter(s => s.userId !== user.id), newScore];
       setLeaderboard(newLB.sort((a, b) => b.points - a.points));
-      localStorage.setItem('local_leaderboard', JSON.stringify(newLB));
+      localStorage.setItem('local_leaderboard_v2', JSON.stringify(newLB));
     }
   };
 
@@ -158,11 +180,11 @@ export default function App() {
     };
 
     if (status === 'Live' && db) {
-      await addDoc(collection(db, 'party_hub'), newMsg);
+      await addDoc(collection(db, MSG_COLLECTION), newMsg);
     } else {
       const updated = [...messages, { ...newMsg, id: Date.now().toString() } as ChatMessage].slice(-50);
       setMessages(updated);
-      localStorage.setItem('local_chat_history', JSON.stringify(updated));
+      localStorage.setItem('local_chat_history_v2', JSON.stringify(updated));
     }
 
     if (text.toLowerCase().includes('/coach')) {
@@ -175,7 +197,7 @@ export default function App() {
         timestamp: status === 'Live' ? serverTimestamp() : new Date().toISOString()
       };
       if (status === 'Live' && db) {
-        await addDoc(collection(db, 'party_hub'), coachMsg);
+        await addDoc(collection(db, MSG_COLLECTION), coachMsg);
       } else {
         setMessages(prev => [...prev, { ...coachMsg, id: 'c' + Date.now() } as ChatMessage]);
       }
@@ -190,7 +212,7 @@ export default function App() {
       updateScore(pts);
       alert("TOUCHDOWN! + " + pts + " pts");
     } else {
-      alert("INCOMPLETE PASS! Try the next one.");
+      alert("INCOMPLETE PASS! Correct answer was: " + INITIAL_TRIVIA.find(q => q.id === qId)?.options[correct]);
     }
   };
 
@@ -200,25 +222,25 @@ export default function App() {
         <div className="scanline"></div>
         <div className="w-full max-w-md p-8 glass rounded-[2.5rem] shadow-2xl relative z-10 border border-white/10 text-center">
           <div className="w-16 h-16 bg-blue-500/20 rounded-2xl flex items-center justify-center mx-auto mb-6 border border-blue-500/30">
-            <i className="fas fa-football-ball text-2xl text-blue-400"></i>
+            <i className="fas fa-sync text-2xl text-blue-400"></i>
           </div>
-          <h1 className="font-orbitron text-3xl font-black italic text-white mb-2 uppercase">Beta: NFC WEST</h1>
+          <h1 className="font-orbitron text-3xl font-black italic text-white mb-2 uppercase tracking-tighter">BETA: NFC WEST</h1>
           <p className="text-blue-500/60 text-[10px] mb-8 font-black uppercase tracking-[0.4em]">RAMS vs SEAHAWKS</p>
           <form onSubmit={handleJoin} className="space-y-6">
-            <input autoFocus value={inputName} onChange={(e) => setInputName(e.target.value.slice(0, 12).toUpperCase())} placeholder="YOUR HANDLE" className="w-full bg-slate-900 border border-white/10 rounded-2xl px-6 py-4 outline-none focus:border-blue-500 transition-all text-white font-black text-lg uppercase tracking-widest text-center" />
+            <input autoFocus value={inputName} onChange={(e) => setInputName(e.target.value.slice(0, 12).toUpperCase())} placeholder="NEW HANDLE" className="w-full bg-slate-900 border border-white/10 rounded-2xl px-6 py-4 outline-none focus:border-blue-500 transition-all text-white font-black text-lg uppercase tracking-widest text-center" />
             <div className="grid grid-cols-2 gap-3">
               <button type="button" onClick={() => setSelectedTeam('RAMS')} className={`py-4 rounded-2xl border-2 transition-all font-black text-xs tracking-widest ${selectedTeam === 'RAMS' ? 'border-blue-600 bg-blue-600/20 text-blue-400' : 'border-white/5 bg-white/5 text-slate-500'}`}>RAMS</button>
               <button type="button" onClick={() => setSelectedTeam('SEAHAWKS')} className={`py-4 rounded-2xl border-2 transition-all font-black text-xs tracking-widest ${selectedTeam === 'SEAHAWKS' ? 'border-emerald-600 bg-emerald-600/20 text-emerald-400' : 'border-white/5 bg-white/5 text-slate-500'}`}>SEAHAWKS</button>
             </div>
             <div className="flex flex-col gap-3">
-              <button className="w-full bg-blue-600 hover:bg-blue-500 text-white font-black uppercase tracking-[0.2em] py-5 rounded-2xl transition-all shadow-xl shadow-blue-500/30">ENTER HUB</button>
+              <button className="w-full bg-blue-600 hover:bg-blue-500 text-white font-black uppercase tracking-[0.2em] py-5 rounded-2xl transition-all shadow-xl shadow-blue-500/30">JOIN NEW HUB</button>
               <button type="button" onClick={handleInvite} className="w-full bg-slate-800/50 hover:bg-slate-800 text-slate-400 border border-white/5 font-black uppercase tracking-[0.15em] py-4 rounded-2xl transition-all flex items-center justify-center gap-3">
                 <i className={`fas ${copyFeedback ? 'fa-check text-emerald-500' : 'fa-user-plus'}`}></i>
                 {copyFeedback ? 'LINK COPIED!' : 'INVITE SQUAD'}
               </button>
             </div>
           </form>
-          <p className="mt-8 text-[9px] text-slate-600 font-black uppercase tracking-[0.2em]">Help us test the load for tonight's game!</p>
+          <p className="mt-8 text-[9px] text-slate-600 font-black uppercase tracking-[0.2em]">Game Hub is cleared for the 5:30 kickoff!</p>
         </div>
       </div>
     );
@@ -245,33 +267,33 @@ export default function App() {
         {showDiag && (
            <div className="mb-4 p-4 bg-black/80 rounded-2xl border border-white/10 animate-msgPop space-y-4">
              <div>
-               <p className="text-[9px] font-black text-blue-500 uppercase mb-2">Manual Sync</p>
-               <textarea value={manualConfig} onChange={(e) => setManualConfig(e.target.value)} placeholder='Paste Firebase JSON...' className="w-full bg-slate-900 border border-white/10 rounded-xl p-3 text-[10px] font-mono text-slate-300 outline-none h-24 mb-2" />
+               <p className="text-[9px] font-black text-blue-500 uppercase mb-2">Beta Controls</p>
                <div className="flex gap-2">
-                 <button onClick={() => saveManualConfig(manualConfig)} className="flex-1 bg-blue-600 text-white text-[10px] font-black uppercase py-2 rounded-lg">Apply</button>
-                 <button onClick={clearManualConfig} className="bg-white/5 text-slate-500 text-[10px] font-black uppercase py-2 px-4 rounded-lg">Reset</button>
+                 <button onClick={triggerPostGameAnalysis} disabled={isAnalyzing} className="flex-1 bg-yellow-500 text-yellow-950 text-[10px] font-black uppercase py-3 rounded-lg flex items-center justify-center gap-2">
+                   <i className={`fas ${isAnalyzing ? 'fa-spinner fa-spin' : 'fa-flag-checkered'}`}></i>
+                   {isAnalyzing ? 'Analyzing...' : 'Trigger Post-Game Recap'}
+                 </button>
+                 <button onClick={wipeStadium} className="bg-red-600/20 text-red-500 border border-red-500/30 text-[10px] font-black uppercase px-4 rounded-xl">Wipe Local</button>
                </div>
              </div>
-             <button onClick={wipeStadium} className="w-full bg-red-600/20 text-red-500 border border-red-500/30 text-[10px] font-black uppercase py-3 rounded-xl hover:bg-red-600 hover:text-white transition-all">
-               <i className="fas fa-bomb mr-2"></i> Nuclear Beta Reset
-             </button>
+             <textarea value={manualConfig} onChange={(e) => setManualConfig(e.target.value)} placeholder='Paste Firebase JSON...' className="w-full bg-slate-900 border border-white/10 rounded-xl p-3 text-[10px] font-mono text-slate-300 outline-none h-16" />
            </div>
         )}
 
         <div className="flex justify-between items-center px-4 py-3 bg-black/40 rounded-3xl border border-white/5 shadow-inner">
           <div className="text-center relative">
             <p className="text-[10px] font-black text-blue-500 tracking-widest">LAR</p>
-            <p className="text-3xl font-orbitron font-black italic text-white">00</p>
+            <p className="text-3xl font-orbitron font-black italic text-white">{gameScore.rams}</p>
           </div>
           <div className="text-center">
-            <p className="text-[10px] font-black text-slate-600 mb-1 italic uppercase">Kickoff 5:30</p>
+            <p className="text-[10px] font-black text-slate-600 mb-1 italic uppercase">Beta Testing</p>
             <div className="px-3 py-0.5 bg-blue-500/10 rounded-full border border-blue-500/20">
-              <p className="text-[9px] font-black text-blue-400 animate-pulse tracking-[0.3em]">PREGAME</p>
+              <p className="text-[9px] font-black text-blue-400 animate-pulse tracking-[0.3em]">LIVE READY</p>
             </div>
           </div>
           <div className="text-center">
             <p className="text-[10px] font-black text-emerald-500 tracking-widest">SEA</p>
-            <p className="text-3xl font-orbitron font-black italic text-white">00</p>
+            <p className="text-3xl font-orbitron font-black italic text-white">{gameScore.seahawks}</p>
           </div>
         </div>
 
@@ -291,6 +313,10 @@ export default function App() {
       <div className="flex-1 overflow-y-auto relative bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')] custom-scrollbar">
         {activeTab === 'chat' && (
           <div className="p-4 space-y-4 pb-32">
+            <div className="text-center py-4 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl mb-2">
+               <p className="text-[8px] font-black text-emerald-500 uppercase tracking-[0.5em] mb-1">Stadium Link Established</p>
+               <p className="text-[10px] text-emerald-100 font-bold">CHAT IS LIVE FOR RAMS VS SEAHAWKS</p>
+            </div>
             {messages.map((msg, i) => {
               const isMe = msg.senderId === user.id;
               const isCoach = msg.senderId === 'coach_ai';
@@ -316,37 +342,59 @@ export default function App() {
             <h2 className="text-xl font-orbitron font-black italic text-white flex items-center gap-3">
               <i className="fas fa-fire text-orange-500"></i> NFC WEST TRIVIA
             </h2>
-            {INITIAL_TRIVIA.map(q => (
+            {INITIAL_TRIVIA.map(q => {
+              const isOU = q.options.includes("OVER");
+              return (
               <div key={q.id} className={`p-6 rounded-3xl border transition-all ${answeredQuestions.has(q.id) ? 'bg-white/5 border-white/5 opacity-50' : 'bg-slate-900 border-white/10 shadow-2xl'}`}>
                 <div className="flex justify-between items-start mb-4">
-                  <span className="bg-blue-500/10 text-blue-400 text-[10px] font-black px-3 py-1 rounded-full border border-blue-500/20">{q.points} PTS</span>
+                  <span className={`text-[10px] font-black px-3 py-1 rounded-full border ${isOU ? 'bg-purple-500/10 text-purple-400 border-purple-500/20' : 'bg-blue-500/10 text-blue-400 border-blue-500/20'}`}>
+                    {isOU ? <i className="fas fa-arrows-v mr-1"></i> : null}
+                    {q.points} PTS
+                  </span>
                   {answeredQuestions.has(q.id) && <i className="fas fa-check-circle text-emerald-500"></i>}
                 </div>
                 <p className="text-lg font-bold text-white mb-6 leading-tight">{q.text}</p>
-                <div className="grid grid-cols-1 gap-2">
+                <div className={`grid ${isOU ? 'grid-cols-2' : 'grid-cols-1'} gap-2`}>
                   {q.options.map((opt, idx) => (
-                    <button key={idx} disabled={answeredQuestions.has(q.id)} onClick={() => handleAnswer(q.id, idx, q.correctIndex, q.points)} className="w-full text-left px-5 py-4 rounded-2xl bg-black/40 border border-white/5 text-slate-300 hover:border-blue-500 hover:bg-blue-500/5 transition-all text-sm font-bold">
+                    <button key={idx} disabled={answeredQuestions.has(q.id)} onClick={() => handleAnswer(q.id, idx, q.correctIndex, q.points)} className="w-full text-center px-5 py-4 rounded-2xl bg-black/40 border border-white/5 text-slate-300 hover:border-blue-500 hover:bg-blue-500/5 transition-all text-sm font-black tracking-widest">
                       {opt}
                     </button>
                   ))}
                 </div>
               </div>
-            ))}
+            )})}
           </div>
         )}
 
         {activeTab === 'ranks' && (
           <div className="p-6 pb-24 space-y-8">
             <div className="text-center">
-              <h2 className="text-2xl font-orbitron font-black italic text-white mb-2">BETA LEADERBOARD</h2>
-              <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest italic">Rams vs Seahawks | Tonight</p>
+              <h2 className="text-2xl font-orbitron font-black italic text-white mb-2 uppercase tracking-tighter">THE LEADERBOARD</h2>
+              <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest italic">Live Rankings | Rams vs Seahawks</p>
             </div>
             
+            {postGameRecap && (
+              <div className="p-6 bg-yellow-500/10 border-2 border-yellow-500/30 rounded-[2rem] relative overflow-hidden group">
+                <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-30 transition-opacity">
+                  <i className="fas fa-trophy text-6xl text-yellow-500 rotate-12"></i>
+                </div>
+                <h3 className="text-yellow-500 font-orbitron font-black italic text-sm mb-3 flex items-center gap-2 uppercase">
+                  <i className="fas fa-microphone"></i> Locker Room Recap
+                </h3>
+                <p className="text-slate-100 text-sm italic font-medium leading-relaxed">
+                  {postGameRecap}
+                </p>
+                <div className="mt-4 flex gap-2">
+                  <div className="px-2 py-1 bg-yellow-500 text-yellow-950 text-[8px] font-black uppercase rounded">Top Fan: {leaderboard[0]?.userName || 'N/A'}</div>
+                </div>
+              </div>
+            )}
+
             <div className="space-y-3">
               {leaderboard.length === 0 ? (
                 <div className="text-center py-20 opacity-30">
                   <i className="fas fa-user-friends text-4xl mb-4 text-blue-500"></i>
-                  <p className="font-black text-xs uppercase tracking-widest">Waiting for scores...</p>
+                  <p className="font-black text-xs uppercase tracking-widest">Board is Clean!</p>
                 </div>
               ) : leaderboard.map((score, i) => (
                 <div key={score.userId} className={`flex items-center gap-4 p-5 rounded-3xl border transition-all ${score.userId === user.id ? 'bg-blue-600 border-blue-400 shadow-xl shadow-blue-500/20' : 'bg-slate-900 border-white/5'}`}>
