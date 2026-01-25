@@ -10,53 +10,49 @@ import {
   serverTimestamp 
 } from 'firebase/firestore';
 
-const getEnv = (key: string): string | undefined => {
-  try {
-    // 1. Check process.env (Vite 'define' injected)
-    if (typeof process !== 'undefined' && process.env) {
-      const val = (process.env as any)[key];
-      if (val && val !== "undefined" && val !== "") return val;
-    }
-  } catch (e) {}
-
-  try {
-    // 2. Check import.meta.env
-    const meta = import.meta as any;
-    if (meta && meta.env) {
-      const val = meta.env[key];
-      if (val && val !== "undefined" && val !== "") return val;
-    }
-  } catch (e) {}
-  
-  return undefined;
-};
-
+// Explicitly define config using direct process.env access for Vite string replacement
 const firebaseConfig = {
-  apiKey: getEnv('VITE_FIREBASE_API_KEY'),
-  authDomain: getEnv('VITE_FIREBASE_AUTH_DOMAIN'),
-  projectId: getEnv('VITE_FIREBASE_PROJECT_ID'),
-  storageBucket: getEnv('VITE_FIREBASE_STORAGE_BUCKET'),
-  messagingSenderId: getEnv('VITE_FIREBASE_MESSAGING_SENDER_ID'),
-  appId: getEnv('VITE_FIREBASE_APP_ID')
+  apiKey: process.env.VITE_FIREBASE_API_KEY,
+  authDomain: process.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: process.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: process.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: process.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: process.env.VITE_FIREBASE_APP_ID
 };
 
 let db: any = null;
 
 const isValidConfig = (config: any) => {
-  return !!(config.projectId && config.projectId.length > 5 && config.apiKey);
+  // Check if keys exist and aren't just empty strings or literal "undefined" strings
+  const keys = ['apiKey', 'projectId', 'appId'];
+  return keys.every(key => 
+    config[key] && 
+    config[key] !== "" && 
+    config[key] !== "undefined" && 
+    config[key].length > 3
+  );
 };
 
 if (isValidConfig(firebaseConfig)) {
   try {
     const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
     db = getFirestore(app);
-    console.log("Firebase Live: Connected to Stadium Grid.");
+    console.log("Firebase initialized successfully.");
   } catch (error) {
-    console.warn("Firestore initialization failed. Running local mode.");
+    console.warn("Firestore initialization error:", error);
   }
 } else {
-  console.log("Firebase keys missing. Defaulting to Local Party Mode.");
+  console.log("Missing Firebase keys. Check Diagnostics in the app UI.");
 }
+
+// Helper to check which keys are missing for the UI diagnostic tool
+export const getMissingKeys = () => {
+  const missing = [];
+  if (!firebaseConfig.apiKey) missing.push("VITE_FIREBASE_API_KEY");
+  if (!firebaseConfig.projectId) missing.push("VITE_FIREBASE_PROJECT_ID");
+  if (!firebaseConfig.appId) missing.push("VITE_FIREBASE_APP_ID");
+  return missing;
+};
 
 export { 
   db, 

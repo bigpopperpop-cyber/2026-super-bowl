@@ -1,13 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { db, collection, addDoc, query, orderBy, limit, onSnapshot, serverTimestamp } from './services/firebaseService';
+import { db, collection, addDoc, query, orderBy, limit, onSnapshot, serverTimestamp, getMissingKeys } from './services/firebaseService';
 import { getCoachResponse } from './services/geminiService';
 import { ChatMessage, User } from './types';
-
-interface Square {
-  id: string;
-  claimer: string;
-  team: string;
-}
 
 export default function App() {
   const [user, setUser] = useState<(User & { team?: string }) | null>(() => {
@@ -23,9 +17,9 @@ export default function App() {
   const [status, setStatus] = useState<'Live' | 'Syncing' | 'Party Mode'>(db ? 'Syncing' : 'Party Mode');
   const [isCoachThinking, setIsCoachThinking] = useState(false);
   const [squares, setSquares] = useState<Record<string, string>>({});
+  const [showDiag, setShowDiag] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Connection Handler
   useEffect(() => {
     if (!user) return;
 
@@ -39,7 +33,7 @@ export default function App() {
     let isMounted = true;
     const syncTimeout = setTimeout(() => {
       if (isMounted && status === 'Syncing') setStatus('Party Mode');
-    }, 5000);
+    }, 4000);
 
     const q = query(collection(db, 'party_hub'), orderBy('timestamp', 'asc'), limit(60));
     const unsubscribeChat = onSnapshot(q, (snapshot) => {
@@ -57,7 +51,10 @@ export default function App() {
     const unsubscribeSquares = onSnapshot(collection(db, 'squares'), (snapshot) => {
       if (!isMounted) return;
       const sqData: Record<string, string> = {};
-      snapshot.docs.forEach(doc => { sqData[doc.id] = doc.data().name; });
+      snapshot.docs.forEach(doc => { 
+        const data = doc.data();
+        sqData[data.id] = data.name; 
+      });
       setSquares(sqData);
     });
 
@@ -96,7 +93,7 @@ export default function App() {
       senderName: user.name,
       senderTeam: user.team,
       text,
-      timestamp: status === 'Live' ? serverTimestamp() : new Date()
+      timestamp: status === 'Live' ? serverTimestamp() : new Date().toISOString()
     };
 
     if (status === 'Live' && db) {
@@ -114,7 +111,7 @@ export default function App() {
         senderId: 'coach_ai',
         senderName: 'COACH SBLIX 🏈',
         text: coachText,
-        timestamp: status === 'Live' ? serverTimestamp() : new Date()
+        timestamp: status === 'Live' ? serverTimestamp() : new Date().toISOString()
       };
       if (status === 'Live' && db) {
         await addDoc(collection(db, 'party_hub'), coachMsg);
@@ -131,7 +128,6 @@ export default function App() {
     if (squares[key]) return;
 
     if (status === 'Live' && db) {
-      // In a real app, you'd use a specific doc ID for squares
       await addDoc(collection(db, 'squares'), { id: key, name: user.name });
     } else {
       const newSquares = { ...squares, [key]: user.name };
@@ -146,41 +142,35 @@ export default function App() {
         <div className="scanline"></div>
         <div className="w-full max-w-md p-8 glass rounded-[2.5rem] shadow-2xl relative z-10 border border-white/10 text-center">
           <div className="w-16 h-16 bg-emerald-500/20 rounded-2xl flex items-center justify-center mx-auto mb-6 border border-emerald-500/30">
-            <i className="fas fa-trophy text-2xl text-emerald-400"></i>
+            <i className="fas fa-football-ball text-2xl text-emerald-400"></i>
           </div>
           <h1 className="font-orbitron text-4xl font-black italic text-white mb-2">SBLIX LIX</h1>
-          <p className="text-emerald-500/60 text-[10px] mb-8 font-black uppercase tracking-[0.3em]">Official Party Hub</p>
+          <p className="text-emerald-500/60 text-[10px] mb-8 font-black uppercase tracking-[0.3em]">The Ultimate Party Hub</p>
           
           <form onSubmit={handleJoin} className="space-y-6">
-            <div>
-              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-3 text-left">Your Handle</label>
-              <input 
-                autoFocus
-                value={inputName}
-                onChange={(e) => setInputName(e.target.value.slice(0, 10))}
-                placeholder="NICKNAME"
-                className="w-full bg-slate-900 border border-white/10 rounded-2xl px-6 py-4 outline-none focus:border-emerald-500 transition-all text-white font-black text-lg uppercase tracking-widest placeholder:text-slate-800"
-              />
-            </div>
+            <input 
+              autoFocus
+              value={inputName}
+              onChange={(e) => setInputName(e.target.value.slice(0, 12))}
+              placeholder="ENTER NICKNAME"
+              className="w-full bg-slate-900 border border-white/10 rounded-2xl px-6 py-4 outline-none focus:border-emerald-500 transition-all text-white font-black text-lg uppercase tracking-widest placeholder:text-slate-800"
+            />
 
-            <div>
-              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-3 text-left">Pick Your Side</label>
-              <div className="grid grid-cols-2 gap-3">
-                <button 
-                  type="button"
-                  onClick={() => setSelectedTeam('CHIEFS')}
-                  className={`py-4 rounded-2xl border-2 transition-all font-black text-xs tracking-widest ${selectedTeam === 'CHIEFS' ? 'border-red-600 bg-red-600/20 text-red-500' : 'border-white/5 bg-white/5 text-slate-500'}`}
-                >
-                  CHIEFS
-                </button>
-                <button 
-                  type="button"
-                  onClick={() => setSelectedTeam('EAGLES')}
-                  className={`py-4 rounded-2xl border-2 transition-all font-black text-xs tracking-widest ${selectedTeam === 'EAGLES' ? 'border-emerald-600 bg-emerald-600/20 text-emerald-500' : 'border-white/5 bg-white/5 text-slate-500'}`}
-                >
-                  EAGLES
-                </button>
-              </div>
+            <div className="grid grid-cols-2 gap-3">
+              <button 
+                type="button"
+                onClick={() => setSelectedTeam('CHIEFS')}
+                className={`py-4 rounded-2xl border-2 transition-all font-black text-xs tracking-widest ${selectedTeam === 'CHIEFS' ? 'border-red-600 bg-red-600/20 text-red-500' : 'border-white/5 bg-white/5 text-slate-500'}`}
+              >
+                CHIEFS
+              </button>
+              <button 
+                type="button"
+                onClick={() => setSelectedTeam('EAGLES')}
+                className={`py-4 rounded-2xl border-2 transition-all font-black text-xs tracking-widest ${selectedTeam === 'EAGLES' ? 'border-emerald-600 bg-emerald-600/20 text-emerald-500' : 'border-white/5 bg-white/5 text-slate-500'}`}
+              >
+                EAGLES
+              </button>
             </div>
 
             <button className="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black uppercase tracking-[0.2em] py-5 rounded-2xl transition-all shadow-xl shadow-emerald-500/20">
@@ -194,7 +184,6 @@ export default function App() {
 
   return (
     <div className="flex flex-col h-screen max-w-lg mx-auto bg-slate-950 border-x border-white/5 relative shadow-2xl overflow-hidden">
-      {/* Scoreboard Header */}
       <header className="pt-6 pb-4 px-4 glass border-b border-white/10 z-50">
         <div className="flex justify-between items-center mb-4">
           <div className="flex items-center gap-2">
@@ -202,7 +191,7 @@ export default function App() {
             <span className="text-[9px] font-black text-slate-500 uppercase tracking-tighter">{status} HUB</span>
           </div>
           <button onClick={() => { localStorage.clear(); window.location.reload(); }} className="text-slate-600 hover:text-white transition-colors">
-            <i className="fas fa-power-off text-xs"></i>
+            <i className="fas fa-sign-out-alt text-xs"></i>
           </button>
         </div>
         
@@ -212,8 +201,8 @@ export default function App() {
             <p className="text-3xl font-orbitron font-black italic">24</p>
           </div>
           <div className="text-center">
-            <p className="text-[10px] font-black text-slate-600 mb-1">4TH QUARTER</p>
-            <p className="text-[10px] font-black text-emerald-500 animate-pulse">LIVE BROADCAST</p>
+            <p className="text-[10px] font-black text-slate-600 mb-1 italic">4TH QUARTER</p>
+            <p className="text-[10px] font-black text-emerald-500 animate-pulse tracking-widest">LIVE</p>
           </div>
           <div className="text-center">
             <p className="text-[10px] font-black text-emerald-500 tracking-widest">PHI</p>
@@ -221,7 +210,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* Tabs */}
         <div className="flex gap-2 mt-4">
           <button 
             onClick={() => setActiveTab('chat')}
@@ -233,7 +221,7 @@ export default function App() {
             onClick={() => setActiveTab('squares')}
             className={`flex-1 py-2 rounded-xl text-[10px] font-black uppercase tracking-[0.2em] transition-all ${activeTab === 'squares' ? 'bg-emerald-500 text-slate-950' : 'bg-white/5 text-slate-500'}`}
           >
-            Squares Game
+            Squares
           </button>
         </div>
       </header>
@@ -242,13 +230,25 @@ export default function App() {
         {activeTab === 'chat' ? (
           <div className="p-4 space-y-4 pb-24">
             {status === 'Party Mode' && (
-              <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-4 mb-6">
-                <p className="text-[10px] font-black text-red-400 uppercase tracking-widest flex items-center gap-2">
-                  <i className="fas fa-exclamation-triangle"></i> Solo Mode Active
-                </p>
-                <p className="text-[10px] text-red-400/60 mt-1 uppercase tracking-tighter">Connect Firebase to sync with your 20 guests!</p>
+              <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-4 mb-4">
+                <div className="flex justify-between items-center">
+                   <p className="text-[10px] font-black text-red-400 uppercase tracking-widest">
+                    <i className="fas fa-wifi-slash mr-2"></i> Solo Mode Active
+                  </p>
+                  <button onClick={() => setShowDiag(!showDiag)} className="text-[8px] font-bold text-red-400 underline uppercase tracking-widest">
+                    {showDiag ? 'Hide' : 'Why?'}
+                  </button>
+                </div>
+                {showDiag && (
+                  <div className="mt-3 text-[9px] text-red-300/70 space-y-1 font-mono">
+                    <p className="font-bold">Missing Firebase Config:</p>
+                    {getMissingKeys().map(k => <p key={k}>- {k}</p>)}
+                    <p className="mt-2 text-slate-500 italic">Add these to your environment variables to enable multi-device chat.</p>
+                  </div>
+                )}
               </div>
             )}
+            
             {messages.map((msg, i) => {
               const isMe = msg.senderId === user.id;
               const isCoach = msg.senderId === 'coach_ai';
@@ -261,7 +261,7 @@ export default function App() {
                       {msg.senderName} {isMe && '(YOU)'}
                     </span>
                   </div>
-                  <div className={`max-w-[90%] px-4 py-3 rounded-2xl text-sm leading-snug shadow-xl ${
+                  <div className={`max-w-[90%] px-4 py-3 rounded-2xl text-sm shadow-xl ${
                     isMe ? 'bg-emerald-500 text-slate-950 font-bold rounded-tr-none' : 
                     isCoach ? 'bg-slate-900 border border-emerald-500/40 text-emerald-50 rounded-tl-none italic' :
                     'bg-slate-900 text-slate-200 rounded-tl-none border border-white/5'
@@ -271,17 +271,11 @@ export default function App() {
                 </div>
               );
             })}
-            {isCoachThinking && (
-              <div className="text-[8px] font-black text-emerald-500/50 uppercase tracking-[0.3em] animate-pulse">Coach is calculating the blitz...</div>
-            )}
+            {isCoachThinking && <div className="text-[8px] font-black text-emerald-500/50 uppercase tracking-[0.3em] animate-pulse">Coach is drawing a play...</div>}
             <div ref={messagesEndRef} />
           </div>
         ) : (
           <div className="p-4 pb-24">
-            <div className="mb-4 text-center">
-              <h3 className="text-xs font-black uppercase tracking-[0.3em] text-emerald-500">Super Bowl Squares</h3>
-              <p className="text-[9px] text-slate-500 uppercase tracking-widest mt-1">Tap an empty square to claim it!</p>
-            </div>
             <div className="grid grid-cols-10 gap-1 aspect-square bg-slate-900 p-1 rounded-xl border border-white/10">
               {Array.from({ length: 100 }).map((_, i) => (
                 <button
@@ -297,6 +291,7 @@ export default function App() {
                 </button>
               ))}
             </div>
+            <p className="text-center text-[9px] text-slate-500 uppercase tracking-widest mt-4 italic">Tap to claim a square for the final score!</p>
           </div>
         )}
       </div>
@@ -307,7 +302,7 @@ export default function App() {
             <input 
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
-              placeholder="Shout something... (use /coach)"
+              placeholder="Message... (use /coach for AI)"
               className="flex-1 bg-slate-900 border border-white/10 rounded-2xl px-5 py-4 outline-none focus:border-emerald-500 transition-all text-white font-medium text-sm"
             />
             <button 
