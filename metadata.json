@@ -1,7 +1,5 @@
 {
-  "name": "SBLIX Registry",
-  "description": "Hard-state synchronization protocol for Super Bowl party management.",
-  "requestFramePermissions": [
-    "camera"
-  ]
+  "name": "SBLIX Party Hub",
+  "description": "High-octane chat room for the Super Bowl.",
+  "requestFramePermissions": []
 }

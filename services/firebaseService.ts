@@ -1,50 +1,40 @@
-import { initializeApp, getApp, getApps } from "firebase/app";
+import { initializeApp, getApps, getApp } from 'firebase/app';
 import { 
   getFirestore, 
   collection, 
-  doc, 
-  onSnapshot, 
-  setDoc, 
-  updateDoc, 
-  addDoc,
+  addDoc, 
   query, 
-  where, 
-  serverTimestamp, 
-  orderBy,
-  limit,
-  deleteDoc,
-  getDocs
-} from "firebase/firestore";
-
-const firebaseConfig = {
-  apiKey: "AIzaSyB0BO9OwaJbevhYKsDb0iNQoaHH1bnD-qw",
-  authDomain: "sblix-6f2a9.firebaseapp.com",
-  projectId: "sblix-6f2a9",
-  storageBucket: "sblix-6f2a9.firebasestorage.app",
-  messagingSenderId: "162130736161",
-  appId: "1:162130736161:web:1fb39b3da97a8bff9ddf60",
-  measurementId: "G-XJ9WY2LMSB"
-};
-
-export const isFirebaseConfigured = 
-  !!firebaseConfig.apiKey && 
-  firebaseConfig.apiKey !== "REPLACE_WITH_YOUR_FIREBASE_API_KEY";
-
-const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
-export const db = getFirestore(app);
-
-export { 
-  collection, 
-  doc, 
-  onSnapshot, 
-  setDoc, 
-  updateDoc, 
-  addDoc,
-  query, 
-  where, 
-  serverTimestamp, 
   orderBy, 
   limit, 
-  deleteDoc, 
-  getDocs 
+  onSnapshot, 
+  serverTimestamp 
+} from 'firebase/firestore';
+
+const firebaseConfig = {
+  apiKey: (process.env as any).API_KEY,
+  authDomain: "party-chat-sblix.firebaseapp.com",
+  projectId: "party-chat-sblix",
+  storageBucket: "party-chat-sblix.appspot.com",
+  messagingSenderId: "123456789",
+  appId: "1:123456789:web:sblix"
+};
+
+let db: any = null;
+
+try {
+  const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
+  db = getFirestore(app);
+} catch (e) {
+  console.warn("Firestore could not be initialized automatically. Using local-first mode.", e);
+}
+
+export { 
+  db, 
+  collection, 
+  addDoc, 
+  query, 
+  orderBy, 
+  limit, 
+  onSnapshot, 
+  serverTimestamp 
 };

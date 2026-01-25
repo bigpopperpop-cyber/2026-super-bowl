@@ -3,42 +3,41 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0, viewport-fit=cover" />
-  <title>SBLIX | Prop Pool</title>
+  <title>SBLIX | Party Chat</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
   <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
   <style>
     :root {
       --bg-dark: #020617;
-      --accent-emerald: #10b981;
+      --accent: #10b981;
+      --accent-glow: rgba(16, 185, 129, 0.2);
     }
     body {
       font-family: 'Inter', sans-serif;
       background-color: var(--bg-dark);
       color: white;
-      overscroll-behavior-y: contain;
       -webkit-font-smoothing: antialiased;
+      overflow: hidden;
     }
     .font-orbitron { font-family: 'Orbitron', sans-serif; }
-    .glass-card {
-      background: rgba(15, 23, 42, 0.6);
-      backdrop-filter: blur(20px);
-      border: 1px solid rgba(255, 255, 255, 0.05);
+    .glass {
+      background: rgba(15, 23, 42, 0.7);
+      backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
     }
-    .status-pulse {
-      animation: pulse-emerald 2s infinite;
+    .chat-height {
+      height: calc(100vh - 140px);
     }
-    @keyframes pulse-emerald {
-      0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4); }
-      70% { box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); }
-      100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+    .neon-border {
+      box-shadow: 0 0 15px var(--accent-glow);
     }
-    .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
-    .no-scrollbar::-webkit-scrollbar { display: none; }
+    @keyframes pulse-soft {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.7; }
+    }
+    .animate-pulse-soft { animation: pulse-soft 2s infinite; }
   </style>
-  <script>
-    window.process = { env: { NODE_ENV: 'production' } };
-  </script>
   <script type="importmap">
 {
   "imports": {
@@ -48,7 +47,7 @@
     "react/jsx-runtime": "https://esm.sh/react@19.0.0/jsx-runtime",
     "firebase/app": "https://esm.sh/firebase@11.2.0/app",
     "firebase/firestore": "https://esm.sh/firebase@11.2.0/firestore",
-    "@google/genai": "https://esm.sh/@google/genai@1.38.0",
+    "@google/genai": "https://esm.sh/@google/genai@1.3.0",
     "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
     "react/": "https://esm.sh/react@^19.2.3/",
     "vite": "https://esm.sh/vite@^7.3.1",
