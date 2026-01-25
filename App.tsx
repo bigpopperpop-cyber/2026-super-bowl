@@ -38,7 +38,7 @@ export default function App() {
         id: uId, name: uName, handle: uName, team: uTeam || 'KC', 
         deviceType: 'mobile', score: 0, lastPulse: Date.now(), 
         isVerified: true, pingCount: 0 
-      };
+      } as User;
     }
     return null;
   });
@@ -105,7 +105,7 @@ export default function App() {
       <div className="h-screen bg-[#020617] flex items-center justify-center p-8 text-center">
         <div className="glass-card p-10 border-emerald-500/30 max-w-md">
           <h1 className="text-2xl font-orbitron font-black text-white mb-4 italic uppercase">Registry Halted</h1>
-          <p className="text-slate-400 text-sm">Update the Firebase credentials in <code>services/firebaseService.ts</code> to initialize the party mesh protocol.</p>
+          <p className="text-slate-400 text-sm">Initialize the party mesh protocol with valid Firestore credentials.</p>
         </div>
       </div>
     );
@@ -158,7 +158,7 @@ export default function App() {
 
             <div className="glass-card p-10 bg-slate-900/50 space-y-8 text-center border-emerald-500/10 shadow-2xl">
                <div className="bg-white p-5 rounded-[2.5rem] mx-auto w-fit shadow-[0_0_60px_rgba(255,255,255,0.1)]">
-                  <img src={`https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(window.location.origin + '?room=' + roomCode)}`} className="w-64 h-64 rounded-2xl" alt="Join QR" />
+                  <img src={`https://api.qrserver.com/v1/create-qr-code/?size=350x350&data=${encodeURIComponent(window.location.origin + '?room=' + roomCode)}`} className="w-80 h-80 rounded-2xl" alt="Join QR" />
                </div>
                <div>
                  <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Protocol Address</div>

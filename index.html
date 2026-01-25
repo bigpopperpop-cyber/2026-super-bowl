@@ -43,6 +43,7 @@
     .text-glow { text-shadow: 0 0 20px rgba(16, 185, 129, 0.5); }
   </style>
   <script>
+    // Runtime shim for process.env (required for Gemini API and other modules)
     window.process = {
       env: {
         NODE_ENV: 'production',

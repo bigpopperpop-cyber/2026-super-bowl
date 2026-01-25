@@ -1,2 +1,2 @@
-// This file is deprecated. Please use constants.ts instead.
+// This file is deprecated. Please use constants.ts
 export {};
