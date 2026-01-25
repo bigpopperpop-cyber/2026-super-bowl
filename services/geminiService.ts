@@ -1,21 +1,27 @@
 import { GoogleGenAI } from "@google/genai";
 
-const getApiKey = (): string | undefined => {
-  if (typeof process !== 'undefined' && (process as any).env?.API_KEY) {
-    return (process as any).env.API_KEY;
-  }
-  const metaEnv = (import.meta as any).env;
-  return metaEnv?.VITE_API_KEY;
-};
-
+/**
+ * Generates a response from Coach SBLIX using the Gemini API.
+ * The API key is retrieved exclusively from process.env.API_KEY.
+ */
 export async function getCoachResponse(prompt: string) {
-  const apiKey = getApiKey();
+  let apiKey: string | undefined;
+  
+  // Safe check for process.env.API_KEY
+  try {
+    if (typeof process !== 'undefined' && process.env) {
+      apiKey = process.env.API_KEY;
+    }
+  } catch (e) {
+    // Fallback or ignore
+  }
   
   if (!apiKey) {
     console.error("Gemini API Key missing.");
     return "Coach is looking for his glasses... (API Key missing).";
   }
 
+  // Create a new GoogleGenAI instance right before the call to ensure the latest key is used.
   const ai = new GoogleGenAI({ apiKey });
   
   try {
@@ -27,7 +33,8 @@ export async function getCoachResponse(prompt: string) {
         temperature: 1,
       }
     });
-    return response.text;
+    // Extract text using the .text property (not a method call).
+    return response.text || "Coach is speechless!";
   } catch (err) {
     console.error("Gemini Error:", err);
     return "The stadium signal is weak, but the fans are loud! Touchdown! 🏈";

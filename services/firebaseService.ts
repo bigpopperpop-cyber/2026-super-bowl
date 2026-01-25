@@ -10,13 +10,26 @@ import {
   serverTimestamp 
 } from 'firebase/firestore';
 
-// Safest way to get environment variables across Vite/Vercel/Production
 const getEnv = (key: string): string | undefined => {
-  const metaEnv = (import.meta as any).env;
-  if (metaEnv && metaEnv[key]) return metaEnv[key];
-  
-  if (typeof process !== 'undefined' && (process as any).env) {
-    return (process as any).env[key];
+  // 1. Try process.env (Vite 'define' replacements)
+  try {
+    if (typeof process !== 'undefined' && process.env) {
+      const val = (process.env as any)[key];
+      if (val && val !== "undefined") return val;
+    }
+  } catch (e) {
+    // Ignore reference errors
+  }
+
+  // 2. Try import.meta.env (Vite standard)
+  try {
+    const meta = import.meta as any;
+    if (meta && meta.env) {
+      const metaVal = meta.env[key];
+      if (metaVal && metaVal !== "undefined") return metaVal;
+    }
+  } catch (e) {
+    // Ignore reference errors
   }
   
   return undefined;
@@ -33,23 +46,19 @@ const firebaseConfig = {
 
 let db: any = null;
 
-// Validate config is not just "undefined" strings or empty
 const isValidConfig = (config: any) => {
-  return config.projectId && 
-         config.projectId !== "undefined" && 
-         config.projectId.trim() !== "";
+  return !!(config.projectId && config.projectId.length > 4 && config.apiKey);
 };
 
 if (isValidConfig(firebaseConfig)) {
   try {
     const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
     db = getFirestore(app);
-    console.log("Firebase initialized successfully.");
   } catch (error) {
-    console.warn("Firestore initialization failed. Running in Local Mode.", error);
+    console.warn("Firestore failed to initialize:", error);
   }
 } else {
-  console.log("Firebase config incomplete or missing. Running in Local Mode.");
+  console.log("Firebase config incomplete. Hub running in Local Mode.");
 }
 
 export { 
