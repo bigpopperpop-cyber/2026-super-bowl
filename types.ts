@@ -20,6 +20,15 @@ export interface TriviaQuestion {
   options: string[];
   correctIndex: number;
   points: number;
+  isPredictive?: boolean;
+}
+
+export interface UserPrediction {
+  userId: string;
+  questionId: string;
+  choiceIndex: number;
+  isSettled: boolean;
+  wasCorrect: boolean;
 }
 
 export interface ScoreEntry {

@@ -1,4 +1,4 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, Type } from "@google/genai";
 
 /**
  * Generates a response from Coach SBLIX using the Gemini API.
@@ -24,6 +24,30 @@ export async function getCoachResponse(prompt: string) {
 }
 
 /**
+ * Uses Google Search to verify specific game statistics for trivia settlement.
+ */
+export async function verifyPredictiveStats(questions: any[]) {
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const queries = questions.map(q => q.text).join(", ");
+  
+  try {
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: `Search for the current stats for this NFL game (Rams vs Seahawks). Based on the live data, determine the correct answer index (0 or 1) for these questions: ${queries}. Format your response as a JSON object where keys are the question text and values are the correct index (0 or 1).`,
+      config: {
+        tools: [{ googleSearch: {} }],
+        responseMimeType: "application/json",
+      },
+    });
+
+    return JSON.parse(response.text || "{}");
+  } catch (err) {
+    console.error("Verification Error:", err);
+    return null;
+  }
+}
+
+/**
  * Uses Google Search to find the current live score of the game.
  */
 export async function getLiveScoreFromSearch() {
@@ -41,7 +65,6 @@ export async function getLiveScoreFromSearch() {
     const text = response.text || "";
     const sources = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
     
-    // Simple parsing logic
     const ramsMatch = text.match(/RAMS:?\s*(\d+)/i);
     const seaMatch = text.match(/SEAHAWKS:?\s*(\d+)/i);
     const halfMatch = text.match(/HALFTIME:?\s*(true|false)/i);
