@@ -1,15 +1,13 @@
 import React from 'react';
-import { NFL_TEAMS } from '../constants.ts';
+import { NFL_TEAMS } from '../constants';
 
 interface TeamHelmetProps {
-  // Allow teamId to be optional to match User.team property
   teamId?: string;
   size?: 'sm' | 'md' | 'lg' | 'xl';
   className?: string;
 }
 
 const TeamHelmet: React.FC<TeamHelmetProps> = ({ teamId, size = 'md', className = '' }) => {
-  // Gracefully handle missing teamId by falling back to the first team in the list
   const team = NFL_TEAMS.find(t => t.id === teamId) || NFL_TEAMS[0];
   
   const dimensions = {

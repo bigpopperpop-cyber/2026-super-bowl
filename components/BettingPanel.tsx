@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { PropBet, User, UserBet } from '../types.ts';
+import { PropBet, User, UserBet } from '../types';
 
 interface BettingPanelProps {
   propBets: PropBet[];
@@ -31,15 +31,6 @@ const BettingPanel: React.FC<BettingPanelProps> = ({
     }
     return bets;
   }, [propBets, categoryFilter]);
-
-  const handleBetSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (selectedBet && selection) {
-      onPlaceBet(selectedBet.id, selection);
-      setSelectedBet(null);
-      setSelection('');
-    }
-  };
 
   const getMyBetOn = (betId: string) => allBets.find(b => b.betId === betId && b.userId === user.id);
 

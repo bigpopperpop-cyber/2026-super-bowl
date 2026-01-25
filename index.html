@@ -43,10 +43,9 @@
     .text-glow { text-shadow: 0 0 20px rgba(16, 185, 129, 0.5); }
   </style>
   <script>
-    // Essential shim for libraries expecting process.env in a browser environment
     window.process = {
       env: {
-        NODE_ENV: 'development',
+        NODE_ENV: 'production',
         API_KEY: '' 
       }
     };

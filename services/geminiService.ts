@@ -1,7 +1,6 @@
 import { GoogleGenAI, Type } from "@google/genai";
-import { PropBet, GameState } from "../types.ts";
+import { PropBet, GameState } from "../types";
 
-// Helper to get Gemini client using the shimmed process.env
 const getAi = () => new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 export const generateLiveProps = async (gameState: GameState): Promise<Partial<PropBet>[]> => {
