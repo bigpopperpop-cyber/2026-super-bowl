@@ -3,6 +3,8 @@ import {
   getFirestore, 
   collection, 
   addDoc, 
+  setDoc,
+  doc,
   query, 
   orderBy, 
   limit, 
@@ -10,26 +12,29 @@ import {
   serverTimestamp 
 } from 'firebase/firestore';
 
-// Explicitly define config using direct process.env access for Vite string replacement
+// Vite standard: Use import.meta.env primarily, fallback to process.env (for older platforms)
+const getV = (key: string) => {
+  const meta = (import.meta as any).env;
+  const proc = (typeof process !== 'undefined' ? process.env : {}) as any;
+  return meta?.[key] || proc?.[key] || "";
+};
+
 const firebaseConfig = {
-  apiKey: process.env.VITE_FIREBASE_API_KEY,
-  authDomain: process.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: process.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: process.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.VITE_FIREBASE_APP_ID
+  apiKey: getV('VITE_FIREBASE_API_KEY'),
+  authDomain: getV('VITE_FIREBASE_AUTH_DOMAIN'),
+  projectId: getV('VITE_FIREBASE_PROJECT_ID'),
+  storageBucket: getV('VITE_FIREBASE_STORAGE_BUCKET'),
+  messagingSenderId: getV('VITE_FIREBASE_MESSAGING_SENDER_ID'),
+  appId: getV('VITE_FIREBASE_APP_ID')
 };
 
 let db: any = null;
 
 const isValidConfig = (config: any) => {
-  // Check if keys exist and aren't just empty strings or literal "undefined" strings
-  const keys = ['apiKey', 'projectId', 'appId'];
-  return keys.every(key => 
-    config[key] && 
-    config[key] !== "" && 
-    config[key] !== "undefined" && 
-    config[key].length > 3
+  return (
+    config.apiKey?.length > 10 && 
+    config.projectId?.length > 3 && 
+    config.appId?.length > 10
   );
 };
 
@@ -37,15 +42,14 @@ if (isValidConfig(firebaseConfig)) {
   try {
     const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
     db = getFirestore(app);
-    console.log("Firebase initialized successfully.");
+    console.log("SBLIX LIVE: Grid synchronized.");
   } catch (error) {
-    console.warn("Firestore initialization error:", error);
+    console.warn("SBLIX LIVE ERROR: Database offline.");
   }
 } else {
-  console.log("Missing Firebase keys. Check Diagnostics in the app UI.");
+  console.log("SBLIX HUB: Running in local Party Mode (Missing Keys).");
 }
 
-// Helper to check which keys are missing for the UI diagnostic tool
 export const getMissingKeys = () => {
   const missing = [];
   if (!firebaseConfig.apiKey) missing.push("VITE_FIREBASE_API_KEY");
@@ -58,6 +62,8 @@ export {
   db, 
   collection, 
   addDoc, 
+  setDoc,
+  doc,
   query, 
   orderBy, 
   limit, 
