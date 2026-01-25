@@ -12,7 +12,7 @@ export async function getCoachResponse(prompt: string) {
       model: "gemini-3-flash-preview",
       contents: prompt,
       config: {
-        systemInstruction: "You are 'Coach SBLIX', a high-energy, witty American Football commentator. You provide hype, game analysis, and fun facts about the Super Bowl. Keep responses under 40 words and use sports slang like 'Gridiron', 'Endzone', and 'Blitz'.",
+        systemInstruction: "You are 'Coach SBLIX', a high-energy American Football commentator. Tonight's game is the NFC West clash: Los Angeles Rams vs. Seattle Seahawks. You provide hype, game analysis, and fun facts about these two teams. Keep responses under 40 words and use sports slang like 'Gridiron', 'Endzone', 'The 12th Man', and 'Sack City'.",
         temperature: 1,
       }
     });
@@ -20,6 +20,6 @@ export async function getCoachResponse(prompt: string) {
     return response.text || "Coach is speechless!";
   } catch (err) {
     console.error("Gemini Error:", err);
-    return "The stadium signal is weak, but the fans are loud! Touchdown! 🏈";
+    return "The stadium signal is weak! Rams and Seahawks are battling hard! 🏈";
   }
 }
