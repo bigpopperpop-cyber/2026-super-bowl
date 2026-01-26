@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { db, collection, addDoc, setDoc, doc, query, orderBy, limit, onSnapshot, serverTimestamp, getMissingKeys, saveManualConfig, clearManualConfig, getDoc } from './services/firebaseService';
+import { db, collection, addDoc, setDoc, doc, query, orderBy, limit, onSnapshot, serverTimestamp, getDoc } from './services/firebaseService';
 import { getCoachResponse, getPostGameAnalysis, getSidelineFact, getLiveScoreFromSearch, verifyPredictiveStats } from './services/geminiService';
 import { ChatMessage, User, TriviaQuestion, ScoreEntry, UserPrediction } from './types';
 
@@ -28,7 +28,6 @@ export default function App() {
   
   const [activeTab, setActiveTab] = useState<'chat' | 'trivia' | 'ranks'>('chat');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [inputText, setInputText] = useState('');
   const [status, setStatus] = useState<'Live' | 'Syncing' | 'Solo'>(db ? 'Syncing' : 'Solo');
   const [leaderboard, setLeaderboard] = useState<ScoreEntry[]>([]);
   const [answeredQuestions, setAnsweredQuestions] = useState<Set<string>>(new Set());
@@ -37,12 +36,66 @@ export default function App() {
   const [settledResults, setSettledResults] = useState<Record<string, number>>({});
   const [myPredictions, setMyPredictions] = useState<Record<string, number>>({});
   const [isVerifying, setIsVerifying] = useState(false);
+  const [isAutoUpdating, setIsAutoUpdating] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // BACKGROUND AUTOMATION: Automatically poll for scores and facts
+  useEffect(() => {
+    if (!user || !db) return;
+
+    const backgroundSync = async () => {
+      try {
+        const stateRef = doc(db, GAME_STATE_DOC, 'global');
+        const stateSnap = await getDoc(stateRef);
+        const data = stateSnap.exists() ? stateSnap.data() : {};
+        const now = Date.now();
+
+        // 1. AUTO SCORE SYNC (Every 5 Minutes)
+        const lastScoreCheck = data.lastScoreCheckTime || 0;
+        if (now - lastScoreCheck > 300000) {
+          setIsAutoUpdating(true);
+          // Set lock immediately to prevent other guests from searching at the same time
+          await setDoc(stateRef, { lastScoreCheckTime: now }, { merge: true });
+          
+          const update = await getLiveScoreFromSearch();
+          if (update && update.rams !== null) {
+            await setDoc(stateRef, {
+              ramsScore: update.rams,
+              seahawksScore: update.seahawks,
+              isHalftime: update.isHalftime,
+              scoreSources: update.sources
+            }, { merge: true });
+          }
+          setIsAutoUpdating(false);
+        }
+
+        // 2. AUTO SIDELINE FACT (Every 10 Minutes)
+        const lastFactTime = data.lastFactTime || 0;
+        if (now - lastFactTime > 600000) {
+          await setDoc(stateRef, { lastFactTime: now }, { merge: true });
+          const fact = await getSidelineFact();
+          await addDoc(collection(db, MSG_COLLECTION), {
+            senderId: SIDELINE_BOT_ID,
+            senderName: 'SIDELINE BOT 🤖',
+            text: fact,
+            timestamp: serverTimestamp()
+          });
+        }
+      } catch (err) {
+        console.error("Automation error:", err);
+        setIsAutoUpdating(false);
+      }
+    };
+
+    // Run once on load then every 30 seconds to check locks
+    backgroundSync();
+    const interval = setInterval(backgroundSync, 30000);
+    return () => clearInterval(interval);
+  }, [user]);
 
   useEffect(() => {
     if (!user || !db) return;
 
-    // Listen to Game State (Scores, Halftime, and Trivia Settlement)
     const unsubscribeGameState = onSnapshot(doc(db, GAME_STATE_DOC, 'global'), (snapshot) => {
       if (snapshot.exists()) {
         const data = snapshot.data();
@@ -51,19 +104,16 @@ export default function App() {
       }
     });
 
-    // Listen to Chat
     const q = query(collection(db, MSG_COLLECTION), orderBy('timestamp', 'asc'), limit(60));
     const unsubscribeChat = onSnapshot(q, (snapshot) => {
       setMessages(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as any);
       setStatus('Live');
     });
 
-    // Listen to Leaderboard
     const unsubscribeLeaderboard = onSnapshot(collection(db, RANK_COLLECTION), (snapshot) => {
       setLeaderboard(snapshot.docs.map(doc => doc.data() as ScoreEntry).sort((a, b) => b.points - a.points));
     });
 
-    // Listen to MY predictions
     const unsubscribeMyPredictions = onSnapshot(collection(db, PREDICTIONS_COLLECTION), (snapshot) => {
       const preds: Record<string, number> = {};
       snapshot.docs.filter(d => d.id.startsWith(user.id)).forEach(d => {
@@ -81,7 +131,6 @@ export default function App() {
     };
   }, [user]);
 
-  // Handle awarding points for newly settled predictive questions
   useEffect(() => {
     if (!user || !db) return;
     
@@ -105,33 +154,19 @@ export default function App() {
     if (!user || !db || answeredQuestions.has(q.id)) return;
 
     if (q.isPredictive) {
-      // Save prediction for later settlement
       await setDoc(doc(db, PREDICTIONS_COLLECTION, `${user.id}_${q.id}`), {
         userId: user.id,
         questionId: q.id,
         choice: idx,
         timestamp: serverTimestamp()
       });
-      alert("PREDICTION LOCKED! Points will be awarded when the play is official.");
     } else {
-      // Instant historical fact
       if (idx === q.correctIndex) {
         const current = leaderboard.find(s => s.userId === user.id) || { userId: user.id, userName: user.name, team: user.team || 'RAMS', points: 0, trophies: 0 };
         await setDoc(doc(db, RANK_COLLECTION, user.id), { ...current, points: current.points + q.points }, { merge: true });
-        alert(`TOUCHDOWN! +${q.points} PTS`);
-      } else {
-        alert("INCOMPLETE PASS! Fact check failed.");
       }
-      // Track instant answers locally since they don't go to Firestore predictions
       setAnsweredQuestions(prev => new Set(prev).add(q.id));
     }
-  };
-
-  const handleManualSettle = async (qId: string, correctIdx: number) => {
-    if (!db) return;
-    await setDoc(doc(db, GAME_STATE_DOC, 'global'), {
-      settledTrivia: { ...settledResults, [qId]: correctIdx }
-    }, { merge: true });
   };
 
   const aiAutoSettle = async () => {
@@ -148,6 +183,20 @@ export default function App() {
     setIsVerifying(false);
   };
 
+  const forceSyncScore = async () => {
+    setIsAutoUpdating(true);
+    const update = await getLiveScoreFromSearch();
+    if (update && update.rams !== null && db) {
+      await setDoc(doc(db, GAME_STATE_DOC, 'global'), {
+        ramsScore: update.rams,
+        seahawksScore: update.seahawks,
+        isHalftime: update.isHalftime,
+        lastScoreCheckTime: Date.now()
+      }, { merge: true });
+    }
+    setIsAutoUpdating(false);
+  };
+
   const handleJoin = (e: React.FormEvent) => {
     e.preventDefault();
     const name = (e.currentTarget.elements[0] as HTMLInputElement).value.toUpperCase();
@@ -161,7 +210,7 @@ export default function App() {
     return (
       <div className="flex items-center justify-center min-h-screen p-6 bg-slate-950">
         <div className="w-full max-w-md p-8 glass rounded-[2.5rem] text-center border border-white/10">
-          <h1 className="font-orbitron text-3xl font-black italic text-white mb-6 uppercase">SBLIX PARTY</h1>
+          <h1 className="font-orbitron text-3xl font-black italic text-white mb-6 uppercase tracking-tighter">SBLIX AUTO</h1>
           <form onSubmit={handleJoin} className="space-y-6">
             <input placeholder="ENTER HANDLE" className="w-full bg-slate-900 border border-white/10 rounded-2xl px-6 py-4 text-white font-black text-center uppercase outline-none focus:border-emerald-500 transition-all" />
             <button className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black py-5 rounded-2xl transition-all shadow-xl shadow-emerald-500/20 uppercase tracking-widest">JOIN BROADCAST</button>
@@ -176,44 +225,42 @@ export default function App() {
       <header className="p-6 glass border-b border-white/10 z-50">
         <div className="flex justify-between items-center mb-6">
           <div className="flex items-center gap-2">
-            <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
-            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">LIVE SBLIX HUB</span>
+            <div className={`w-2 h-2 rounded-full ${status === 'Live' ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`}></div>
+            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{status} HUB</span>
           </div>
-          <button onClick={() => setShowDiag(!showDiag)} className="text-slate-600 hover:text-white transition-colors"><i className="fas fa-cog"></i></button>
+          <div className="flex items-center gap-3">
+             {isAutoUpdating && <i className="fas fa-satellite-dish text-blue-500 text-[10px] animate-pulse"></i>}
+             <button onClick={() => setShowDiag(!showDiag)} className="text-slate-600 hover:text-white transition-colors"><i className="fas fa-cog"></i></button>
+          </div>
         </div>
 
         {showDiag && (
           <div className="mb-6 p-4 bg-black/80 rounded-2xl border border-white/10 space-y-4 animate-msgPop">
-            <p className="text-[10px] font-black text-emerald-500 uppercase italic">Host Stat Verification</p>
+            <p className="text-[10px] font-black text-emerald-500 uppercase italic">Admin Game Controls</p>
             <div className="space-y-3">
+              <button onClick={forceSyncScore} disabled={isAutoUpdating} className="w-full bg-emerald-600 py-3 rounded-xl text-[10px] font-black uppercase flex items-center justify-center gap-2">
+                <i className={`fas ${isAutoUpdating ? 'fa-sync fa-spin' : 'fa-search'}`}></i>
+                {isAutoUpdating ? 'Syncing Live Data...' : 'Manual Score Search'}
+              </button>
               <button onClick={aiAutoSettle} disabled={isVerifying} className="w-full bg-blue-600 py-3 rounded-xl text-[10px] font-black uppercase flex items-center justify-center gap-2">
                 <i className={`fas ${isVerifying ? 'fa-spinner fa-spin' : 'fa-robot'}`}></i>
-                {isVerifying ? 'Verifying Stats via Gemini...' : 'Verify All Predictive Stats'}
+                Verify Stat Predictions
               </button>
-              <div className="h-px bg-white/5"></div>
-              {TRIVIA_SET.filter(q => q.isPredictive).map(q => (
-                <div key={q.id} className="flex flex-col gap-2 p-3 bg-white/5 rounded-xl border border-white/5">
-                  <p className="text-[9px] text-slate-400 font-bold uppercase">{q.text}</p>
-                  <div className="flex gap-2">
-                    {q.options.map((opt, i) => (
-                      <button key={i} onClick={() => handleManualSettle(q.id, i)} className={`flex-1 py-1.5 rounded-lg text-[8px] font-black uppercase border ${settledResults[q.id] === i ? 'bg-emerald-500 border-emerald-400 text-white' : 'bg-slate-800 border-white/10 text-slate-500'}`}>
-                        {opt} {settledResults[q.id] === i ? '(SETTLED)' : ''}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ))}
             </div>
           </div>
         )}
 
-        <div className="flex justify-between items-center px-4 py-4 bg-black/40 rounded-3xl border border-white/5">
+        <div className="flex justify-between items-center px-4 py-4 bg-black/40 rounded-3xl border border-white/5 relative overflow-hidden">
+          {isAutoUpdating && <div className="absolute inset-0 bg-blue-500/5 animate-pulse pointer-events-none"></div>}
           <div className="text-center">
             <p className="text-[10px] font-black text-blue-500 uppercase mb-1">LAR</p>
             <p className="text-3xl font-orbitron font-black text-white italic">{gameScore.rams}</p>
           </div>
-          <div className="bg-emerald-500/10 border border-emerald-500/20 px-4 py-1.5 rounded-full">
-             <p className="text-[9px] font-black text-emerald-400 uppercase tracking-[0.2em] animate-pulse">Live Tracking</p>
+          <div className="text-center">
+             <div className="bg-emerald-500/10 border border-emerald-500/20 px-4 py-1.5 rounded-full mb-1">
+               <p className="text-[9px] font-black text-emerald-400 uppercase tracking-[0.2em] animate-pulse">Live Score</p>
+             </div>
+             <p className="text-[8px] font-black text-slate-600 uppercase">AUTO-SYNCING ON</p>
           </div>
           <div className="text-center">
             <p className="text-[10px] font-black text-emerald-500 uppercase mb-1">SEA</p>
@@ -259,7 +306,7 @@ export default function App() {
                     </span>
                     {isSettled && hasAnswered && (
                        <span className={`text-[10px] font-black ${wasCorrect ? 'text-emerald-500' : 'text-red-500'}`}>
-                         {wasCorrect ? 'WINNER!' : 'LOSS'}
+                         {wasCorrect ? 'WINNER!' : 'MISS'}
                        </span>
                     )}
                   </div>
@@ -267,8 +314,8 @@ export default function App() {
                   
                   {q.isPredictive && !isSettled && hasAnswered && (
                     <div className="mb-4 p-4 bg-blue-500/10 border border-blue-500/20 rounded-2xl text-center">
-                      <p className="text-[10px] font-black text-blue-400 uppercase italic animate-pulse">Waiting for Play Resolution...</p>
-                      <p className="text-[9px] text-slate-500 uppercase mt-1">Locked Choice: {q.options[myPick]}</p>
+                      <p className="text-[10px] font-black text-blue-400 uppercase italic animate-pulse">Waiting for official stats...</p>
+                      <p className="text-[9px] text-slate-500 uppercase mt-1">Your Pick: {q.options[myPick]}</p>
                     </div>
                   )}
 
@@ -281,7 +328,6 @@ export default function App() {
                         className={`w-full text-left px-5 py-4 rounded-2xl transition-all text-sm font-black border ${hasAnswered ? (isSettled ? (i === settledResults[q.id] ? 'bg-emerald-500 border-emerald-400 text-white' : (i === myPick ? 'bg-red-500/20 border-red-500/40 text-red-400' : 'bg-slate-900 border-white/5 text-slate-700')) : (i === myPick ? 'bg-blue-600 border-blue-400 text-white' : 'bg-slate-900 border-white/5 text-slate-700')) : 'bg-black/40 border-white/10 text-slate-300 hover:border-emerald-500 hover:text-white uppercase'}`}
                       >
                         {opt}
-                        {hasAnswered && i === myPick && !isSettled && <i className="fas fa-lock ml-2 text-[10px] opacity-50"></i>}
                       </button>
                     ))}
                   </div>
@@ -298,7 +344,7 @@ export default function App() {
                 <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-orbitron font-black text-xl ${i === 0 ? 'bg-yellow-400 text-yellow-900' : 'bg-black/40 text-slate-500'}`}>{i + 1}</div>
                 <div className="flex-1">
                   <p className="font-black text-sm uppercase text-white tracking-widest">{score.userName}</p>
-                  <p className="text-[9px] font-bold uppercase text-slate-400 opacity-60">Team Fan</p>
+                  <p className="text-[9px] font-bold uppercase text-slate-400 opacity-60">Super Fan</p>
                 </div>
                 <div className="text-right">
                   <p className="font-orbitron font-black text-lg text-white">{score.points}</p>
