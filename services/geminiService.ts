@@ -33,7 +33,7 @@ export async function verifyPredictiveStats(questions: any[]) {
   try {
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: `Search for the current stats for this NFL game (Rams vs Seahawks). Based on the live data, determine the correct answer index (0 or 1) for these questions: ${queries}. Format your response as a JSON object where keys are the question text and values are the correct index (0 or 1).`,
+      contents: `Search for the current stats for the Rams vs Seahawks game happening now. Based on live box scores, determine the correct answer index (0 or 1) for these questions: ${queries}. Format your response as a JSON object where keys are the question text and values are the correct index (0 or 1).`,
       config: {
         tools: [{ googleSearch: {} }],
         responseMimeType: "application/json",
@@ -52,11 +52,12 @@ export async function verifyPredictiveStats(questions: any[]) {
  */
 export async function getLiveScoreFromSearch() {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const now = new Date().toLocaleString();
   
   try {
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: "What is the current score of the NFL game between the Los Angeles Rams and the Seattle Seahawks right now? Also tell me if it is currently halftime. Format your response exactly like this: RAMS: [score], SEAHAWKS: [score], HALFTIME: [true/false]",
+      contents: `Search for the current live score of the NFL game between the Los Angeles Rams and the Seattle Seahawks (Current time: ${now}). What is the score and is it currently halftime? Respond ONLY with: RAMS: [score], SEAHAWKS: [score], HALFTIME: [true/false]`,
       config: {
         tools: [{ googleSearch: {} }],
       },
@@ -65,13 +66,19 @@ export async function getLiveScoreFromSearch() {
     const text = response.text || "";
     const sources = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
     
+    // Improved regex to handle various potential model outputs
     const ramsMatch = text.match(/RAMS:?\s*(\d+)/i);
     const seaMatch = text.match(/SEAHAWKS:?\s*(\d+)/i);
     const halfMatch = text.match(/HALFTIME:?\s*(true|false)/i);
 
+    if (!ramsMatch || !seaMatch) {
+        console.warn("Could not parse score from text:", text);
+        return null;
+    }
+
     return {
-      rams: ramsMatch ? parseInt(ramsMatch[1]) : null,
-      seahawks: seaMatch ? parseInt(seaMatch[1]) : null,
+      rams: parseInt(ramsMatch[1]),
+      seahawks: parseInt(seaMatch[1]),
       isHalftime: halfMatch ? halfMatch[1].toLowerCase() === 'true' : false,
       sources: sources.map((c: any) => c.web?.uri).filter(Boolean)
     };

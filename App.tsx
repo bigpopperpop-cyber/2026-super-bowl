@@ -37,9 +37,10 @@ export default function App() {
   const [myPredictions, setMyPredictions] = useState<Record<string, number>>({});
   const [isVerifying, setIsVerifying] = useState(false);
   const [isAutoUpdating, setIsAutoUpdating] = useState(false);
+  const [lastSyncTime, setLastSyncTime] = useState<number | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // BACKGROUND AUTOMATION: Automatically poll for scores and facts
+  // BACKGROUND AUTOMATION: Poll scores every 120 seconds (2 mins) for responsiveness
   useEffect(() => {
     if (!user || !db) return;
 
@@ -50,11 +51,11 @@ export default function App() {
         const data = stateSnap.exists() ? stateSnap.data() : {};
         const now = Date.now();
 
-        // 1. AUTO SCORE SYNC (Every 5 Minutes)
+        // 1. AUTO SCORE SYNC (Every 2 Minutes for high-octane updates)
         const lastScoreCheck = data.lastScoreCheckTime || 0;
-        if (now - lastScoreCheck > 300000) {
+        if (now - lastScoreCheck > 120000) { 
           setIsAutoUpdating(true);
-          // Set lock immediately to prevent other guests from searching at the same time
+          // Optimistically update timestamp to lock other clients immediately
           await setDoc(stateRef, { lastScoreCheckTime: now }, { merge: true });
           
           const update = await getLiveScoreFromSearch();
@@ -63,15 +64,19 @@ export default function App() {
               ramsScore: update.rams,
               seahawksScore: update.seahawks,
               isHalftime: update.isHalftime,
-              scoreSources: update.sources
+              scoreSources: update.sources,
+              lastSuccessfulSync: now
             }, { merge: true });
+          } else {
+            // If failed, reset lock earlier so someone else can try in 30s
+            await setDoc(stateRef, { lastScoreCheckTime: now - 90000 }, { merge: true });
           }
           setIsAutoUpdating(false);
         }
 
-        // 2. AUTO SIDELINE FACT (Every 10 Minutes)
+        // 2. AUTO SIDELINE FACT (Every 8 Minutes)
         const lastFactTime = data.lastFactTime || 0;
-        if (now - lastFactTime > 600000) {
+        if (now - lastFactTime > 480000) {
           await setDoc(stateRef, { lastFactTime: now }, { merge: true });
           const fact = await getSidelineFact();
           await addDoc(collection(db, MSG_COLLECTION), {
@@ -87,9 +92,8 @@ export default function App() {
       }
     };
 
-    // Run once on load then every 30 seconds to check locks
     backgroundSync();
-    const interval = setInterval(backgroundSync, 30000);
+    const interval = setInterval(backgroundSync, 30000); // Check every 30s if we need to be the "syncer"
     return () => clearInterval(interval);
   }, [user]);
 
@@ -101,6 +105,7 @@ export default function App() {
         const data = snapshot.data();
         setGameScore({ rams: data.ramsScore ?? 0, seahawks: data.seahawksScore ?? 0 });
         setSettledResults(data.settledTrivia ?? {});
+        setLastSyncTime(data.lastSuccessfulSync ?? null);
       }
     });
 
@@ -191,7 +196,8 @@ export default function App() {
         ramsScore: update.rams,
         seahawksScore: update.seahawks,
         isHalftime: update.isHalftime,
-        lastScoreCheckTime: Date.now()
+        lastScoreCheckTime: Date.now(),
+        lastSuccessfulSync: Date.now()
       }, { merge: true });
     }
     setIsAutoUpdating(false);
@@ -204,6 +210,13 @@ export default function App() {
     const newUser = { id: 'u' + Math.random().toString(36).substr(2, 5), name, team: 'RAMS' };
     setUser(newUser);
     localStorage.setItem('sblix_user_beta_v2', JSON.stringify(newUser));
+  };
+
+  const formatLastSync = () => {
+    if (!lastSyncTime) return "INITIALIZING...";
+    const secondsAgo = Math.floor((Date.now() - lastSyncTime) / 1000);
+    if (secondsAgo < 60) return "UPDATED SECONDS AGO";
+    return `UPDATED ${Math.floor(secondsAgo / 60)}M AGO`;
   };
 
   if (!user) {
@@ -240,7 +253,7 @@ export default function App() {
             <div className="space-y-3">
               <button onClick={forceSyncScore} disabled={isAutoUpdating} className="w-full bg-emerald-600 py-3 rounded-xl text-[10px] font-black uppercase flex items-center justify-center gap-2">
                 <i className={`fas ${isAutoUpdating ? 'fa-sync fa-spin' : 'fa-search'}`}></i>
-                {isAutoUpdating ? 'Syncing Live Data...' : 'Manual Score Search'}
+                {isAutoUpdating ? 'Syncing Live Data...' : 'Force Score Sync'}
               </button>
               <button onClick={aiAutoSettle} disabled={isVerifying} className="w-full bg-blue-600 py-3 rounded-xl text-[10px] font-black uppercase flex items-center justify-center gap-2">
                 <i className={`fas ${isVerifying ? 'fa-spinner fa-spin' : 'fa-robot'}`}></i>
@@ -258,9 +271,9 @@ export default function App() {
           </div>
           <div className="text-center">
              <div className="bg-emerald-500/10 border border-emerald-500/20 px-4 py-1.5 rounded-full mb-1">
-               <p className="text-[9px] font-black text-emerald-400 uppercase tracking-[0.2em] animate-pulse">Live Score</p>
+               <p className="text-[9px] font-black text-emerald-400 uppercase tracking-[0.2em] animate-pulse">Live Tracking</p>
              </div>
-             <p className="text-[8px] font-black text-slate-600 uppercase">AUTO-SYNCING ON</p>
+             <p className="text-[8px] font-black text-slate-600 uppercase tracking-tighter">{formatLastSync()}</p>
           </div>
           <div className="text-center">
             <p className="text-[10px] font-black text-emerald-500 uppercase mb-1">SEA</p>
