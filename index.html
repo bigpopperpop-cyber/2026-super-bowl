@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0, viewport-fit=cover" />
-  <title>SBLIX | Super Bowl Hub</title>
+  <title>SBLIX | Command Center</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
   <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
@@ -35,27 +35,56 @@
       0% { transform: translateY(-100%); }
       100% { transform: translateY(100%); }
     }
-    .scanline {
-      position: absolute;
+    .scanline-overlay {
+      position: fixed;
       top: 0; left: 0; width: 100%; height: 2px;
-      background: linear-gradient(to right, transparent, rgba(16, 185, 129, 0.1), transparent);
-      animation: scanline 8s linear infinite;
+      background: linear-gradient(to right, transparent, rgba(16, 185, 129, 0.15), transparent);
+      animation: scanline 4s linear infinite;
       pointer-events: none;
-      z-index: 100;
+      z-index: 999;
     }
-    .msg-animate {
-      animation: msgPop 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    .crt-flicker {
+      animation: flicker 0.15s infinite;
     }
-    @keyframes msgPop {
-      from { opacity: 0; transform: translateY(15px) scale(0.9); }
-      to { opacity: 1; transform: translateY(0) scale(1); }
+    @keyframes flicker {
+      0% { opacity: 0.97; }
+      50% { opacity: 1; }
+      100% { opacity: 0.98; }
     }
-    @keyframes pulse-glow {
-      0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4); }
-      70% { box-shadow: 0 0 0 20px rgba(16, 185, 129, 0); }
-      100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+    .btn-flicker:hover {
+      animation: btn-flicker 0.2s infinite;
     }
-    .pulse-glow { animation: pulse-glow 2s infinite; }
+    @keyframes btn-flicker {
+      0% { opacity: 0.8; }
+      50% { opacity: 1; }
+      100% { opacity: 0.9; }
+    }
+    @keyframes flash-blue {
+      0%, 100% { background-color: transparent; }
+      50% { background-color: rgba(59, 130, 246, 0.4); }
+    }
+    @keyframes flash-emerald {
+      0%, 100% { background-color: transparent; }
+      50% { background-color: rgba(16, 185, 129, 0.4); }
+    }
+    .flash-blue { animation: flash-blue 0.5s ease-out 3; }
+    .flash-emerald { animation: flash-emerald 0.5s ease-out 3; }
+    
+    .ticker-wrap {
+      width: 100%;
+      overflow: hidden;
+      background-color: rgba(0, 0, 0, 0.9);
+      padding: 4px 0;
+    }
+    .ticker {
+      display: inline-block;
+      white-space: nowrap;
+      animation: ticker-anim 20s linear infinite;
+    }
+    @keyframes ticker-anim {
+      0% { transform: translateX(100%); }
+      100% { transform: translateX(-100%); }
+    }
   </style>
 <script type="importmap">
 {
@@ -71,7 +100,8 @@
 }
 </script>
 </head>
-<body>
+<body class="crt-flicker">
+  <div class="scanline-overlay"></div>
   <div id="root"></div>
   <script type="module" src="index.tsx"></script>
 </body>
