@@ -1,8 +1,21 @@
-
 import React, { useState, useEffect, useRef } from 'react';
-import { db, collection, addDoc, setDoc, doc, query, orderBy, limit, onSnapshot, serverTimestamp, getDoc } from './services/firebaseService';
+import { 
+  db, 
+  collection, 
+  addDoc, 
+  setDoc, 
+  doc, 
+  query, 
+  orderBy, 
+  limit, 
+  onSnapshot, 
+  serverTimestamp, 
+  getDoc,
+  saveManualConfig,
+  getMissingKeys
+} from './services/firebaseService';
 import { getCoachResponse, getSidelineFact, getLiveScoreFromSearch, analyzeMomentum } from './services/geminiService';
-import { ChatMessage, User, TriviaQuestion, ScoreEntry } from './types';
+import { ChatMessage, User } from './types';
 
 const MSG_COLLECTION = 'hub_v5_messages';
 const GAME_STATE_DOC = 'hub_v5_state';
@@ -42,38 +55,43 @@ export default function App() {
     if (!user || !db) return;
 
     const runAutomation = async () => {
-      const stateRef = doc(db, GAME_STATE_DOC, 'global');
-      const stateSnap = await getDoc(stateRef);
-      const data = stateSnap.exists() ? stateSnap.data() : {};
-      const now = Date.now();
+      try {
+        const stateRef = doc(db, GAME_STATE_DOC, 'global');
+        const stateSnap = await getDoc(stateRef);
+        const data = stateSnap.exists() ? stateSnap.data() : {};
+        const now = Date.now();
 
-      if (now - (data.lastUpdate || 0) > 45000) {
-        setIsSyncing(true);
-        const score = await getLiveScoreFromSearch();
-        if (score) {
-          const intel = await analyzeMomentum({ rams: score.score1, seahawks: score.score2 });
-          const tickerFact = await getSidelineFact();
-          
-          await setDoc(stateRef, {
-            s1: score.score1, s2: score.score2,
-            t1: score.team1, t2: score.team2,
-            status: score.status,
-            momentum: intel.momentum,
-            ticker: `${intel.intel.toUpperCase()} | ${tickerFact.toUpperCase()}`,
-            bigPlayTrigger: intel.isBigPlay ? now : (data.bigPlayTrigger || 0),
-            lastUpdate: now,
-            sources: [...(score.sources || []), ...(intel.sources || [])]
-          }, { merge: true });
+        if (now - (data.lastUpdate || 0) > 45000) {
+          setIsSyncing(true);
+          const score = await getLiveScoreFromSearch();
+          if (score) {
+            const intel = await analyzeMomentum({ rams: score.score1, seahawks: score.score2 });
+            const tickerFact = await getSidelineFact();
+            
+            await setDoc(stateRef, {
+              s1: score.score1, s2: score.score2,
+              t1: score.team1, t2: score.team2,
+              status: score.status,
+              momentum: intel.momentum,
+              ticker: `${intel.intel.toUpperCase()} | ${tickerFact.toUpperCase()}`,
+              bigPlayTrigger: intel.isBigPlay ? now : (data.bigPlayTrigger || 0),
+              lastUpdate: now,
+              sources: [...(score.sources || []), ...(intel.sources || [])]
+            }, { merge: true });
 
-          if (intel.isBigPlay) {
-            await addDoc(collection(db, MSG_COLLECTION), {
-              senderId: 'sideline_bot_ai',
-              senderName: 'COMBAT CONTROLLER',
-              text: `URGENT: ${intel.intel}`,
-              timestamp: serverTimestamp()
-            });
+            if (intel.isBigPlay) {
+              await addDoc(collection(db, MSG_COLLECTION), {
+                senderId: 'sideline_bot_ai',
+                senderName: 'COMBAT CONTROLLER',
+                text: `URGENT: ${intel.intel}`,
+                timestamp: serverTimestamp()
+              });
+            }
           }
+          setIsSyncing(false);
         }
+      } catch (err) {
+        console.error("Automation error:", err);
         setIsSyncing(false);
       }
     };
@@ -91,7 +109,6 @@ export default function App() {
       if (snap.exists()) {
         const data = snap.data();
         setGameScore(data as any);
-        // Detect "Big Play" flash from other clients
         if (data.bigPlayTrigger > (gameScore.bigPlayTrigger || 0)) {
            setFlashType(data.s1 > data.s2 ? 'blue' : 'emerald');
            setTimeout(() => setFlashType(null), 1500);
@@ -105,7 +122,6 @@ export default function App() {
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     });
 
-    // Real-time Momentum Tug-of-War (Reactive Hype)
     const qHype = query(collection(db, HYPE_COLLECTION), orderBy('timestamp', 'desc'), limit(10));
     const unsubHype = onSnapshot(qHype, async (snap) => {
       if (!snap.empty) {
@@ -113,8 +129,6 @@ export default function App() {
         const t1Hype = hypes.filter(h => h.team === 'T1').length;
         const t2Hype = hypes.filter(h => h.team === 'T2').length;
         setIntensity(t1Hype + t2Hype);
-        
-        // Push local hype shift to momentum bar (Visual Only for local speed)
         const shift = (t2Hype - t1Hype) * 2;
         setGameScore(prev => ({...prev, momentum: Math.max(0, Math.min(100, prev.momentum + shift))}));
       }
@@ -138,11 +152,11 @@ export default function App() {
     localStorage.setItem('sblix_u5', JSON.stringify(newUser));
   };
 
-  const teamColor = user?.team === 'T1' ? 'blue' : 'emerald';
+  // Logic: Show Config if DB missing, then Join if User missing, then Main App
+  if (!db) return <ConfigScreen />;
+  if (!user) return <JoinScreen onJoin={handleJoin} />;
 
-  if (!user) {
-    return <JoinScreen onJoin={handleJoin} />;
-  }
+  const teamColor = user.team === 'T1' ? 'blue' : 'emerald';
 
   return (
     <div className={`flex flex-col h-screen max-w-lg mx-auto bg-slate-950 text-white overflow-hidden relative ${flashType === 'blue' ? 'flash-blue' : flashType === 'emerald' ? 'flash-emerald' : ''}`}>
@@ -244,7 +258,6 @@ export default function App() {
 
         {activeTab === 'ranks' && (
           <div className="space-y-3 pb-20">
-            {/* Fixed: Removed stray 'r' undefined variable reference from line 234 */}
             {[{n: 'COLONEL_FOOTBALL', p: 4500, t: 'T1'}, {n: 'STADIUM_SNIPER', p: 3100, t: 'T2'}, {n: user.name, p: 1200, t: user.team}].map((r, i) => (
               <div key={i} className={`flex items-center gap-4 p-5 glass rounded-3xl border ${r.n === user.name ? `border-${teamColor}-500` : 'border-white/5'}`}>
                  <div className="w-10 h-10 rounded-xl bg-black/60 flex items-center justify-center font-black text-emerald-500">{i+1}</div>
@@ -271,8 +284,8 @@ export default function App() {
            <form onSubmit={(e) => {
              e.preventDefault();
              const input = e.currentTarget.elements[0] as HTMLInputElement;
-             if (!input.value.trim()) return;
-             addDoc(collection(db!, MSG_COLLECTION), {
+             if (!input.value.trim() || !db) return;
+             addDoc(collection(db, MSG_COLLECTION), {
                senderId: user.id,
                senderName: user.name,
                text: input.value,
@@ -286,7 +299,7 @@ export default function App() {
         </div>
       )}
 
-      {/* BROADCAST TICKER - Lists Search Grounding URLs as per MUST requirements */}
+      {/* BROADCAST TICKER */}
       <div className="h-7 bg-black border-t border-white/10 flex items-center overflow-hidden z-[100]">
          <div className="ticker-wrap w-full">
             <div className="ticker font-orbitron font-black text-[9px] text-emerald-500 uppercase tracking-widest space-x-20">
@@ -345,6 +358,50 @@ function JoinScreen({ onJoin }: { onJoin: (n: string, t: 'T1' | 'T2') => void })
           className={`w-full bg-${team === 'T1' ? 'blue' : 'emerald'}-600 text-white font-black py-6 rounded-3xl transition-all shadow-2xl uppercase tracking-[0.2em] text-xl btn-flicker active:scale-95 ${isFlickering ? 'animate-pulse' : ''}`}
         >
           CONNECT TO FEED
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ConfigScreen() {
+  const [config, setConfig] = useState('');
+  const missing = getMissingKeys();
+
+  return (
+    <div className="flex items-center justify-center min-h-screen p-6 bg-slate-950 text-white font-inter">
+      <div className="max-w-md w-full glass p-10 rounded-[2.5rem] space-y-8 border-red-500/20">
+        <div className="text-center">
+          <i className="fas fa-exclamation-triangle text-4xl text-yellow-500 mb-4 animate-bounce"></i>
+          <h2 className="text-2xl font-orbitron font-black italic uppercase">Config Required</h2>
+          <p className="text-xs text-slate-400 mt-2">Firebase initialization failed. Provide a valid configuration to establish the Hub.</p>
+        </div>
+
+        <div className="space-y-4">
+          <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl">
+            <p className="text-[9px] font-black text-red-400 uppercase mb-2">Missing Environment Variables:</p>
+            <ul className="text-[10px] space-y-1 text-slate-300">
+              {missing.map(k => <li key={k}>• {k}</li>)}
+            </ul>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-[8px] font-black text-slate-500 uppercase px-2">Paste Firebase Config JSON</label>
+            <textarea 
+              rows={5}
+              value={config}
+              onChange={e => setConfig(e.target.value)}
+              placeholder='{ "apiKey": "...", "projectId": "...", ... }'
+              className="w-full bg-black/60 border border-white/10 rounded-2xl p-4 text-[10px] font-mono outline-none focus:border-blue-500"
+            />
+          </div>
+        </div>
+
+        <button 
+          onClick={() => saveManualConfig(config)}
+          className="w-full bg-blue-600 py-4 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-blue-500 transition-all shadow-xl shadow-blue-500/20"
+        >
+          INITIALIZE HANDSHAKE
         </button>
       </div>
     </div>
