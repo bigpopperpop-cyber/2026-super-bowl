@@ -11,7 +11,7 @@ export async function getCoachResponse(prompt: string) {
       model: "gemini-3-flash-preview",
       contents: prompt,
       config: {
-        systemInstruction: "You are 'Coach SBLIX', a high-energy American Football commentator. Tonight's game is the NFC West clash: Los Angeles Rams vs. Seattle Seahawks. You provide hype, game analysis, and fun facts about these two teams. Keep responses under 40 words and use sports slang like 'Gridiron', 'Endzone', 'The 12th Man', and 'Sack City'.",
+        systemInstruction: "You are 'Coach SBLIX', a high-energy American Football commentator. You are covering Super Bowl LIX and the road to the championship. You provide hype, game analysis, and fun facts. Keep responses under 40 words and use sports slang like 'Gridiron', 'Endzone', and 'Lombardi Trophy'.",
         temperature: 1,
       }
     });
@@ -19,7 +19,7 @@ export async function getCoachResponse(prompt: string) {
     return response.text || "Coach is speechless!";
   } catch (err) {
     console.error("Gemini Error:", err);
-    return "The stadium signal is weak! Rams and Seahawks are battling hard! 🏈";
+    return "The stadium signal is weak! The battle is heating up! 🏈";
   }
 }
 
@@ -33,7 +33,7 @@ export async function verifyPredictiveStats(questions: any[]) {
   try {
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: `Search for the current stats for the Rams vs Seahawks game happening now. Based on live box scores, determine the correct answer index (0 or 1) for these questions: ${queries}. Format your response as a JSON object where keys are the question text and values are the correct index (0 or 1).`,
+      contents: `Search for the current stats for Super Bowl LIX or the most recent NFL playoff game. Based on live box scores, determine the correct answer index (0 or 1) for these questions: ${queries}. Format your response as a JSON object where keys are the question text and values are the correct index (0 or 1).`,
       config: {
         tools: [{ googleSearch: {} }],
         responseMimeType: "application/json",
@@ -55,9 +55,10 @@ export async function getLiveScoreFromSearch() {
   const now = new Date().toLocaleString();
   
   try {
+    // We search for Super Bowl LIX or the most current live NFL game
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: `Search for the current live score of the NFL game between the Los Angeles Rams and the Seattle Seahawks (Current time: ${now}). What is the score and is it currently halftime? Respond ONLY with: RAMS: [score], SEAHAWKS: [score], HALFTIME: [true/false]`,
+      contents: `Search for the live score of Super Bowl LIX (February 2025) or the most recent NFL game if that hasn't started yet. Current local time: ${now}. What is the score? Respond exactly in this format: TEAM1: [Name], SCORE1: [score], TEAM2: [Name], SCORE2: [score], STATUS: [Live/Scheduled/Final/Halftime]`,
       config: {
         tools: [{ googleSearch: {} }],
       },
@@ -66,20 +67,30 @@ export async function getLiveScoreFromSearch() {
     const text = response.text || "";
     const sources = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
     
-    // Improved regex to handle various potential model outputs
-    const ramsMatch = text.match(/RAMS:?\s*(\d+)/i);
-    const seaMatch = text.match(/SEAHAWKS:?\s*(\d+)/i);
-    const halfMatch = text.match(/HALFTIME:?\s*(true|false)/i);
+    // Flexible regex to catch names and scores
+    const t1Match = text.match(/TEAM1:?\s*([\w\s]+),/i);
+    const s1Match = text.match(/SCORE1:?\s*(\d+)/i);
+    const t2Match = text.match(/TEAM2:?\s*([\w\s]+),/i);
+    const s2Match = text.match(/SCORE2:?\s*(\d+)/i);
+    const statusMatch = text.match(/STATUS:?\s*(\w+)/i);
 
-    if (!ramsMatch || !seaMatch) {
-        console.warn("Could not parse score from text:", text);
-        return null;
+    if (!s1Match || !s2Match) {
+        return {
+            rams: 0,
+            seahawks: 0,
+            isHalftime: false,
+            status: 'Searching...',
+            sources: []
+        };
     }
 
     return {
-      rams: parseInt(ramsMatch[1]),
-      seahawks: parseInt(seaMatch[1]),
-      isHalftime: halfMatch ? halfMatch[1].toLowerCase() === 'true' : false,
+      team1: t1Match ? t1Match[1].trim() : "TEAM A",
+      rams: parseInt(s1Match[1]),
+      team2: t2Match ? t2Match[1].trim() : "TEAM B",
+      seahawks: parseInt(s2Match[1]),
+      isHalftime: statusMatch ? statusMatch[1].toLowerCase() === 'halftime' : false,
+      status: statusMatch ? statusMatch[1].toUpperCase() : 'LIVE',
       sources: sources.map((c: any) => c.web?.uri).filter(Boolean)
     };
   } catch (err) {
@@ -89,7 +100,7 @@ export async function getLiveScoreFromSearch() {
 }
 
 /**
- * Generates a deep-cut historical or statistical fact about the Rams/Seahawks matchup.
+ * Generates a deep-cut historical or statistical fact about the Super Bowl.
  */
 export async function getSidelineFact() {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
@@ -97,41 +108,36 @@ export async function getSidelineFact() {
   try {
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: "Give me one interesting, high-energy historical fact or obscure stat about the Rams vs Seahawks rivalry. It could be about a specific player (like Aaron Donald or Marshawn Lynch), a legendary game, or a weird stat. Keep it under 30 words and very hype!",
+      contents: "Give me one legendary Super Bowl history fact or an obscure stat about Super Bowl LIX. Keep it under 30 words and very hype!",
       config: {
-        systemInstruction: "You are 'SBLIX SIDELINE BOT'. You provide automated, data-driven nuggets of wisdom during the broadcast. You are punchy, professional, and use lots of tech/data emojis like 📊, 📉, 🤖.",
+        systemInstruction: "You are 'SBLIX SIDELINE BOT'. You provide automated nuggets of football wisdom. Use 📊, 📉, 🤖.",
         temperature: 0.9,
       }
     });
-    return response.text || "Did you know? These two teams always play it close! 🏈";
+    return response.text || "Super Bowl LIX is the ultimate stage! 🏟️";
   } catch (err) {
-    return "NFC West Fact: The rivalry between these two is one of the most physical in the NFL! 🏟️";
+    return "NFL Fact: The Super Bowl is the most watched single-day sporting event in the US! 🏟️";
   }
 }
 
 /**
- * Generates a post-game summary based on the final scores and player rankings.
+ * Generates a post-game summary.
  */
 export async function getPostGameAnalysis(scoreData: any, leaderboard: any[]) {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  
-  const leaderboardSummary = leaderboard.map((u, i) => `${i+1}. ${u.userName} (${u.points} pts)`).join(", ");
-  const prompt = `Tonight's Final: Rams ${scoreData.rams} - Seahawks ${scoreData.seahawks}. 
-  The top fans in the SBLIX Hub were: ${leaderboardSummary}. 
-  Write a 60-word post-game 'Locker Room Recap' in your Coach SBLIX voice. 
-  Praise the winner of the game, shout out the MVP fan (the #1 ranked user), and mention the intense battle on the field.`;
+  const prompt = `Game Finished. Score: ${scoreData.rams} to ${scoreData.seahawks}. Write a 60-word hype recap.`;
 
   try {
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
       contents: prompt,
       config: {
-        systemInstruction: "You are Coach SBLIX. You are doing a post-game radio broadcast. You are energetic, professional, but definitely a bit of a football fanatic. Use lots of emojis.",
+        systemInstruction: "You are Coach SBLIX. Recap the Super Bowl win with maximum energy.",
         temperature: 0.8,
       }
     });
     return response.text;
   } catch (err) {
-    return "What a game! Technical difficulties prevent the full breakdown, but the energy in the stadium was ELECTRIC! 🏈🔥";
+    return "What a game! History was made tonight! 🏈🔥";
   }
 }

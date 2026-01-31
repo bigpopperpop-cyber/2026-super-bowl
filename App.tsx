@@ -6,11 +6,11 @@ import { ChatMessage, User, TriviaQuestion, ScoreEntry, UserPrediction } from '.
 const TRIVIA_SET: TriviaQuestion[] = [
   { id: 'q1', text: "Where did the Rams play before moving to Los Angeles?", options: ["Cleveland", "St. Louis", "Anaheim", "San Diego"], correctIndex: 0, points: 100 },
   { id: 'q2', text: "Which Seahawks player is known as 'Beast Mode'?", options: ["Shaun Alexander", "Marshawn Lynch", "DK Metcalf", "Tyler Lockett"], correctIndex: 1, points: 100 },
-  { id: 'q3', text: "Over/Under: Will Matthew Stafford throw for 2+ Touchdowns tonight?", options: ["OVER", "UNDER"], correctIndex: 0, points: 250, isPredictive: true },
+  { id: 'q3', text: "Over/Under: Will there be a 50+ yard field goal tonight?", options: ["OVER", "UNDER"], correctIndex: 0, points: 250, isPredictive: true },
   { id: 'q4', text: "How many Super Bowl titles do the Seattle Seahawks have?", options: ["0", "1", "2", "3"], correctIndex: 1, points: 100 },
   { id: 'q5', text: "Which Rams defender has 3 NFL DPOY awards?", options: ["Jalen Ramsey", "Aaron Donald", "Bobby Wagner", "Ernest Jones"], correctIndex: 1, points: 100 },
   { id: 'q6', text: "Over/Under: Combined sacks tonight will be 5.5?", options: ["OVER", "UNDER"], correctIndex: 0, points: 200, isPredictive: true },
-  { id: 'q9', text: "Over/Under: DK Metcalf records 75.5+ receiving yards?", options: ["OVER", "UNDER"], correctIndex: 1, points: 250, isPredictive: true },
+  { id: 'q9', text: "Over/Under: Will any receiver record 100+ yards?", options: ["OVER", "UNDER"], correctIndex: 1, points: 250, isPredictive: true },
   { id: 'h3', text: "Predict the total points for the 3rd Quarter (Both Teams).", options: ["0-10", "11+"], correctIndex: 0, points: 500, isPredictive: true }
 ];
 
@@ -31,7 +31,7 @@ export default function App() {
   const [status, setStatus] = useState<'Live' | 'Syncing' | 'Solo'>(db ? 'Syncing' : 'Solo');
   const [leaderboard, setLeaderboard] = useState<ScoreEntry[]>([]);
   const [answeredQuestions, setAnsweredQuestions] = useState<Set<string>>(new Set());
-  const [gameScore, setGameScore] = useState({ rams: 0, seahawks: 0 });
+  const [gameScore, setGameScore] = useState({ rams: 0, seahawks: 0, team1: "TBD", team2: "TBD", status: "PENDING" });
   const [showDiag, setShowDiag] = useState(false);
   const [settledResults, setSettledResults] = useState<Record<string, number>>({});
   const [myPredictions, setMyPredictions] = useState<Record<string, number>>({});
@@ -40,7 +40,7 @@ export default function App() {
   const [lastSyncTime, setLastSyncTime] = useState<number | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // BACKGROUND AUTOMATION: Poll scores every 120 seconds (2 mins) for responsiveness
+  // BACKGROUND AUTOMATION: Poll scores and sync state across all guests
   useEffect(() => {
     if (!user || !db) return;
 
@@ -51,32 +51,40 @@ export default function App() {
         const data = stateSnap.exists() ? stateSnap.data() : {};
         const now = Date.now();
 
-        // 1. AUTO SCORE SYNC (Every 2 Minutes for high-octane updates)
+        // Ensure doc exists even if empty
+        if (!stateSnap.exists()) {
+           await setDoc(stateRef, { lastScoreCheckTime: 0, ramsScore: 0, seahawksScore: 0, team1: "TBD", team2: "TBD" });
+        }
+
+        // 1. AUTO SCORE SYNC (Every 2 Minutes)
         const lastScoreCheck = data.lastScoreCheckTime || 0;
         if (now - lastScoreCheck > 120000) { 
           setIsAutoUpdating(true);
-          // Optimistically update timestamp to lock other clients immediately
+          // Lock sync immediately
           await setDoc(stateRef, { lastScoreCheckTime: now }, { merge: true });
           
           const update = await getLiveScoreFromSearch();
-          if (update && update.rams !== null) {
+          if (update) {
             await setDoc(stateRef, {
               ramsScore: update.rams,
               seahawksScore: update.seahawks,
+              team1: update.team1 || "TBD",
+              team2: update.team2 || "TBD",
+              gameStatus: update.status || "LIVE",
               isHalftime: update.isHalftime,
               scoreSources: update.sources,
               lastSuccessfulSync: now
             }, { merge: true });
           } else {
-            // If failed, reset lock earlier so someone else can try in 30s
+            // Failed? Reset lock to allow retry sooner
             await setDoc(stateRef, { lastScoreCheckTime: now - 90000 }, { merge: true });
           }
           setIsAutoUpdating(false);
         }
 
-        // 2. AUTO SIDELINE FACT (Every 8 Minutes)
+        // 2. AUTO SIDELINE FACT (Every 10 Minutes)
         const lastFactTime = data.lastFactTime || 0;
-        if (now - lastFactTime > 480000) {
+        if (now - lastFactTime > 600000) {
           await setDoc(stateRef, { lastFactTime: now }, { merge: true });
           const fact = await getSidelineFact();
           await addDoc(collection(db, MSG_COLLECTION), {
@@ -93,7 +101,7 @@ export default function App() {
     };
 
     backgroundSync();
-    const interval = setInterval(backgroundSync, 30000); // Check every 30s if we need to be the "syncer"
+    const interval = setInterval(backgroundSync, 30000);
     return () => clearInterval(interval);
   }, [user]);
 
@@ -103,7 +111,13 @@ export default function App() {
     const unsubscribeGameState = onSnapshot(doc(db, GAME_STATE_DOC, 'global'), (snapshot) => {
       if (snapshot.exists()) {
         const data = snapshot.data();
-        setGameScore({ rams: data.ramsScore ?? 0, seahawks: data.seahawksScore ?? 0 });
+        setGameScore({ 
+          rams: data.ramsScore ?? 0, 
+          seahawks: data.seahawksScore ?? 0,
+          team1: data.team1 ?? "TBD",
+          team2: data.team2 ?? "TBD",
+          status: data.gameStatus ?? "LIVE"
+        });
         setSettledResults(data.settledTrivia ?? {});
         setLastSyncTime(data.lastSuccessfulSync ?? null);
       }
@@ -174,33 +188,29 @@ export default function App() {
     }
   };
 
-  const aiAutoSettle = async () => {
-    setIsVerifying(true);
-    const predictiveOnes = TRIVIA_SET.filter(q => q.isPredictive && settledResults[q.id] === undefined);
-    const results = await verifyPredictiveStats(predictiveOnes);
-    if (results && db) {
-      const mappedResults: Record<string, number> = { ...settledResults };
-      predictiveOnes.forEach(q => {
-        if (results[q.text] !== undefined) mappedResults[q.id] = results[q.text];
-      });
-      await setDoc(doc(db, GAME_STATE_DOC, 'global'), { settledTrivia: mappedResults }, { merge: true });
-    }
-    setIsVerifying(false);
-  };
-
   const forceSyncScore = async () => {
     setIsAutoUpdating(true);
     const update = await getLiveScoreFromSearch();
-    if (update && update.rams !== null && db) {
+    if (update && db) {
       await setDoc(doc(db, GAME_STATE_DOC, 'global'), {
         ramsScore: update.rams,
         seahawksScore: update.seahawks,
-        isHalftime: update.isHalftime,
+        team1: update.team1,
+        team2: update.team2,
+        gameStatus: update.status,
         lastScoreCheckTime: Date.now(),
         lastSuccessfulSync: Date.now()
       }, { merge: true });
     }
     setIsAutoUpdating(false);
+  };
+
+  const formatLastSync = () => {
+    if (isAutoUpdating) return "SEARCHING LIVE DATA...";
+    if (!lastSyncTime) return "CONNECTING TO BROADCAST...";
+    const secondsAgo = Math.floor((Date.now() - lastSyncTime) / 1000);
+    if (secondsAgo < 60) return "SYNCED SECONDS AGO";
+    return `SYNCED ${Math.floor(secondsAgo / 60)}M AGO`;
   };
 
   const handleJoin = (e: React.FormEvent) => {
@@ -212,21 +222,14 @@ export default function App() {
     localStorage.setItem('sblix_user_beta_v2', JSON.stringify(newUser));
   };
 
-  const formatLastSync = () => {
-    if (!lastSyncTime) return "INITIALIZING...";
-    const secondsAgo = Math.floor((Date.now() - lastSyncTime) / 1000);
-    if (secondsAgo < 60) return "UPDATED SECONDS AGO";
-    return `UPDATED ${Math.floor(secondsAgo / 60)}M AGO`;
-  };
-
   if (!user) {
     return (
       <div className="flex items-center justify-center min-h-screen p-6 bg-slate-950">
         <div className="w-full max-w-md p-8 glass rounded-[2.5rem] text-center border border-white/10">
-          <h1 className="font-orbitron text-3xl font-black italic text-white mb-6 uppercase tracking-tighter">SBLIX AUTO</h1>
+          <h1 className="font-orbitron text-3xl font-black italic text-white mb-6 uppercase tracking-tighter">SBLIX LIX</h1>
           <form onSubmit={handleJoin} className="space-y-6">
-            <input placeholder="ENTER HANDLE" className="w-full bg-slate-900 border border-white/10 rounded-2xl px-6 py-4 text-white font-black text-center uppercase outline-none focus:border-emerald-500 transition-all" />
-            <button className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black py-5 rounded-2xl transition-all shadow-xl shadow-emerald-500/20 uppercase tracking-widest">JOIN BROADCAST</button>
+            <input placeholder="ENTER PARTY HANDLE" className="w-full bg-slate-900 border border-white/10 rounded-2xl px-6 py-4 text-white font-black text-center uppercase outline-none focus:border-emerald-500 transition-all" />
+            <button className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black py-5 rounded-2xl transition-all shadow-xl shadow-emerald-500/20 uppercase tracking-widest">JOIN LIVE HUB</button>
           </form>
         </div>
       </div>
@@ -241,42 +244,33 @@ export default function App() {
             <div className={`w-2 h-2 rounded-full ${status === 'Live' ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`}></div>
             <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{status} HUB</span>
           </div>
-          <div className="flex items-center gap-3">
-             {isAutoUpdating && <i className="fas fa-satellite-dish text-blue-500 text-[10px] animate-pulse"></i>}
-             <button onClick={() => setShowDiag(!showDiag)} className="text-slate-600 hover:text-white transition-colors"><i className="fas fa-cog"></i></button>
-          </div>
+          <button onClick={() => setShowDiag(!showDiag)} className="text-slate-600 hover:text-white transition-colors"><i className="fas fa-cog"></i></button>
         </div>
 
         {showDiag && (
           <div className="mb-6 p-4 bg-black/80 rounded-2xl border border-white/10 space-y-4 animate-msgPop">
-            <p className="text-[10px] font-black text-emerald-500 uppercase italic">Admin Game Controls</p>
-            <div className="space-y-3">
-              <button onClick={forceSyncScore} disabled={isAutoUpdating} className="w-full bg-emerald-600 py-3 rounded-xl text-[10px] font-black uppercase flex items-center justify-center gap-2">
-                <i className={`fas ${isAutoUpdating ? 'fa-sync fa-spin' : 'fa-search'}`}></i>
-                {isAutoUpdating ? 'Syncing Live Data...' : 'Force Score Sync'}
-              </button>
-              <button onClick={aiAutoSettle} disabled={isVerifying} className="w-full bg-blue-600 py-3 rounded-xl text-[10px] font-black uppercase flex items-center justify-center gap-2">
-                <i className={`fas ${isVerifying ? 'fa-spinner fa-spin' : 'fa-robot'}`}></i>
-                Verify Stat Predictions
-              </button>
-            </div>
+            <p className="text-[10px] font-black text-emerald-500 uppercase italic">Host Controls</p>
+            <button onClick={forceSyncScore} disabled={isAutoUpdating} className="w-full bg-emerald-600 py-3 rounded-xl text-[10px] font-black uppercase flex items-center justify-center gap-2">
+              <i className={`fas ${isAutoUpdating ? 'fa-sync fa-spin' : 'fa-satellite'}`}></i>
+              {isAutoUpdating ? 'Connecting to NFL Sat...' : 'Force Score Sync'}
+            </button>
           </div>
         )}
 
         <div className="flex justify-between items-center px-4 py-4 bg-black/40 rounded-3xl border border-white/5 relative overflow-hidden">
-          {isAutoUpdating && <div className="absolute inset-0 bg-blue-500/5 animate-pulse pointer-events-none"></div>}
-          <div className="text-center">
-            <p className="text-[10px] font-black text-blue-500 uppercase mb-1">LAR</p>
+          {isAutoUpdating && <div className="absolute inset-0 bg-emerald-500/5 animate-pulse pointer-events-none"></div>}
+          <div className="text-center w-24">
+            <p className="text-[9px] font-black text-blue-500 uppercase mb-1 truncate">{gameScore.team1}</p>
             <p className="text-3xl font-orbitron font-black text-white italic">{gameScore.rams}</p>
           </div>
           <div className="text-center">
              <div className="bg-emerald-500/10 border border-emerald-500/20 px-4 py-1.5 rounded-full mb-1">
-               <p className="text-[9px] font-black text-emerald-400 uppercase tracking-[0.2em] animate-pulse">Live Tracking</p>
+               <p className="text-[9px] font-black text-emerald-400 uppercase tracking-[0.2em] animate-pulse">{gameScore.status}</p>
              </div>
              <p className="text-[8px] font-black text-slate-600 uppercase tracking-tighter">{formatLastSync()}</p>
           </div>
-          <div className="text-center">
-            <p className="text-[10px] font-black text-emerald-500 uppercase mb-1">SEA</p>
+          <div className="text-center w-24">
+            <p className="text-[9px] font-black text-emerald-500 uppercase mb-1 truncate">{gameScore.team2}</p>
             <p className="text-3xl font-orbitron font-black text-white italic">{gameScore.seahawks}</p>
           </div>
         </div>
@@ -357,7 +351,7 @@ export default function App() {
                 <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-orbitron font-black text-xl ${i === 0 ? 'bg-yellow-400 text-yellow-900' : 'bg-black/40 text-slate-500'}`}>{i + 1}</div>
                 <div className="flex-1">
                   <p className="font-black text-sm uppercase text-white tracking-widest">{score.userName}</p>
-                  <p className="text-[9px] font-bold uppercase text-slate-400 opacity-60">Super Fan</p>
+                  <p className="text-[9px] font-bold uppercase text-slate-400 opacity-60">Hub Legend</p>
                 </div>
                 <div className="text-right">
                   <p className="font-orbitron font-black text-lg text-white">{score.points}</p>
