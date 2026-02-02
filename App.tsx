@@ -12,6 +12,7 @@ import {
   serverTimestamp, 
   getDoc,
   saveManualConfig,
+  clearManualConfig,
   getMissingKeys
 } from './services/firebaseService';
 import { getCoachResponse, getSidelineFact, getLiveScoreFromSearch, analyzeMomentum } from './services/geminiService';
@@ -137,6 +138,13 @@ export default function App() {
     return () => { unsubState(); unsubChat(); unsubHype(); };
   }, [user]);
 
+  const handleResetSession = () => {
+    if (confirm("TERMINATE SESSION? This will reset your callsign and team selection.")) {
+      localStorage.removeItem('sblix_u5');
+      window.location.reload();
+    }
+  };
+
   const sendHype = async () => {
     if (!db || !user) return;
     await addDoc(collection(db, HYPE_COLLECTION), {
@@ -152,7 +160,6 @@ export default function App() {
     localStorage.setItem('sblix_u5', JSON.stringify(newUser));
   };
 
-  // Logic: Show Config if DB missing, then Join if User missing, then Main App
   if (!db) return <ConfigScreen />;
   if (!user) return <JoinScreen onJoin={handleJoin} />;
 
@@ -167,9 +174,18 @@ export default function App() {
             <span className={`w-1.5 h-1.5 rounded-full bg-${teamColor}-500 animate-pulse`}></span>
             <span className="text-[8px] font-black text-slate-500 uppercase tracking-[0.3em]">SECURE COMMS ESTABLISHED</span>
           </div>
-          <div className="flex items-center gap-1.5 text-[8px] font-black text-slate-500">
-             {isSyncing ? <i className="fas fa-satellite fa-spin text-blue-400"></i> : <i className="fas fa-radar text-emerald-500"></i>}
-             SBLIX_INTEL_ACTIVE
+          <div className="flex items-center gap-3">
+             <div className="flex items-center gap-1.5 text-[8px] font-black text-slate-500">
+                {isSyncing ? <i className="fas fa-satellite fa-spin text-blue-400"></i> : <i className="fas fa-radar text-emerald-500"></i>}
+                SBLIX_INTEL_ACTIVE
+             </div>
+             <button 
+               onClick={handleResetSession}
+               className="w-6 h-6 rounded-lg bg-red-500/10 border border-red-500/20 flex items-center justify-center hover:bg-red-500/20 transition-all text-red-500 text-[10px]"
+               title="RESET SESSION"
+             >
+               <i className="fas fa-power-off"></i>
+             </button>
           </div>
         </div>
 
@@ -397,12 +413,21 @@ function ConfigScreen() {
           </div>
         </div>
 
-        <button 
-          onClick={() => saveManualConfig(config)}
-          className="w-full bg-blue-600 py-4 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-blue-500 transition-all shadow-xl shadow-blue-500/20"
-        >
-          INITIALIZE HANDSHAKE
-        </button>
+        <div className="flex flex-col gap-3">
+          <button 
+            onClick={() => saveManualConfig(config)}
+            className="w-full bg-blue-600 py-4 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-blue-500 transition-all shadow-xl shadow-blue-500/20"
+          >
+            INITIALIZE HANDSHAKE
+          </button>
+          
+          <button 
+            onClick={clearManualConfig}
+            className="w-full bg-slate-800 py-3 rounded-2xl font-black text-[9px] text-slate-400 uppercase tracking-widest hover:bg-slate-700 transition-all"
+          >
+            CLEAR LOCAL CONFIG
+          </button>
+        </div>
       </div>
     </div>
   );
