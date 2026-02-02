@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   db, 
@@ -21,6 +22,18 @@ import { ChatMessage, User } from './types';
 const MSG_COLLECTION = 'hub_v5_messages';
 const GAME_STATE_DOC = 'hub_v5_state';
 const HYPE_COLLECTION = 'hub_v5_hype';
+const PREDICTIONS_COLLECTION = 'hub_v5_predictions';
+
+const PREDICTION_TASKS = [
+  { id: 'q1', label: 'COIN TOSS WINNER', options: ['RAMS', 'SEAHAWKS'], type: 'choice' },
+  { id: 'q2', label: 'FIRST STRIKE (TEAM)', options: ['RAMS', 'SEAHAWKS'], type: 'choice' },
+  { id: 'q3', label: '1ST HALF PASSING YDS', options: ['UNDER 240.5', 'OVER 240.5'], type: 'choice' },
+  { id: 'q4', label: 'TURNOVER COUNT', options: ['UNDER 2.5', 'OVER 2.5'], type: 'choice' },
+  { id: 'q5', label: 'TOTAL TOUCHDOWNS', options: ['UNDER 5.5', 'OVER 5.5'], type: 'choice' },
+  { id: 'q6', label: '50+ YD FIELD GOAL', options: ['NEGATIVE', 'CONFIRMED'], type: 'choice' },
+  { id: 'q7', label: 'MVP OPERATIVE', options: ['QB', 'WR', 'RB', 'DEF/SPEC'], type: 'choice' },
+  { id: 'q8', label: 'MAX DOMINANCE GAP', options: ['UNDER 10.5', 'OVER 10.5'], type: 'choice' },
+];
 
 export default function App() {
   const [user, setUser] = useState<(User & { team: 'T1' | 'T2' }) | null>(() => {
@@ -49,6 +62,11 @@ export default function App() {
   const [intensity, setIntensity] = useState(0);
   const [flashType, setFlashType] = useState<'blue' | 'emerald' | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [predictions, setPredictions] = useState<Record<string, string>>({});
+  const [finalScorePred, setFinalScorePred] = useState({ s1: '', s2: '' });
+  const [isSavingStakes, setIsSavingStakes] = useState(false);
+  const [hasSavedStakes, setHasSavedStakes] = useState(false);
+  
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Background Automation
@@ -135,6 +153,19 @@ export default function App() {
       }
     });
 
+    // Check if user already has predictions
+    const checkPreds = async () => {
+      const predRef = doc(db, PREDICTIONS_COLLECTION, user.id);
+      const snap = await getDoc(predRef);
+      if (snap.exists()) {
+        const data = snap.data();
+        setPredictions(data.choices || {});
+        setFinalScorePred(data.finalScore || { s1: '', s2: '' });
+        setHasSavedStakes(true);
+      }
+    };
+    checkPreds();
+
     return () => { unsubState(); unsubChat(); unsubHype(); };
   }, [user]);
 
@@ -143,6 +174,31 @@ export default function App() {
       localStorage.removeItem('sblix_u5');
       window.location.reload();
     }
+  };
+
+  const handleSaveStakes = async () => {
+    if (!db || !user) return;
+    setIsSavingStakes(true);
+    try {
+      await setDoc(doc(db, PREDICTIONS_COLLECTION, user.id), {
+        userId: user.id,
+        userName: user.name,
+        choices: predictions,
+        finalScore: finalScorePred,
+        timestamp: serverTimestamp()
+      });
+      setHasSavedStakes(true);
+      // Small automated message to celebrate
+      await addDoc(collection(db, MSG_COLLECTION), {
+        senderId: 'sideline_bot_ai',
+        senderName: 'COMBAT CONTROLLER',
+        text: `LOGISTICS UPDATE: OPERATIVE ${user.name} HAS SEALED THEIR PREDICTION VAULT. PROBABILITY ANALYSIS INITIATED.`,
+        timestamp: serverTimestamp()
+      });
+    } catch (e) {
+      console.error(e);
+    }
+    setIsSavingStakes(false);
   };
 
   const sendHype = async () => {
@@ -252,22 +308,85 @@ export default function App() {
         )}
 
         {activeTab === 'stakes' && (
-          <div className="space-y-6 py-4">
-             <div className="p-8 text-center glass border border-white/10 rounded-[2.5rem] space-y-4">
-                <i className={`fas fa-lock text-4xl text-${teamColor}-500 mb-2`}></i>
-                <h2 className="font-orbitron font-black text-xl uppercase italic">The Prediction Vault</h2>
-                <p className="text-xs text-slate-400">Locking in your predictions. The Intel Officer will grade your tactical accuracy after the final whistle.</p>
-                <div className="grid grid-cols-2 gap-4 mt-8">
-                   <div className="bg-black/40 p-4 rounded-2xl border border-white/5">
-                      <p className="text-[8px] font-black text-slate-500 mb-2">RAMS SCORE</p>
-                      <input type="number" className="w-full bg-transparent text-center font-orbitron font-black text-2xl outline-none" placeholder="00" />
-                   </div>
-                   <div className="bg-black/40 p-4 rounded-2xl border border-white/5">
-                      <p className="text-[8px] font-black text-slate-500 mb-2">SEA SCORE</p>
-                      <input type="number" className="w-full bg-transparent text-center font-orbitron font-black text-2xl outline-none" placeholder="00" />
-                   </div>
+          <div className="space-y-6 py-4 pb-20">
+             <div className="p-6 glass border border-white/10 rounded-[2rem] space-y-8 relative overflow-hidden">
+                <div className="absolute top-0 right-0 p-4 opacity-10">
+                   <i className={`fas fa-shIELD-alt text-6xl text-${teamColor}-500`}></i>
                 </div>
-                <button className={`w-full py-5 rounded-2xl bg-${teamColor}-600 font-black uppercase tracking-widest mt-6 hover:bg-${teamColor}-500 transition-all`}>SEAL PREDICTION</button>
+                
+                <div className="text-center">
+                   <h2 className="font-orbitron font-black text-xl uppercase italic mb-1">MISSION MANIFEST</h2>
+                   <p className="text-[8px] font-black text-slate-500 tracking-[0.4em] uppercase">SBLIX_TACTICAL_FORECAST_V5.0</p>
+                </div>
+
+                <div className="space-y-6">
+                  {PREDICTION_TASKS.map((task) => (
+                    <div key={task.id} className="space-y-3">
+                       <label className="text-[8px] font-black text-slate-500 uppercase tracking-widest px-1">{task.label}</label>
+                       <div className="grid grid-cols-2 gap-2">
+                          {task.options.map((opt) => (
+                            <button
+                              key={opt}
+                              disabled={hasSavedStakes}
+                              onClick={() => setPredictions(prev => ({ ...prev, [task.id]: opt }))}
+                              className={`py-3 rounded-xl text-[9px] font-black uppercase transition-all border ${
+                                predictions[task.id] === opt 
+                                  ? `bg-${teamColor}-600 border-${teamColor}-500 text-white shadow-lg shadow-${teamColor}-500/20` 
+                                  : 'bg-black/40 border-white/5 text-slate-500 hover:text-slate-300'
+                              } ${hasSavedStakes && predictions[task.id] !== opt ? 'opacity-30' : ''}`}
+                            >
+                              {opt}
+                            </button>
+                          ))}
+                       </div>
+                    </div>
+                  ))}
+
+                  <div className="space-y-3 pt-4 border-t border-white/5">
+                     <label className="text-[8px] font-black text-slate-500 uppercase tracking-widest px-1">FINAL SCORE EXTRACTION</label>
+                     <div className="grid grid-cols-2 gap-4">
+                        <div className="bg-black/40 p-4 rounded-2xl border border-white/5">
+                           <p className="text-[7px] font-black text-slate-500 mb-2 uppercase">{gameScore.t1}</p>
+                           <input 
+                             type="number" 
+                             disabled={hasSavedStakes}
+                             value={finalScorePred.s1}
+                             onChange={(e) => setFinalScorePred(prev => ({ ...prev, s1: e.target.value }))}
+                             className="w-full bg-transparent text-center font-orbitron font-black text-2xl outline-none" 
+                             placeholder="00" 
+                           />
+                        </div>
+                        <div className="bg-black/40 p-4 rounded-2xl border border-white/5">
+                           <p className="text-[7px] font-black text-slate-500 mb-2 uppercase">{gameScore.t2}</p>
+                           <input 
+                             type="number" 
+                             disabled={hasSavedStakes}
+                             value={finalScorePred.s2}
+                             onChange={(e) => setFinalScorePred(prev => ({ ...prev, s2: e.target.value }))}
+                             className="w-full bg-transparent text-center font-orbitron font-black text-2xl outline-none" 
+                             placeholder="00" 
+                           />
+                        </div>
+                     </div>
+                  </div>
+                </div>
+
+                {!hasSavedStakes ? (
+                  <button 
+                    onClick={handleSaveStakes}
+                    disabled={isSavingStakes}
+                    className={`w-full py-5 rounded-2xl bg-${teamColor}-600 font-black uppercase tracking-[0.2em] mt-8 hover:bg-${teamColor}-500 transition-all flex items-center justify-center gap-3 shadow-xl shadow-${teamColor}-500/20`}
+                  >
+                    {isSavingStakes ? <i className="fas fa-spinner fa-spin"></i> : <i className="fas fa-fingerprint"></i>}
+                    {isSavingStakes ? 'PROCESSING...' : 'SEAL VAULT'}
+                  </button>
+                ) : (
+                  <div className="mt-8 p-6 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl text-center">
+                    <i className="fas fa-check-double text-2xl text-emerald-500 mb-2"></i>
+                    <p className="text-[10px] font-black text-emerald-400 uppercase tracking-widest">VAULT LOCKED & SEALED</p>
+                    <p className="text-[7px] text-slate-500 mt-1">LOGISTICS TRANSMITTED TO COMMAND CENTER</p>
+                  </div>
+                )}
              </div>
           </div>
         )}
