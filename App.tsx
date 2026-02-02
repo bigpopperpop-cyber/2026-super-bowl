@@ -74,11 +74,10 @@ export default function App() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [predictions, setPredictions] = useState<Record<string, string>>({});
   const [sidePredictions, setSidePredictions] = useState<Record<string, string>>({});
-  const [finalScorePred, setFinalScorePred] = useState({ s1: '', s2: '' });
-  const [isSavingStakes, setIsSavingStakes] = useState(false);
   const [hasSavedStakes, setHasSavedStakes] = useState(false);
   const [hasSavedSide, setHasSavedSide] = useState(false);
   const [hasVotedRedzone, setHasVotedRedzone] = useState(false);
+  const [shareToast, setShareToast] = useState(false);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const sideMessagesEndRef = useRef<HTMLDivElement>(null);
@@ -100,7 +99,6 @@ export default function App() {
           if (score) {
             const intel = await analyzeMomentum({ rams: score.score1, seahawks: score.score2 });
             const tickerFact = await getSidelineFact();
-            
             const newRedzoneId = intel.redzoneTeam ? `rz_${score.score1}_${score.score2}_${now}` : null;
 
             await setDoc(stateRef, {
@@ -153,7 +151,6 @@ export default function App() {
           }
           return { ...prev, ...data };
         });
-        
         if (data.bigPlayTrigger > (gameScore.bigPlayTrigger || 0)) {
            setFlashType(data.s1 > data.s2 ? 'blue' : 'emerald');
            setTimeout(() => setFlashType(null), 1500);
@@ -175,6 +172,26 @@ export default function App() {
 
     return () => { unsubState(); unsubChat(); unsubSideChat(); };
   }, [user]);
+
+  const handleShare = async () => {
+    const shareData = {
+      title: 'SBLIX Command Center',
+      text: 'JOIN THE SUPER BOWL COMMAND FEED. LOCK IN YOUR PREDICTIONS NOW.',
+      url: window.location.href
+    };
+
+    try {
+      if (navigator.share) {
+        await navigator.share(shareData);
+      } else {
+        await navigator.clipboard.writeText(window.location.href);
+        setShareToast(true);
+        setTimeout(() => setShareToast(false), 2000);
+      }
+    } catch (err) {
+      console.error('Share failed', err);
+    }
+  };
 
   const handleRedzoneVote = async (choice: string) => {
     if (!db || !user || !gameScore.redzoneId) return;
@@ -210,7 +227,7 @@ export default function App() {
   };
 
   if (!db) return <ConfigScreen />;
-  if (!user) return <JoinScreen onJoin={handleJoin} />;
+  if (!user) return <JoinScreen onJoin={handleJoin} onInvite={handleShare} />;
 
   const teamColorKey = user.team === 'T1' ? 'blue' : 'emerald';
   const activeColorKey = activeTab === 'side' ? 'amber' : teamColorKey;
@@ -220,6 +237,13 @@ export default function App() {
   return (
     <div className={`flex flex-col h-screen max-w-lg mx-auto bg-slate-950 text-white overflow-hidden relative ${flashType === 'blue' ? 'flash-blue' : flashType === 'emerald' ? 'flash-emerald' : flashType === 'red' ? 'flash-red' : ''}`}>
       
+      {/* SHARE TOAST */}
+      {shareToast && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[2000] px-6 py-2 bg-emerald-500 text-white font-black text-[10px] uppercase rounded-full shadow-2xl animate-bounce">
+          MISSION LINK COPIED TO CLIPBOARD
+        </div>
+      )}
+
       {/* REDZONE OVERLAY */}
       {gameScore.redzoneTeam && !hasVotedRedzone && (
         <div className="absolute inset-0 z-[1000] bg-red-950/95 flex flex-col items-center justify-center p-8 animate-pulse border-4 border-red-600 m-2 rounded-[2.5rem] backdrop-blur-xl">
@@ -228,7 +252,6 @@ export default function App() {
               <h1 className="font-orbitron text-4xl font-black italic tracking-tighter text-white">REDZONE ALERT</h1>
               <p className="text-red-400 font-black text-xs uppercase tracking-[0.4em]">{gameScore.redzoneTeam} HAS BREACHED THE 20</p>
            </div>
-           
            <div className="w-full space-y-4">
               <p className="text-center text-[10px] font-black text-slate-400 uppercase mb-4 tracking-widest">SELECT TACTICAL OUTCOME [+500 XP]</p>
               {['TOUCHDOWN', 'FIELD GOAL', 'REJECTED'].map(choice => (
@@ -241,7 +264,6 @@ export default function App() {
                 </button>
               ))}
            </div>
-           
            <p className="mt-10 text-[8px] font-black text-red-700 uppercase tracking-widest animate-pulse">LOCK IN BEFORE THE SNAP</p>
         </div>
       )}
@@ -253,12 +275,11 @@ export default function App() {
             <span className={`w-1.5 h-1.5 rounded-full ${activeTheme.main} animate-pulse`}></span>
             <span className="text-[7px] font-black text-slate-500 uppercase tracking-[0.3em]">SECURE COMMS ESTABLISHED</span>
           </div>
-          <div className="flex items-center gap-3">
-             <div className="flex items-center gap-1.5 text-[7px] font-black text-slate-500">
-                {isSyncing ? <i className="fas fa-satellite fa-spin text-blue-400"></i> : <i className="fas fa-radar text-emerald-500"></i>}
-                INTEL_FEED_ACTIVE
-             </div>
-             <button onClick={handleResetSession} className="w-5 h-5 rounded bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-500 text-[8px]"><i className="fas fa-power-off"></i></button>
+          <div className="flex items-center gap-2">
+             <button onClick={handleShare} className="h-6 px-3 rounded bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-500 text-[8px] font-black uppercase tracking-widest gap-1.5">
+                <i className="fas fa-user-plus"></i> INVITE
+             </button>
+             <button onClick={handleResetSession} className="w-6 h-6 rounded bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-500 text-[10px]"><i className="fas fa-power-off"></i></button>
           </div>
         </div>
 
@@ -269,7 +290,6 @@ export default function App() {
               <p className={`text-[8px] font-black uppercase mb-0.5 ${gameScore.s1 >= gameScore.s2 ? 'text-blue-400' : 'text-slate-600'}`}>{gameScore.t1}</p>
               <p className={`text-2xl font-orbitron font-black italic ${gameScore.s1 >= gameScore.s2 ? 'text-white' : 'text-slate-500'}`}>{gameScore.s1}</p>
             </div>
-            
             <div className="flex flex-col items-center flex-1 mx-2">
               <div className="px-2 py-0.5 bg-white/5 rounded-full mb-2 border border-white/5">
                 <span className={`text-[6px] font-black ${gameScore.redzoneTeam ? 'text-red-500 animate-pulse' : 'text-emerald-400'} uppercase tracking-widest`}>
@@ -281,7 +301,6 @@ export default function App() {
                 <div style={{ width: `${gameScore.momentum}%` }} className="h-full bg-emerald-500 transition-all duration-300"></div>
               </div>
             </div>
-
             <div className="text-center w-16">
               <p className={`text-[8px] font-black uppercase mb-0.5 ${gameScore.s2 >= gameScore.s1 ? 'text-emerald-400' : 'text-slate-600'}`}>{gameScore.t2}</p>
               <p className={`text-2xl font-orbitron font-black italic ${gameScore.s2 >= gameScore.s1 ? 'text-white' : 'text-slate-500'}`}>{gameScore.s2}</p>
@@ -344,7 +363,6 @@ export default function App() {
                    <h2 className="font-orbitron font-black text-lg uppercase italic text-amber-500 mb-1">SIDE MISSION MANIFEST</h2>
                    <p className="text-[7px] font-black text-slate-500 tracking-[0.3em] uppercase">COMMERCIAL_INTEL_V5.0</p>
                 </div>
-
                 <div className="space-y-5">
                   {SIDE_TASKS.map((task) => (
                     <div key={task.id} className="space-y-2">
@@ -371,29 +389,9 @@ export default function App() {
                     </div>
                   ))}
                 </div>
-
                 {!hasSavedSide && (
                   <button onClick={() => setHasSavedSide(true)} className="w-full py-4 rounded-xl bg-amber-600 font-black uppercase tracking-[0.2em] mt-4 hover:bg-amber-500 shadow-xl shadow-amber-500/20">SEAL SIDE OPS</button>
                 )}
-             </div>
-
-             <div className="space-y-4 pt-6">
-                <div className="flex items-center gap-2 mb-2 px-2">
-                   <div className="h-px flex-1 bg-amber-500/20"></div>
-                   <span className="text-[8px] font-black text-amber-500 uppercase tracking-widest">SIDE COMMS</span>
-                   <div className="h-px flex-1 bg-amber-500/20"></div>
-                </div>
-                {sideMessages.map((msg, i) => (
-                  <div key={msg.id || i} className={`flex flex-col ${msg.senderId === user.id ? 'items-end' : 'items-start'}`}>
-                    <span className="text-[7px] font-black uppercase text-amber-500/40 mb-0.5 px-2">{msg.senderName}</span>
-                    <div className={`max-w-[85%] px-4 py-2.5 rounded-2xl text-[13px] ${
-                      msg.senderId === user.id ? `bg-amber-600 text-white rounded-tr-none` : `bg-slate-900 border border-amber-500/20 text-slate-200 rounded-tl-none`
-                    }`}>
-                      {msg.text}
-                    </div>
-                  </div>
-                ))}
-                <div ref={sideMessagesEndRef} />
              </div>
           </div>
         )}
@@ -507,13 +505,18 @@ export default function App() {
   );
 }
 
-function JoinScreen({ onJoin }: { onJoin: (n: string, t: 'T1' | 'T2') => void }) {
+function JoinScreen({ onJoin, onInvite }: { onJoin: (n: string, t: 'T1' | 'T2') => void, onInvite: () => void }) {
   const [name, setName] = useState('');
   const [team, setTeam] = useState<'T1' | 'T2'>('T1');
   return (
     <div className={`flex items-center justify-center min-h-screen p-6 ${team === 'T1' ? 'bg-blue-950' : 'bg-emerald-950'} relative overflow-hidden`}>
       <div className="w-full max-w-md p-10 glass rounded-[3rem] text-center border-white/10 shadow-2xl relative z-10 space-y-10">
-        <h1 className="font-orbitron text-4xl font-black italic text-white mb-2 tracking-tighter">SBLIX LIX</h1>
+        <div>
+          <h1 className="font-orbitron text-4xl font-black italic text-white mb-2 tracking-tighter">SBLIX LIX</h1>
+          <button onClick={onInvite} className="mt-2 text-[8px] font-black text-emerald-400 uppercase tracking-[0.3em] bg-emerald-500/10 border border-emerald-500/20 px-4 py-2 rounded-full hover:bg-emerald-500/20 active:scale-95 transition-all">
+            <i className="fas fa-user-plus mr-1.5"></i> INVITE SQUAD TO FEED
+          </button>
+        </div>
         <div className="space-y-6">
           <input value={name} onChange={e => setName(e.target.value.toUpperCase())} placeholder="CALLSIGN" className="w-full bg-black/40 border border-white/10 rounded-2xl px-6 py-4 text-white font-black text-center uppercase outline-none focus:border-emerald-500 text-xl" />
           <div className="grid grid-cols-2 gap-4">
