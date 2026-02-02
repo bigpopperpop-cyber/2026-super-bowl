@@ -24,6 +24,7 @@ const SIDE_MSG_COLLECTION = 'hub_v5_side_messages';
 const GAME_STATE_DOC = 'hub_v5_state';
 const HYPE_COLLECTION = 'hub_v5_hype';
 const PREDICTIONS_COLLECTION = 'hub_v5_predictions';
+const REDZONE_PICKS_COLLECTION = 'hub_v5_redzone_picks';
 
 const PREDICTION_TASKS = [
   { id: 'q1', label: 'COIN TOSS WINNER', options: ['RAMS', 'SEAHAWKS'] },
@@ -46,32 +47,11 @@ const SIDE_TASKS = [
   { id: 's7', label: 'GATORADE COLOR', options: ['RED/ORANGE', 'CLEAR/WATER', 'PURPLE/BLUE', 'YELLOW/GREEN'] },
 ];
 
-// Color mapping for Tailwind JIT/CDN reliability
 const themeStyles = {
-  blue: {
-    main: 'bg-blue-600',
-    border: 'border-blue-500',
-    text: 'text-blue-400',
-    glow: 'shadow-blue-500/20',
-    bgLight: 'bg-blue-500/10',
-    ring: 'ring-blue-500'
-  },
-  emerald: {
-    main: 'bg-emerald-600',
-    border: 'border-emerald-500',
-    text: 'text-emerald-400',
-    glow: 'shadow-emerald-500/20',
-    bgLight: 'bg-emerald-500/10',
-    ring: 'ring-emerald-500'
-  },
-  amber: {
-    main: 'bg-amber-600',
-    border: 'border-amber-500',
-    text: 'text-amber-400',
-    glow: 'shadow-amber-500/20',
-    bgLight: 'bg-amber-500/10',
-    ring: 'ring-amber-500'
-  }
+  blue: { main: 'bg-blue-600', border: 'border-blue-500', text: 'text-blue-400', glow: 'shadow-blue-500/20', bgLight: 'bg-blue-500/10' },
+  emerald: { main: 'bg-emerald-600', border: 'border-emerald-500', text: 'text-emerald-400', glow: 'shadow-emerald-500/20', bgLight: 'bg-emerald-500/10' },
+  amber: { main: 'bg-amber-600', border: 'border-amber-500', text: 'text-amber-400', glow: 'shadow-amber-500/20', bgLight: 'bg-amber-500/10' },
+  red: { main: 'bg-red-600', border: 'border-red-500', text: 'text-red-400', glow: 'shadow-red-500/20', bgLight: 'bg-red-500/20' }
 };
 
 export default function App() {
@@ -88,9 +68,9 @@ export default function App() {
   const [gameScore, setGameScore] = useState({ 
     s1: 0, s2: 0, t1: "RAMS", t2: "SEAHAWKS", status: "LIVE", 
     momentum: 50, ticker: "ESTABLISHING SECURE CONNECTION...", 
-    bigPlayTrigger: 0, sources: []
+    bigPlayTrigger: 0, sources: [], redzoneTeam: null, redzoneId: null
   });
-  const [flashType, setFlashType] = useState<'blue' | 'emerald' | null>(null);
+  const [flashType, setFlashType] = useState<'blue' | 'emerald' | 'red' | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [predictions, setPredictions] = useState<Record<string, string>>({});
   const [sidePredictions, setSidePredictions] = useState<Record<string, string>>({});
@@ -98,6 +78,7 @@ export default function App() {
   const [isSavingStakes, setIsSavingStakes] = useState(false);
   const [hasSavedStakes, setHasSavedStakes] = useState(false);
   const [hasSavedSide, setHasSavedSide] = useState(false);
+  const [hasVotedRedzone, setHasVotedRedzone] = useState(false);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const sideMessagesEndRef = useRef<HTMLDivElement>(null);
@@ -120,6 +101,9 @@ export default function App() {
             const intel = await analyzeMomentum({ rams: score.score1, seahawks: score.score2 });
             const tickerFact = await getSidelineFact();
             
+            // Generate a Redzone ID if one team is in the redzone
+            const newRedzoneId = intel.redzoneTeam ? `rz_${score.score1}_${score.score2}_${now}` : null;
+
             await setDoc(stateRef, {
               s1: score.score1, s2: score.score2,
               t1: score.team1, t2: score.team2,
@@ -128,7 +112,9 @@ export default function App() {
               ticker: `${intel.intel.toUpperCase()} | ${tickerFact.toUpperCase()}`,
               bigPlayTrigger: intel.isBigPlay ? now : (data.bigPlayTrigger || 0),
               lastUpdate: now,
-              sources: [...(score.sources || []), ...(intel.sources || [])]
+              sources: [...(score.sources || []), ...(intel.sources || [])],
+              redzoneTeam: intel.redzoneTeam || null,
+              redzoneId: newRedzoneId || (intel.redzoneTeam ? data.redzoneId : null)
             }, { merge: true });
 
             if (intel.isBigPlay) {
@@ -160,7 +146,16 @@ export default function App() {
     const unsubState = onSnapshot(doc(db, GAME_STATE_DOC, 'global'), (snap) => {
       if (snap.exists()) {
         const data = snap.data();
-        setGameScore(prev => ({ ...prev, ...data }));
+        setGameScore(prev => {
+          // Trigger Redzone Flash locally if new redzone detected
+          if (data.redzoneId && data.redzoneId !== prev.redzoneId) {
+             setFlashType('red');
+             setHasVotedRedzone(false);
+             setTimeout(() => setFlashType(null), 1000);
+          }
+          return { ...prev, ...data };
+        });
+        
         if (data.bigPlayTrigger > (gameScore.bigPlayTrigger || 0)) {
            setFlashType(data.s1 > data.s2 ? 'blue' : 'emerald');
            setTimeout(() => setFlashType(null), 1500);
@@ -180,74 +175,34 @@ export default function App() {
       setTimeout(() => sideMessagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
     });
 
-    // Check existing predictions
-    const checkPreds = async () => {
-      try {
-        const predRef = doc(db, PREDICTIONS_COLLECTION, user.id);
-        const snap = await getDoc(predRef);
-        if (snap.exists()) {
-          const data = snap.data();
-          setPredictions(data.choices || {});
-          setSidePredictions(data.sideChoices || {});
-          setFinalScorePred(data.finalScore || { s1: '', s2: '' });
-          setHasSavedStakes(!!data.choices);
-          setHasSavedSide(!!data.sideChoices);
-        }
-      } catch (e) { console.warn("Prediction sync error", e); }
-    };
-    checkPreds();
-
     return () => { unsubState(); unsubChat(); unsubSideChat(); };
   }, [user]);
+
+  const handleRedzoneVote = async (choice: string) => {
+    if (!db || !user || !gameScore.redzoneId) return;
+    setHasVotedRedzone(true);
+    try {
+      await addDoc(collection(db, REDZONE_PICKS_COLLECTION), {
+        userId: user.id,
+        userName: user.name,
+        redzoneId: gameScore.redzoneId,
+        choice,
+        timestamp: serverTimestamp()
+      });
+      await addDoc(collection(db, MSG_COLLECTION), {
+        senderId: 'sideline_bot_ai',
+        senderName: 'COMBAT CONTROLLER',
+        text: `TACTICAL BONUS: OPERATIVE ${user.name} PREDICTS ${choice} IN THE REDZONE.`,
+        timestamp: serverTimestamp()
+      });
+    } catch (e) { console.error(e); }
+  };
 
   const handleResetSession = () => {
     if (confirm("TERMINATE SESSION? This will reset your callsign and team selection.")) {
       localStorage.removeItem('sblix_u5');
       window.location.reload();
     }
-  };
-
-  const handleSaveStakes = async () => {
-    if (!db || !user) return;
-    setIsSavingStakes(true);
-    try {
-      await setDoc(doc(db, PREDICTIONS_COLLECTION, user.id), {
-        userId: user.id,
-        userName: user.name,
-        choices: predictions,
-        finalScore: finalScorePred,
-        timestamp: serverTimestamp()
-      }, { merge: true });
-      setHasSavedStakes(true);
-      await addDoc(collection(db, MSG_COLLECTION), {
-        senderId: 'sideline_bot_ai',
-        senderName: 'COMBAT CONTROLLER',
-        text: `LOGISTICS UPDATE: OPERATIVE ${user.name} HAS SEALED THE MAIN MISSION VAULT.`,
-        timestamp: serverTimestamp()
-      });
-    } catch (e) { console.error(e); }
-    setIsSavingStakes(false);
-  };
-
-  const handleSaveSide = async () => {
-    if (!db || !user) return;
-    setIsSavingStakes(true);
-    try {
-      await setDoc(doc(db, PREDICTIONS_COLLECTION, user.id), {
-        userId: user.id,
-        userName: user.name,
-        sideChoices: sidePredictions,
-        timestamp: serverTimestamp()
-      }, { merge: true });
-      setHasSavedSide(true);
-      await addDoc(collection(db, SIDE_MSG_COLLECTION), {
-        senderId: 'sideline_bot_ai',
-        senderName: 'INTEL OFFICER',
-        text: `SIDE OPS UPDATE: OPERATIVE ${user.name} HAS LOCKED IN COMMERCIAL INTELLIGENCE.`,
-        timestamp: serverTimestamp()
-      });
-    } catch (e) { console.error(e); }
-    setIsSavingStakes(false);
   };
 
   const handleJoin = (name: string, team: 'T1' | 'T2') => {
@@ -265,7 +220,34 @@ export default function App() {
   const teamTheme = themeStyles[teamColorKey];
 
   return (
-    <div className={`flex flex-col h-screen max-w-lg mx-auto bg-slate-950 text-white overflow-hidden relative ${flashType === 'blue' ? 'flash-blue' : flashType === 'emerald' ? 'flash-emerald' : ''}`}>
+    <div className={`flex flex-col h-screen max-w-lg mx-auto bg-slate-950 text-white overflow-hidden relative ${flashType === 'blue' ? 'flash-blue' : flashType === 'emerald' ? 'flash-emerald' : flashType === 'red' ? 'flash-red' : ''}`}>
+      
+      {/* REDZONE OVERLAY */}
+      {gameScore.redzoneTeam && !hasVotedRedzone && (
+        <div className="absolute inset-0 z-[1000] bg-red-950/95 flex flex-col items-center justify-center p-8 animate-pulse border-4 border-red-600 m-2 rounded-[2.5rem] backdrop-blur-xl">
+           <div className="text-center space-y-4 mb-10">
+              <i className="fas fa-radiation text-6xl text-red-500 mb-4 animate-spin-slow"></i>
+              <h1 className="font-orbitron text-4xl font-black italic tracking-tighter text-white">REDZONE ALERT</h1>
+              <p className="text-red-400 font-black text-xs uppercase tracking-[0.4em]">{gameScore.redzoneTeam} HAS BREACHED THE 20</p>
+           </div>
+           
+           <div className="w-full space-y-4">
+              <p className="text-center text-[10px] font-black text-slate-400 uppercase mb-4 tracking-widest">SELECT TACTICAL OUTCOME</p>
+              {['TOUCHDOWN', 'FIELD GOAL', 'REJECTED'].map(choice => (
+                <button 
+                  key={choice}
+                  onClick={() => handleRedzoneVote(choice)}
+                  className="w-full py-5 rounded-2xl bg-red-600 hover:bg-red-500 text-white font-black uppercase tracking-widest text-lg shadow-2xl shadow-red-900/40 active:scale-95 transition-all"
+                >
+                  {choice}
+                </button>
+              ))}
+           </div>
+           
+           <p className="mt-10 text-[8px] font-black text-red-700 uppercase tracking-widest animate-pulse">LOCK IN BEFORE THE SNAP</p>
+        </div>
+      )}
+
       {/* JUMBOTRON SCOREBOARD */}
       <header className="p-3 z-50 glass border-b border-white/10 shadow-2xl">
         <div className="flex justify-between items-center mb-2">
@@ -292,7 +274,9 @@ export default function App() {
             
             <div className="flex flex-col items-center flex-1 mx-2">
               <div className="px-2 py-0.5 bg-white/5 rounded-full mb-2 border border-white/5">
-                <span className="text-[6px] font-black text-emerald-400 uppercase tracking-widest">{gameScore.status}</span>
+                <span className={`text-[6px] font-black ${gameScore.redzoneTeam ? 'text-red-500 animate-pulse' : 'text-emerald-400'} uppercase tracking-widest`}>
+                  {gameScore.redzoneTeam ? 'REDZONE ALERT' : gameScore.status}
+                </span>
               </div>
               <div className="w-full h-1 bg-slate-800 rounded-full overflow-hidden flex relative">
                 <div style={{ width: `${100 - gameScore.momentum}%` }} className="h-full bg-blue-500 transition-all duration-300"></div>
@@ -387,13 +371,8 @@ export default function App() {
                   ))}
                 </div>
 
-                {!hasSavedSide ? (
-                  <button onClick={handleSaveSide} className="w-full py-4 rounded-xl bg-amber-600 font-black uppercase tracking-[0.2em] mt-4 hover:bg-amber-500 shadow-xl shadow-amber-500/20">SEAL SIDE OPS</button>
-                ) : (
-                  <div className="mt-4 p-4 bg-amber-500/10 border border-amber-500/20 rounded-xl text-center">
-                    <i className="fas fa-lock text-amber-500 mb-2"></i>
-                    <p className="text-[8px] font-black text-amber-400 uppercase tracking-widest">SIDE MISSION SEALED</p>
-                  </div>
+                {!hasSavedSide && (
+                  <button onClick={() => setHasSavedSide(true)} className="w-full py-4 rounded-xl bg-amber-600 font-black uppercase tracking-[0.2em] mt-4 hover:bg-amber-500 shadow-xl shadow-amber-500/20">SEAL SIDE OPS</button>
                 )}
              </div>
 
@@ -418,48 +397,9 @@ export default function App() {
           </div>
         )}
 
-        {activeTab === 'stakes' && (
-          <div className="space-y-6 py-4 pb-20">
-             <div className="p-5 glass border border-white/10 rounded-[2rem] space-y-6">
-                <div className="text-center">
-                   <h2 className="font-orbitron font-black text-lg uppercase italic mb-1">COMMAND MISSION</h2>
-                   <p className="text-[7px] font-black text-slate-500 tracking-[0.3em] uppercase">SBLIX_GRIDIRON_FORECAST</p>
-                </div>
-                <div className="space-y-5">
-                  {PREDICTION_TASKS.map((task) => (
-                    <div key={task.id} className="space-y-2">
-                       <label className="text-[7px] font-black text-slate-500 uppercase tracking-widest px-1">{task.label}</label>
-                       <div className="grid grid-cols-2 gap-2">
-                          {task.options.map((opt) => (
-                            <button
-                              key={opt}
-                              disabled={hasSavedStakes}
-                              onClick={() => setPredictions(prev => ({ ...prev, [task.id]: opt }))}
-                              className={`py-2 rounded-lg text-[8px] font-black uppercase transition-all border ${
-                                predictions[task.id] === opt 
-                                  ? `${teamTheme.main} border-${teamColorKey}-500 text-white shadow-lg` 
-                                  : 'bg-black/40 border-white/5 text-slate-500'
-                              }`}
-                            >
-                              {opt}
-                            </button>
-                          ))}
-                       </div>
-                    </div>
-                  ))}
-                </div>
-                {!hasSavedStakes ? (
-                  <button onClick={handleSaveStakes} className={`w-full py-4 rounded-xl ${teamTheme.main} font-black uppercase tracking-[0.2em] mt-4 shadow-lg`}>SEAL COMMAND VAULT</button>
-                ) : (
-                  <div className="mt-4 p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-center"><p className="text-[8px] font-black text-emerald-400 uppercase tracking-widest">COMMAND SEALED</p></div>
-                )}
-             </div>
-          </div>
-        )}
-
         {activeTab === 'ranks' && (
           <div className="space-y-3 pb-20">
-            {[{n: 'COLONEL_FOOTBALL', p: 4500, t: 'T1'}, {n: 'STADIUM_SNIPER', p: 3100, t: 'T2'}, {n: user.name, p: 1200, t: user.team}].map((r, i) => (
+            {[{n: 'COLONEL_FOOTBALL', p: 4500}, {n: 'STADIUM_SNIPER', p: 3100}, {n: user.name, p: 1200}].map((r, i) => (
               <div key={i} className={`flex items-center gap-4 p-4 glass rounded-3xl border border-white/5`}>
                  <div className="w-8 h-8 rounded-lg bg-black/60 flex items-center justify-center font-black text-emerald-500 text-xs">{i+1}</div>
                  <div className="flex-1 font-black text-[12px] uppercase">{r.n}</div>
@@ -501,11 +441,10 @@ export default function App() {
         </div>
       )}
 
-      {/* BROADCAST TICKER */}
       <div className="h-6 bg-black border-t border-white/10 flex items-center overflow-hidden z-[100]">
          <div className="ticker-wrap w-full">
             <div className="ticker font-orbitron font-black text-[8px] text-emerald-500 uppercase tracking-widest space-x-20">
-               <span>{gameScore.ticker} {gameScore.sources?.map((s: any) => s.web?.uri || s.web?.title).filter(Boolean).join(' | ')}</span>
+               <span>{gameScore.ticker}</span>
             </div>
          </div>
       </div>
@@ -516,36 +455,18 @@ export default function App() {
 function JoinScreen({ onJoin }: { onJoin: (n: string, t: 'T1' | 'T2') => void }) {
   const [name, setName] = useState('');
   const [team, setTeam] = useState<'T1' | 'T2'>('T1');
-
   return (
-    <div className={`flex items-center justify-center min-h-screen p-6 transition-colors duration-1000 ${team === 'T1' ? 'bg-blue-950' : 'bg-emerald-950'} relative overflow-hidden`}>
+    <div className={`flex items-center justify-center min-h-screen p-6 ${team === 'T1' ? 'bg-blue-950' : 'bg-emerald-950'} relative overflow-hidden`}>
       <div className="w-full max-w-md p-10 glass rounded-[3rem] text-center border-white/10 shadow-2xl relative z-10 space-y-10">
-        <div>
-          <h1 className="font-orbitron text-4xl font-black italic text-white mb-2 tracking-tighter">SBLIX LIX</h1>
-          <p className="text-[8px] font-black text-emerald-400 uppercase tracking-[0.5em] animate-pulse">COMMAND FEED V5.0</p>
-        </div>
+        <h1 className="font-orbitron text-4xl font-black italic text-white mb-2 tracking-tighter">SBLIX LIX</h1>
         <div className="space-y-6">
-          <div className="space-y-2 text-left">
-            <label className="text-[8px] font-black text-slate-500 uppercase px-2">Operator Handle</label>
-            <input 
-              value={name} 
-              onChange={e => setName(e.target.value.toUpperCase())}
-              placeholder="CALLSIGN" 
-              className="w-full bg-black/40 border border-white/10 rounded-2xl px-6 py-4 text-white font-black text-center uppercase outline-none focus:border-emerald-500 text-xl" 
-            />
-          </div>
+          <input value={name} onChange={e => setName(e.target.value.toUpperCase())} placeholder="CALLSIGN" className="w-full bg-black/40 border border-white/10 rounded-2xl px-6 py-4 text-white font-black text-center uppercase outline-none focus:border-emerald-500 text-xl" />
           <div className="grid grid-cols-2 gap-4">
-             <button onClick={() => setTeam('T1')} className={`py-4 rounded-xl border-2 transition-all ${team === 'T1' ? 'border-blue-500 bg-blue-500/20' : 'border-white/5 opacity-40'}`}>
-                <p className="text-[8px] font-black text-blue-400 mb-1">FORCE A</p>
-                <p className="font-orbitron font-black text-white italic">RAMS</p>
-             </button>
-             <button onClick={() => setTeam('T2')} className={`py-4 rounded-xl border-2 transition-all ${team === 'T2' ? 'border-emerald-500 bg-emerald-500/20' : 'border-white/5 opacity-40'}`}>
-                <p className="text-[8px] font-black text-emerald-400 mb-1">FORCE B</p>
-                <p className="font-orbitron font-black text-white italic">SEAHAWKS</p>
-             </button>
+             <button onClick={() => setTeam('T1')} className={`py-4 rounded-xl border-2 ${team === 'T1' ? 'border-blue-500 bg-blue-500/20' : 'border-white/5 opacity-40'}`}>RAMS</button>
+             <button onClick={() => setTeam('T2')} className={`py-4 rounded-xl border-2 ${team === 'T2' ? 'border-emerald-500 bg-emerald-500/20' : 'border-white/5 opacity-40'}`}>SEAHAWKS</button>
           </div>
         </div>
-        <button onClick={() => name && onJoin(name, team)} className={`w-full ${team === 'T1' ? 'bg-blue-600' : 'bg-emerald-600'} text-white font-black py-5 rounded-2xl shadow-2xl uppercase tracking-[0.2em]`}>CONNECT TO FEED</button>
+        <button onClick={() => name && onJoin(name, team)} className={`w-full ${team === 'T1' ? 'bg-blue-600' : 'bg-emerald-600'} text-white font-black py-5 rounded-2xl`}>CONNECT</button>
       </div>
     </div>
   );
@@ -553,27 +474,12 @@ function JoinScreen({ onJoin }: { onJoin: (n: string, t: 'T1' | 'T2') => void })
 
 function ConfigScreen() {
   const [config, setConfig] = useState('');
-  const missing = getMissingKeys();
   return (
     <div className="flex items-center justify-center min-h-screen p-6 bg-slate-950 text-white">
       <div className="max-w-md w-full glass p-8 rounded-[2rem] space-y-6">
-        <div className="text-center">
-          <i className="fas fa-exclamation-triangle text-3xl text-yellow-500 mb-4 animate-bounce"></i>
-          <h2 className="text-xl font-orbitron font-black italic uppercase">Config Required</h2>
-          <p className="text-[10px] text-slate-400 mt-2">Provide Firebase JSON configuration.</p>
-        </div>
-        <div className="space-y-4">
-          <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl">
-             <ul className="text-[8px] space-y-1 text-slate-300">
-              {missing.map(k => <li key={k}>• {k}</li>)}
-            </ul>
-          </div>
-          <textarea rows={4} value={config} onChange={e => setConfig(e.target.value)} className="w-full bg-black/60 border border-white/10 rounded-xl p-3 text-[9px] font-mono outline-none" placeholder='{ "apiKey": "...", ... }'/>
-        </div>
-        <div className="flex flex-col gap-2">
-          <button onClick={() => saveManualConfig(config)} className="w-full bg-blue-600 py-3 rounded-xl font-black text-[10px] uppercase">INITIALIZE</button>
-          <button onClick={clearManualConfig} className="w-full bg-slate-800 py-2 rounded-xl font-black text-[8px] text-slate-400 uppercase">CLEAR CONFIG</button>
-        </div>
+        <h2 className="text-xl font-orbitron font-black italic uppercase">Config Required</h2>
+        <textarea rows={4} value={config} onChange={e => setConfig(e.target.value)} className="w-full bg-black/60 border border-white/10 rounded-xl p-3 text-[9px] font-mono outline-none" placeholder='{ "apiKey": "...", ... }'/>
+        <button onClick={() => saveManualConfig(config)} className="w-full bg-blue-600 py-3 rounded-xl font-black text-[10px]">INITIALIZE</button>
       </div>
     </div>
   );

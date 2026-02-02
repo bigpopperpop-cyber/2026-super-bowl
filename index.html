@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -51,14 +52,6 @@
       50% { opacity: 1; }
       100% { opacity: 0.98; }
     }
-    .btn-flicker:hover {
-      animation: btn-flicker 0.2s infinite;
-    }
-    @keyframes btn-flicker {
-      0% { opacity: 0.8; }
-      50% { opacity: 1; }
-      100% { opacity: 0.9; }
-    }
     @keyframes flash-blue {
       0%, 100% { background-color: transparent; }
       50% { background-color: rgba(59, 130, 246, 0.4); }
@@ -67,8 +60,18 @@
       0%, 100% { background-color: transparent; }
       50% { background-color: rgba(16, 185, 129, 0.4); }
     }
+    @keyframes flash-red {
+      0%, 100% { background-color: transparent; }
+      50% { background-color: rgba(220, 38, 38, 0.6); }
+    }
+    @keyframes spin-slow {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
     .flash-blue { animation: flash-blue 0.5s ease-out 3; }
     .flash-emerald { animation: flash-emerald 0.5s ease-out 3; }
+    .flash-red { animation: flash-red 0.3s ease-out infinite; }
+    .animate-spin-slow { animation: spin-slow 8s linear infinite; }
     
     .ticker-wrap {
       width: 100%;
