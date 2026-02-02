@@ -27,24 +27,24 @@ const PREDICTIONS_COLLECTION = 'hub_v5_predictions';
 const REDZONE_PICKS_COLLECTION = 'hub_v5_redzone_picks';
 
 const PREDICTION_TASKS = [
-  { id: 'q1', label: 'COIN TOSS WINNER', options: ['RAMS', 'SEAHAWKS'] },
-  { id: 'q2', label: 'FIRST STRIKE (TEAM)', options: ['RAMS', 'SEAHAWKS'] },
-  { id: 'q3', label: '1ST HALF PASSING YDS', options: ['UNDER 240.5', 'OVER 240.5'] },
-  { id: 'q4', label: 'TURNOVER COUNT', options: ['UNDER 2.5', 'OVER 2.5'] },
-  { id: 'q5', label: 'TOTAL TOUCHDOWNS', options: ['UNDER 5.5', 'OVER 5.5'] },
-  { id: 'q6', label: '50+ YD FIELD GOAL', options: ['NEGATIVE', 'CONFIRMED'] },
-  { id: 'q7', label: 'MVP OPERATIVE', options: ['QB', 'WR', 'RB', 'DEF/SPEC'] },
-  { id: 'q8', label: 'MAX DOMINANCE GAP', options: ['UNDER 10.5', 'OVER 10.5'] },
+  { id: 'q1', label: 'COIN TOSS WINNER', options: ['RAMS', 'SEAHAWKS'], points: 100 },
+  { id: 'q2', label: 'FIRST STRIKE (TEAM)', options: ['RAMS', 'SEAHAWKS'], points: 150 },
+  { id: 'q3', label: '1ST HALF PASSING YDS', options: ['UNDER 240.5', 'OVER 240.5'], points: 200 },
+  { id: 'q4', label: 'TURNOVER COUNT', options: ['UNDER 2.5', 'OVER 2.5'], points: 250 },
+  { id: 'q5', label: 'TOTAL TOUCHDOWNS', options: ['UNDER 5.5', 'OVER 5.5'], points: 200 },
+  { id: 'q6', label: '50+ YD FIELD GOAL', options: ['NEGATIVE', 'CONFIRMED'], points: 150 },
+  { id: 'q7', label: 'MVP OPERATIVE', options: ['QB', 'WR', 'RB', 'DEF/SPEC'], points: 500 },
+  { id: 'q8', label: 'MAX DOMINANCE GAP', options: ['UNDER 10.5', 'OVER 10.5'], points: 200 },
 ];
 
 const SIDE_TASKS = [
-  { id: 's1', label: 'FIRST BEER COMMERCIAL', options: ['BUD LIGHT', 'MICHELOB', 'COORS', 'OTHER'] },
-  { id: 's2', label: 'MOVIE TRAILER PRIORITY', options: ['MARVEL', 'DC', 'HORROR', 'OTHER'] },
-  { id: 's3', label: 'HALFTIME: FIRST SONG', options: ['UPBEAT/FAST', 'SLOW/BALLAD'] },
-  { id: 's4', label: 'HALFTIME GUEST COUNT', options: ['UNDER 1.5', 'OVER 1.5'] },
-  { id: 's5', label: 'CELEBRITY CHIPS AD?', options: ['YES', 'NO'] },
-  { id: 's6', label: 'TAYLOR SWIFT CAMEO?', options: ['YES', 'NO'] },
-  { id: 's7', label: 'GATORADE COLOR', options: ['RED/ORANGE', 'CLEAR/WATER', 'PURPLE/BLUE', 'YELLOW/GREEN'] },
+  { id: 's1', label: 'FIRST BEER COMMERCIAL', options: ['BUD LIGHT', 'MICHELOB', 'COORS', 'OTHER'], points: 50 },
+  { id: 's2', label: 'MOVIE TRAILER PRIORITY', options: ['MARVEL', 'DC', 'HORROR', 'OTHER'], points: 75 },
+  { id: 's3', label: 'HALFTIME: FIRST SONG', options: ['UPBEAT/FAST', 'SLOW/BALLAD'], points: 150 },
+  { id: 's4', label: 'HALFTIME GUEST COUNT', options: ['UNDER 1.5', 'OVER 1.5'], points: 100 },
+  { id: 's5', label: 'CELEBRITY CHIPS AD?', options: ['YES', 'NO'], points: 50 },
+  { id: 's6', label: 'TAYLOR SWIFT CAMEO?', options: ['YES', 'NO'], points: 100 },
+  { id: 's7', label: 'GATORADE COLOR', options: ['RED/ORANGE', 'CLEAR/WATER', 'PURPLE/BLUE', 'YELLOW/GREEN'], points: 200 },
 ];
 
 const themeStyles = {
@@ -101,7 +101,6 @@ export default function App() {
             const intel = await analyzeMomentum({ rams: score.score1, seahawks: score.score2 });
             const tickerFact = await getSidelineFact();
             
-            // Generate a Redzone ID if one team is in the redzone
             const newRedzoneId = intel.redzoneTeam ? `rz_${score.score1}_${score.score2}_${now}` : null;
 
             await setDoc(stateRef, {
@@ -147,7 +146,6 @@ export default function App() {
       if (snap.exists()) {
         const data = snap.data();
         setGameScore(prev => {
-          // Trigger Redzone Flash locally if new redzone detected
           if (data.redzoneId && data.redzoneId !== prev.redzoneId) {
              setFlashType('red');
              setHasVotedRedzone(false);
@@ -232,7 +230,7 @@ export default function App() {
            </div>
            
            <div className="w-full space-y-4">
-              <p className="text-center text-[10px] font-black text-slate-400 uppercase mb-4 tracking-widest">SELECT TACTICAL OUTCOME</p>
+              <p className="text-center text-[10px] font-black text-slate-400 uppercase mb-4 tracking-widest">SELECT TACTICAL OUTCOME [+500 XP]</p>
               {['TOUCHDOWN', 'FIELD GOAL', 'REJECTED'].map(choice => (
                 <button 
                   key={choice}
@@ -350,7 +348,10 @@ export default function App() {
                 <div className="space-y-5">
                   {SIDE_TASKS.map((task) => (
                     <div key={task.id} className="space-y-2">
-                       <label className="text-[7px] font-black text-amber-500/60 uppercase tracking-widest px-1">{task.label}</label>
+                       <div className="flex justify-between items-center px-1">
+                          <label className="text-[7px] font-black text-amber-500/60 uppercase tracking-widest">{task.label}</label>
+                          <span className="text-[6px] font-black text-amber-400/40 bg-amber-400/10 px-1.5 py-0.5 rounded-full">+{task.points} XP</span>
+                       </div>
                        <div className="grid grid-cols-2 gap-2">
                           {task.options.map((opt) => (
                             <button
@@ -397,15 +398,69 @@ export default function App() {
           </div>
         )}
 
+        {activeTab === 'stakes' && (
+          <div className="space-y-6 py-4 pb-20">
+             <div className="p-5 glass border border-white/10 rounded-[2rem] space-y-6">
+                <div className="text-center">
+                   <h2 className="font-orbitron font-black text-lg uppercase italic mb-1">COMMAND MISSION</h2>
+                   <p className="text-[7px] font-black text-slate-500 tracking-[0.3em] uppercase">SBLIX_GRIDIRON_FORECAST</p>
+                </div>
+                <div className="space-y-5">
+                  {PREDICTION_TASKS.map((task) => (
+                    <div key={task.id} className="space-y-2">
+                       <div className="flex justify-between items-center px-1">
+                          <label className="text-[7px] font-black text-slate-500 uppercase tracking-widest">{task.label}</label>
+                          <span className="text-[6px] font-black text-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 rounded-full">+{task.points} XP</span>
+                       </div>
+                       <div className="grid grid-cols-2 gap-2">
+                          {task.options.map((opt) => (
+                            <button
+                              key={opt}
+                              disabled={hasSavedStakes}
+                              onClick={() => setPredictions(prev => ({ ...prev, [task.id]: opt }))}
+                              className={`py-2 rounded-lg text-[8px] font-black uppercase transition-all border ${
+                                predictions[task.id] === opt 
+                                  ? `${teamTheme.main} border-${teamColorKey}-500 text-white shadow-lg` 
+                                  : 'bg-black/40 border-white/5 text-slate-500'
+                              }`}
+                            >
+                              {opt}
+                            </button>
+                          ))}
+                       </div>
+                    </div>
+                  ))}
+                </div>
+                {!hasSavedStakes && (
+                  <button onClick={() => setHasSavedStakes(true)} className={`w-full py-4 rounded-xl ${teamTheme.main} font-black uppercase tracking-[0.2em] mt-4 shadow-lg`}>SEAL COMMAND VAULT</button>
+                )}
+             </div>
+          </div>
+        )}
+
         {activeTab === 'ranks' && (
           <div className="space-y-3 pb-20">
-            {[{n: 'COLONEL_FOOTBALL', p: 4500}, {n: 'STADIUM_SNIPER', p: 3100}, {n: user.name, p: 1200}].map((r, i) => (
-              <div key={i} className={`flex items-center gap-4 p-4 glass rounded-3xl border border-white/5`}>
-                 <div className="w-8 h-8 rounded-lg bg-black/60 flex items-center justify-center font-black text-emerald-500 text-xs">{i+1}</div>
-                 <div className="flex-1 font-black text-[12px] uppercase">{r.n}</div>
-                 <div className="font-orbitron font-black text-emerald-400 text-sm">{r.p}</div>
+            <div className="text-center mb-6 py-4 border-y border-white/5">
+               <h3 className="font-orbitron text-[10px] font-black text-slate-500 uppercase tracking-[0.4em]">MISSION STATUS: RESET</h3>
+               <p className="text-[7px] font-black text-emerald-500 uppercase mt-1 animate-pulse">ALL OPERATIVES RETURNING TO BASELINE</p>
+            </div>
+            {[{n: user.name, p: 0}].map((r, i) => (
+              <div key={i} className={`flex items-center gap-4 p-4 glass rounded-3xl border border-white/10 shadow-xl relative overflow-hidden`}>
+                 <div className="absolute top-0 left-0 w-1 h-full bg-emerald-500"></div>
+                 <div className="w-8 h-8 rounded-lg bg-black/60 flex items-center justify-center font-black text-emerald-500 text-xs border border-white/5">{i+1}</div>
+                 <div className="flex-1">
+                    <div className="font-black text-[12px] uppercase text-white">{r.n}</div>
+                    <div className="text-[6px] font-black text-slate-500 uppercase tracking-widest">RANK: RECRUIT</div>
+                 </div>
+                 <div className="text-right">
+                    <div className="font-orbitron font-black text-emerald-400 text-sm">{r.p}</div>
+                    <div className="text-[6px] font-black text-emerald-500/40 uppercase">XP_INTEL</div>
+                 </div>
               </div>
             ))}
+            <div className="mt-8 p-6 bg-white/5 rounded-3xl border border-dashed border-white/10 text-center">
+               <p className="text-[8px] font-black text-slate-600 uppercase tracking-widest">FURTHER OPERATIVES IN TRANSIT...</p>
+            </div>
           </div>
         )}
       </main>
