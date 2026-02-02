@@ -1,24 +1,36 @@
 
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI } from "@google/genai";
+
+/**
+ * Safely initialize the AI client.
+ */
+function getAI() {
+  const apiKey = process.env.API_KEY;
+  if (!apiKey) {
+    console.warn("SBLIX INTEL ERROR: API_KEY not found in environment.");
+    return null;
+  }
+  return new GoogleGenAI({ apiKey });
+}
 
 /**
  * Generates high-energy, tactical responses from the Live Combat Controller.
  */
 export async function getCoachResponse(prompt: string) {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = getAI();
+  if (!ai) return "Signal lost. 📡";
   try {
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
       contents: prompt,
       config: {
-        systemInstruction: "You are the 'SBLIX COMBAT CONTROLLER'. Your mission is to provide tactical, high-octane updates on Super Bowl LIX. Treat the game like a mission. Use military and sports jargon: 'Red Zone Breach', 'Tango Down', 'Air Raid', 'Gridiron Intelligence'. Keep it short, under 30 words.",
-        temperature: 1,
+        systemInstruction: "You are the 'SBLIX COMBAT CONTROLLER'. Mission: Tactical Super Bowl LIX updates. Use military jargon: 'Red Zone Breach', 'Tango Down', 'Air Raid'. Keep it under 25 words.",
+        temperature: 0.9,
       }
     });
-    // Use .text property directly
     return response.text || "Eyes on the objective. 🏈";
   } catch (err) {
-    return "Signal interference detected. Maintain visual on the gridiron. 📡";
+    return "Signal interference detected. 📡";
   }
 }
 
@@ -26,23 +38,20 @@ export async function getCoachResponse(prompt: string) {
  * Uses Search Grounding to analyze game intensity and momentum.
  */
 export async function analyzeMomentum(scoreData: any) {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = getAI();
+  if (!ai) return { momentum: 50, isBigPlay: false, intel: "Interference.", sources: [] };
   const now = new Date().toLocaleString();
   try {
-    // Note: guidelines suggest avoiding JSON parsing with googleSearch results as output may not be strictly JSON
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: `Tactical Assessment Request: Super Bowl LIX (Time: ${now}). Based on score (${scoreData.rams}-${scoreData.seahawks}), determine the Momentum Quotient (0-100). 0 is heavy Rams dominance, 100 is heavy Seahawks dominance. Detect 'Big Play' status. Respond in format: MOMENTUM: [number], BIG_PLAY: [true/false], INTEL: [text]`,
-      config: { 
-        tools: [{ googleSearch: {} }]
-      },
+      contents: `Tactical Assessment: SB LIX (${now}). Score (${scoreData.rams}-${scoreData.seahawks}). Determine Momentum (0-100). 0=Rams, 100=Seahawks. Format: MOMENTUM: [num], BIG_PLAY: [bool], INTEL: [text]`,
+      config: { tools: [{ googleSearch: {} }] },
     });
     
     const text = response.text || "";
     const momentum = parseInt(text.match(/MOMENTUM:?\s*(\d+)/i)?.[1] || "50");
     const isBigPlay = /BIG_PLAY:?\s*true/i.test(text);
     const intel = text.match(/INTEL:?\s*(.+)/i)?.[1] || "Scanning...";
-    // MUST extract grounding chunks if Google Search is used
     const sources = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
 
     return { momentum, isBigPlay, intel, sources };
@@ -51,16 +60,14 @@ export async function analyzeMomentum(scoreData: any) {
   }
 }
 
-/**
- * Enhanced score search for the Command Center.
- */
 export async function getLiveScoreFromSearch() {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = getAI();
+  if (!ai) return null;
   const now = new Date().toLocaleString();
   try {
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: `Broadcast Intelligence Retrieval: Super Bowl LIX. Current time: ${now}. Fetch real-time status. Respond in format: T1: [Name], S1: [Score], T2: [Name], S2: [Score], STATUS: [Scheduled/Live/Halftime/Final]`,
+      contents: `Intelligence Retrieval: SB LIX. Time: ${now}. Format: T1: [Name], S1: [Score], T2: [Name], S2: [Score], STATUS: [Live/Final]`,
       config: { tools: [{ googleSearch: {} }] },
     });
 
@@ -70,7 +77,6 @@ export async function getLiveScoreFromSearch() {
     const t2 = text.match(/T2:?\s*([\w\s]+),/i)?.[1] || "SEAHAWKS";
     const s2 = parseInt(text.match(/S2:?\s*(\d+)/i)?.[1] || "0");
     const status = text.match(/STATUS:?\s*(\w+)/i)?.[1] || "LIVE";
-    // MUST extract grounding chunks if Google Search is used
     const sources = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
 
     return { team1: t1, score1: s1, team2: t2, score2: s2, status: status.toUpperCase(), sources };
@@ -80,15 +86,15 @@ export async function getLiveScoreFromSearch() {
 }
 
 export async function getSidelineFact() {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = getAI();
+  if (!ai) return "Objective: Win the Lombardi.";
   try {
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: "Intelligence Snippet: Super Bowl historical tactical error or legendary play. Max 15 words.",
-      config: { systemInstruction: "You are the SBLIX Intel Officer." }
+      contents: "Super Bowl historical tactical play or legend fact. 15 words max.",
     });
-    return response.text || "Objective: Win the Lombardi Trophy.";
+    return response.text || "Every yard counts. 📊";
   } catch (err) {
-    return "Every yard counts. 📊";
+    return "Status: Operational. 📊";
   }
 }
