@@ -12,52 +12,74 @@ import {
   onSnapshot, 
   serverTimestamp, 
   getDoc,
-  saveManualConfig,
-  clearManualConfig,
-  getMissingKeys
+  saveManualConfig
 } from './services/firebaseService';
 import { getCoachResponse, getSidelineFact, getLiveScoreFromSearch, analyzeMomentum } from './services/geminiService';
 import { ChatMessage, User } from './types';
 
-const MSG_COLLECTION = 'hub_v5_messages';
-const SIDE_MSG_COLLECTION = 'hub_v5_side_messages';
-const GAME_STATE_DOC = 'hub_v5_state';
-const HYPE_COLLECTION = 'hub_v5_hype';
-const PREDICTIONS_COLLECTION = 'hub_v5_predictions';
-const REDZONE_PICKS_COLLECTION = 'hub_v5_redzone_picks';
+const MSG_COLLECTION = 'hub_lx_messages';
+const SIDE_MSG_COLLECTION = 'hub_lx_side_messages';
+const GAME_STATE_DOC = 'hub_lx_state';
+const HYPE_COLLECTION = 'hub_lx_hype';
+const REDZONE_PICKS_COLLECTION = 'hub_lx_redzone_picks';
 
 const PREDICTION_TASKS = [
-  { id: 'q1', label: 'COIN TOSS WINNER', options: ['RAMS', 'SEAHAWKS'], points: 100 },
-  { id: 'q2', label: 'FIRST STRIKE (TEAM)', options: ['RAMS', 'SEAHAWKS'], points: 150 },
-  { id: 'q3', label: '1ST HALF PASSING YDS', options: ['UNDER 240.5', 'OVER 240.5'], points: 200 },
-  { id: 'q4', label: 'TURNOVER COUNT', options: ['UNDER 2.5', 'OVER 2.5'], points: 250 },
-  { id: 'q5', label: 'TOTAL TOUCHDOWNS', options: ['UNDER 5.5', 'OVER 5.5'], points: 200 },
-  { id: 'q6', label: '50+ YD FIELD GOAL', options: ['NEGATIVE', 'CONFIRMED'], points: 150 },
-  { id: 'q7', label: 'MVP OPERATIVE', options: ['QB', 'WR', 'RB', 'DEF/SPEC'], points: 500 },
-  { id: 'q8', label: 'MAX DOMINANCE GAP', options: ['UNDER 10.5', 'OVER 10.5'], points: 200 },
+  { id: 'q1', label: 'COIN TOSS RESULT', options: ['HEADS', 'TAILS'], points: 100 },
+  { id: 'q2', label: 'ANTHEM LENGTH', options: ['UNDER 1:58', 'OVER 1:58'], points: 150 },
+  { id: 'q3', label: 'FIRST TOUCHDOWN', options: ['PATRIOTS', 'SEAHAWKS', 'OTHER'], points: 250 },
+  { id: 'q4', label: 'QB RUSHING YDS', options: ['UNDER 28.5', 'OVER 28.5'], points: 200 },
+  { id: 'q5', label: 'TOTAL SACKS', options: ['UNDER 3.5', 'OVER 3.5'], points: 300 },
+  { id: 'q6', label: 'LONGEST RECEPTION', options: ['UNDER 38.5', 'OVER 38.5'], points: 200 },
+  { id: 'q7', label: 'SB LX MVP', options: ['QB', 'WR', 'DEF', 'SPECIAL'], points: 750 },
+  { id: 'q8', label: 'FINAL SCORE GAP', options: ['UNDER 4.5', 'OVER 4.5'], points: 300 },
 ];
 
 const SIDE_TASKS = [
-  { id: 's1', label: 'FIRST BEER COMMERCIAL', options: ['BUD LIGHT', 'MICHELOB', 'COORS', 'OTHER'], points: 50 },
-  { id: 's2', label: 'MOVIE TRAILER PRIORITY', options: ['MARVEL', 'DC', 'HORROR', 'OTHER'], points: 75 },
-  { id: 's3', label: 'HALFTIME: FIRST SONG', options: ['UPBEAT/FAST', 'SLOW/BALLAD'], points: 150 },
-  { id: 's4', label: 'HALFTIME GUEST COUNT', options: ['UNDER 1.5', 'OVER 1.5'], points: 100 },
-  { id: 's5', label: 'CELEBRITY CHIPS AD?', options: ['YES', 'NO'], points: 50 },
-  { id: 's6', label: 'TAYLOR SWIFT CAMEO?', options: ['YES', 'NO'], points: 100 },
-  { id: 's7', label: 'GATORADE COLOR', options: ['RED/ORANGE', 'CLEAR/WATER', 'PURPLE/BLUE', 'YELLOW/GREEN'], points: 200 },
+  { id: 's1', label: 'BEER AD COUNT', options: ['1-4', '5-8', '9+'], points: 100 },
+  { id: 's2', label: 'CELEBRITY CAMEO', options: ['UNDER 5.5', 'OVER 5.5'], points: 150 },
+  { id: 's3', label: 'HALFTIME: FIRST SONG', options: ['POP/HIT', 'ROCK/CLASSIC'], points: 200 },
+  { id: 's4', label: 'GATORADE COLOR', options: ['ORANGE/RED', 'BLUE/PURPLE', 'CLEAR', 'ACTION GREEN'], points: 400 },
+  { id: 's5', label: 'BEST MOVIE TRAILER', options: ['ACTION', 'SCIFI', 'HORROR', 'OTHER'], points: 100 },
+  { id: 's6', label: 'AI AD DETECTED?', options: ['YES', 'NO'], points: 50 },
 ];
 
 const themeStyles = {
-  blue: { main: 'bg-blue-600', border: 'border-blue-500', text: 'text-blue-400', glow: 'shadow-blue-500/20', bgLight: 'bg-blue-500/10' },
-  emerald: { main: 'bg-emerald-600', border: 'border-emerald-500', text: 'text-emerald-400', glow: 'shadow-emerald-500/20', bgLight: 'bg-emerald-500/10' },
-  amber: { main: 'bg-amber-600', border: 'border-amber-500', text: 'text-amber-400', glow: 'shadow-amber-500/20', bgLight: 'bg-amber-500/10' },
-  red: { main: 'bg-red-600', border: 'border-red-500', text: 'text-red-400', glow: 'shadow-red-500/20', bgLight: 'bg-red-500/20' }
+  patriots: { 
+    main: 'bg-[#C60C30]', // Patriots Red
+    border: 'border-[#002244]', // Patriots Navy
+    text: 'text-[#C60C30]', 
+    glow: 'shadow-red-500/30', 
+    bgLight: 'bg-[#C60C30]/10',
+    accent: 'text-[#B0B7BC]' // Silver
+  },
+  seahawks: { 
+    main: 'bg-[#69BE28]', // Action Green
+    border: 'border-[#002244]', // College Navy
+    text: 'text-[#69BE28]', 
+    glow: 'shadow-emerald-500/30', 
+    bgLight: 'bg-[#69BE28]/10',
+    accent: 'text-[#A5ACAF]' // Wolf Gray
+  },
+  amber: { 
+    main: 'bg-amber-600', 
+    border: 'border-amber-500', 
+    text: 'text-amber-400', 
+    glow: 'shadow-amber-500/20', 
+    bgLight: 'bg-amber-500/10' 
+  },
+  red: { 
+    main: 'bg-red-600', 
+    border: 'border-red-500', 
+    text: 'text-red-400', 
+    glow: 'shadow-red-500/20', 
+    bgLight: 'bg-red-500/20' 
+  }
 };
 
 export default function App() {
   const [user, setUser] = useState<(User & { team: 'T1' | 'T2' }) | null>(() => {
     try {
-      const saved = localStorage.getItem('sblix_u5');
+      const saved = localStorage.getItem('sblix_lx_v1');
       return saved ? JSON.parse(saved) : null;
     } catch (e) { return null; }
   });
@@ -66,11 +88,11 @@ export default function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sideMessages, setSideMessages] = useState<ChatMessage[]>([]);
   const [gameScore, setGameScore] = useState({ 
-    s1: 0, s2: 0, t1: "RAMS", t2: "SEAHAWKS", status: "LIVE", 
-    momentum: 50, ticker: "ESTABLISHING SECURE CONNECTION...", 
+    s1: 0, s2: 0, t1: "NEW ENGLAND", t2: "SEATTLE", status: "PRE-GAME", 
+    momentum: 50, ticker: "PREPARING FOR SUPER BOWL LX KICKOFF...", 
     bigPlayTrigger: 0, sources: [], redzoneTeam: null, redzoneId: null
   });
-  const [flashType, setFlashType] = useState<'blue' | 'emerald' | 'red' | null>(null);
+  const [flashType, setFlashType] = useState<'red' | 'patriots' | 'seahawks' | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [predictions, setPredictions] = useState<Record<string, string>>({});
   const [sidePredictions, setSidePredictions] = useState<Record<string, string>>({});
@@ -82,7 +104,6 @@ export default function App() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const sideMessagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Background Automation
   useEffect(() => {
     if (!user || !db) return;
 
@@ -93,11 +114,11 @@ export default function App() {
         const data = stateSnap.exists() ? stateSnap.data() : {};
         const now = Date.now();
 
-        if (now - (data.lastUpdate || 0) > 45000) {
+        if (now - (data.lastUpdate || 0) > 40000) {
           setIsSyncing(true);
           const score = await getLiveScoreFromSearch();
           if (score) {
-            const intel = await analyzeMomentum({ rams: score.score1, seahawks: score.score2 });
+            const intel = await analyzeMomentum({ t1: score.score1, t2: score.score2 });
             const tickerFact = await getSidelineFact();
             const newRedzoneId = intel.redzoneTeam ? `rz_${score.score1}_${score.score2}_${now}` : null;
 
@@ -116,9 +137,9 @@ export default function App() {
 
             if (intel.isBigPlay) {
               await addDoc(collection(db, MSG_COLLECTION), {
-                senderId: 'sideline_bot_ai',
-                senderName: 'COMBAT CONTROLLER',
-                text: `URGENT: ${intel.intel}`,
+                senderId: 'controller_ai',
+                senderName: 'COMMAND CONTROLLER',
+                text: `CRITICAL PLAY: ${intel.intel}`,
                 timestamp: serverTimestamp()
               });
             }
@@ -126,17 +147,15 @@ export default function App() {
           setIsSyncing(false);
         }
       } catch (err) {
-        console.error("Automation error:", err);
         setIsSyncing(false);
       }
     };
 
     runAutomation();
-    const interval = setInterval(runAutomation, 30000);
+    const interval = setInterval(runAutomation, 35000);
     return () => clearInterval(interval);
   }, [user]);
 
-  // Sync state and listeners
   useEffect(() => {
     if (!user || !db) return;
 
@@ -147,13 +166,13 @@ export default function App() {
           if (data.redzoneId && data.redzoneId !== prev.redzoneId) {
              setFlashType('red');
              setHasVotedRedzone(false);
-             setTimeout(() => setFlashType(null), 1000);
+             setTimeout(() => setFlashType(null), 1200);
           }
           return { ...prev, ...data };
         });
         if (data.bigPlayTrigger > (gameScore.bigPlayTrigger || 0)) {
-           setFlashType(data.s1 > data.s2 ? 'blue' : 'emerald');
-           setTimeout(() => setFlashType(null), 1500);
+           setFlashType(data.s1 > data.s2 ? 'patriots' : 'seahawks');
+           setTimeout(() => setFlashType(null), 2000);
         }
       }
     });
@@ -175,22 +194,18 @@ export default function App() {
 
   const handleShare = async () => {
     const shareData = {
-      title: 'SBLIX Command Center',
-      text: 'JOIN THE SUPER BOWL COMMAND FEED. LOCK IN YOUR PREDICTIONS NOW.',
+      title: 'SUPER BOWL LX COMMAND CENTER',
+      text: 'JOIN THE COMMAND FEED. SUPER BOWL LX IS LIVE.',
       url: window.location.href
     };
-
     try {
-      if (navigator.share) {
-        await navigator.share(shareData);
-      } else {
+      if (navigator.share) await navigator.share(shareData);
+      else {
         await navigator.clipboard.writeText(window.location.href);
         setShareToast(true);
         setTimeout(() => setShareToast(false), 2000);
       }
-    } catch (err) {
-      console.error('Share failed', err);
-    }
+    } catch (err) {}
   };
 
   const handleRedzoneVote = async (choice: string) => {
@@ -198,121 +213,122 @@ export default function App() {
     setHasVotedRedzone(true);
     try {
       await addDoc(collection(db, REDZONE_PICKS_COLLECTION), {
-        userId: user.id,
-        userName: user.name,
-        redzoneId: gameScore.redzoneId,
-        choice,
-        timestamp: serverTimestamp()
+        userId: user.id, userName: user.name, redzoneId: gameScore.redzoneId, choice, timestamp: serverTimestamp()
       });
       await addDoc(collection(db, MSG_COLLECTION), {
-        senderId: 'sideline_bot_ai',
-        senderName: 'COMBAT CONTROLLER',
-        text: `TACTICAL BONUS: OPERATIVE ${user.name} PREDICTS ${choice} IN THE REDZONE.`,
+        senderId: 'controller_ai', senderName: 'COMMAND CONTROLLER',
+        text: `TACTICAL BONUS: OPERATIVE ${user.name} DEPLOYED '${choice}' PREDICTION. [+750 XP PENDING]`,
         timestamp: serverTimestamp()
       });
-    } catch (e) { console.error(e); }
+    } catch (e) {}
   };
 
   const handleResetSession = () => {
-    if (confirm("TERMINATE SESSION? This will reset your callsign and team selection.")) {
-      localStorage.removeItem('sblix_u5');
+    if (confirm("ABORT MISSION? This will reset your operative status.")) {
+      localStorage.removeItem('sblix_lx_v1');
       window.location.reload();
     }
   };
 
   const handleJoin = (name: string, team: 'T1' | 'T2') => {
-    const newUser = { id: 'u' + Math.random().toString(36).substr(2, 4), name: name.toUpperCase(), team };
+    const newUser = { id: 'op_' + Math.random().toString(36).substr(2, 4), name: name.toUpperCase(), team };
     setUser(newUser);
-    localStorage.setItem('sblix_u5', JSON.stringify(newUser));
+    localStorage.setItem('sblix_lx_v1', JSON.stringify(newUser));
   };
 
   if (!db) return <ConfigScreen />;
   if (!user) return <JoinScreen onJoin={handleJoin} onInvite={handleShare} />;
 
-  const teamColorKey = user.team === 'T1' ? 'blue' : 'emerald';
+  const teamColorKey = user.team === 'T1' ? 'patriots' : 'seahawks';
   const activeColorKey = activeTab === 'side' ? 'amber' : teamColorKey;
   const activeTheme = themeStyles[activeColorKey];
   const teamTheme = themeStyles[teamColorKey];
 
   return (
-    <div className={`flex flex-col h-screen max-w-lg mx-auto bg-slate-950 text-white overflow-hidden relative ${flashType === 'blue' ? 'flash-blue' : flashType === 'emerald' ? 'flash-emerald' : flashType === 'red' ? 'flash-red' : ''}`}>
+    <div className={`flex flex-col h-screen max-w-lg mx-auto bg-[#001122] text-white overflow-hidden relative transition-colors duration-500 ${flashType === 'patriots' ? 'bg-[#440615]' : flashType === 'seahawks' ? 'bg-[#153408]' : flashType === 'red' ? 'bg-[#330000]' : ''}`}>
       
-      {/* SHARE TOAST */}
+      {/* SHARE NOTIFICATION */}
       {shareToast && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[2000] px-6 py-2 bg-emerald-500 text-white font-black text-[10px] uppercase rounded-full shadow-2xl animate-bounce">
-          MISSION LINK COPIED TO CLIPBOARD
+        <div className="fixed top-24 left-1/2 -translate-x-1/2 z-[2000] px-8 py-3 bg-[#69BE28] text-white font-black text-[10px] uppercase rounded-full shadow-2xl animate-bounce border-2 border-white/20">
+          MISSION LINK BROADCASTED
         </div>
       )}
 
-      {/* REDZONE OVERLAY */}
+      {/* NUCLEAR REDZONE ALERT */}
       {gameScore.redzoneTeam && !hasVotedRedzone && (
-        <div className="absolute inset-0 z-[1000] bg-red-950/95 flex flex-col items-center justify-center p-8 animate-pulse border-4 border-red-600 m-2 rounded-[2.5rem] backdrop-blur-xl">
-           <div className="text-center space-y-4 mb-10">
-              <i className="fas fa-radiation text-6xl text-red-500 mb-4 animate-spin-slow"></i>
-              <h1 className="font-orbitron text-4xl font-black italic tracking-tighter text-white">REDZONE ALERT</h1>
-              <p className="text-red-400 font-black text-xs uppercase tracking-[0.4em]">{gameScore.redzoneTeam} HAS BREACHED THE 20</p>
+        <div className="absolute inset-0 z-[1000] bg-black/95 flex flex-col items-center justify-center p-8 animate-in fade-in zoom-in duration-300">
+           <div className="absolute inset-0 bg-red-600/10 animate-pulse pointer-events-none"></div>
+           <div className="text-center space-y-4 mb-12 relative">
+              <div className="w-24 h-24 rounded-full border-4 border-red-600 flex items-center justify-center mx-auto mb-6 animate-pulse">
+                <i className="fas fa-radiation text-5xl text-red-600"></i>
+              </div>
+              <h1 className="font-orbitron text-5xl font-black italic tracking-tighter text-white">REDZONE OVERRIDE</h1>
+              <p className="text-red-500 font-black text-sm uppercase tracking-[0.4em]">{gameScore.redzoneTeam} IN STRIKING RANGE</p>
            </div>
-           <div className="w-full space-y-4">
-              <p className="text-center text-[10px] font-black text-slate-400 uppercase mb-4 tracking-widest">SELECT TACTICAL OUTCOME [+500 XP]</p>
+           
+           <div className="w-full space-y-4 relative z-10">
+              <p className="text-center text-[11px] font-black text-slate-400 uppercase mb-4 tracking-[0.3em]">CHOOSE OUTCOME [+750 XP]</p>
               {['TOUCHDOWN', 'FIELD GOAL', 'REJECTED'].map(choice => (
                 <button 
                   key={choice}
                   onClick={() => handleRedzoneVote(choice)}
-                  className="w-full py-5 rounded-2xl bg-red-600 hover:bg-red-500 text-white font-black uppercase tracking-widest text-lg shadow-2xl shadow-red-900/40 active:scale-95 transition-all"
+                  className="w-full py-6 rounded-[2rem] bg-red-700 hover:bg-red-600 text-white font-black uppercase tracking-widest text-xl border-b-4 border-red-900 active:translate-y-1 active:border-b-0 transition-all"
                 >
                   {choice}
                 </button>
               ))}
            </div>
-           <p className="mt-10 text-[8px] font-black text-red-700 uppercase tracking-widest animate-pulse">LOCK IN BEFORE THE SNAP</p>
+           <p className="mt-12 text-[9px] font-black text-red-800 uppercase tracking-[0.5em] animate-pulse">LOCK IN BEFORE THE SNAP</p>
         </div>
       )}
 
-      {/* JUMBOTRON SCOREBOARD */}
-      <header className="p-3 z-50 glass border-b border-white/10 shadow-2xl">
-        <div className="flex justify-between items-center mb-2">
-          <div className="flex items-center gap-2">
-            <span className={`w-1.5 h-1.5 rounded-full ${activeTheme.main} animate-pulse`}></span>
-            <span className="text-[7px] font-black text-slate-500 uppercase tracking-[0.3em]">SECURE COMMS ESTABLISHED</span>
+      {/* CHAMPIONSHIP JUMBOTRON */}
+      <header className="p-4 z-50 glass border-b border-white/10 shadow-2xl">
+        <div className="flex justify-between items-center mb-4">
+          <div className="flex items-center gap-3">
+            <div className={`w-2 h-2 rounded-full ${activeTheme.main} animate-ping`}></div>
+            <span className="text-[9px] font-black text-slate-400 uppercase tracking-[0.3em]">LX COMMAND ACTIVE</span>
           </div>
           <div className="flex items-center gap-2">
-             <button onClick={handleShare} className="h-6 px-3 rounded bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-500 text-[8px] font-black uppercase tracking-widest gap-1.5">
-                <i className="fas fa-user-plus"></i> INVITE
+             <button onClick={handleShare} className="h-8 px-4 rounded-full bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 text-[9px] font-black uppercase tracking-widest gap-2">
+                <i className="fas fa-satellite"></i> INVITE SQUAD
              </button>
-             <button onClick={handleResetSession} className="w-6 h-6 rounded bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-500 text-[10px]"><i className="fas fa-power-off"></i></button>
+             <button onClick={handleResetSession} className="w-8 h-8 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-slate-500 text-[12px]"><i className="fas fa-power-off"></i></button>
           </div>
         </div>
 
-        <div className="relative group">
-          <div className={`absolute -inset-1 bg-gradient-to-r ${user.team === 'T1' ? 'from-blue-600 to-indigo-600' : 'from-emerald-600 to-teal-600'} rounded-[1.5rem] blur opacity-10`}></div>
-          <div className="relative flex justify-between items-center px-5 py-3 bg-black/60 rounded-[1.5rem] border border-white/5 backdrop-blur-md">
-            <div className="text-center w-16">
-              <p className={`text-[8px] font-black uppercase mb-0.5 ${gameScore.s1 >= gameScore.s2 ? 'text-blue-400' : 'text-slate-600'}`}>{gameScore.t1}</p>
-              <p className={`text-2xl font-orbitron font-black italic ${gameScore.s1 >= gameScore.s2 ? 'text-white' : 'text-slate-500'}`}>{gameScore.s1}</p>
+        <div className="relative">
+          <div className={`absolute -inset-1 bg-gradient-to-r ${user.team === 'T1' ? 'from-[#C60C30] to-[#002244]' : 'from-[#69BE28] to-[#002244]'} rounded-[2rem] blur opacity-20`}></div>
+          <div className="relative flex justify-between items-center px-6 py-5 bg-black/80 rounded-[2rem] border border-white/10 backdrop-blur-xl">
+            <div className="text-center w-24">
+              <p className={`text-[10px] font-black uppercase mb-1 ${gameScore.s1 >= gameScore.s2 ? 'text-[#C60C30]' : 'text-slate-600'}`}>NEW ENGLAND</p>
+              <p className={`text-3xl font-orbitron font-black italic ${gameScore.s1 >= gameScore.s2 ? 'text-white' : 'text-slate-500'}`}>{gameScore.s1}</p>
             </div>
-            <div className="flex flex-col items-center flex-1 mx-2">
-              <div className="px-2 py-0.5 bg-white/5 rounded-full mb-2 border border-white/5">
-                <span className={`text-[6px] font-black ${gameScore.redzoneTeam ? 'text-red-500 animate-pulse' : 'text-emerald-400'} uppercase tracking-widest`}>
+            
+            <div className="flex flex-col items-center flex-1 mx-4">
+              <div className="px-3 py-1 bg-white/5 rounded-full mb-3 border border-white/5">
+                <span className={`text-[8px] font-black ${gameScore.redzoneTeam ? 'text-red-500 animate-pulse' : 'text-[#69BE28]'} uppercase tracking-widest`}>
                   {gameScore.redzoneTeam ? 'REDZONE ALERT' : gameScore.status}
                 </span>
               </div>
-              <div className="w-full h-1 bg-slate-800 rounded-full overflow-hidden flex relative">
-                <div style={{ width: `${100 - gameScore.momentum}%` }} className="h-full bg-blue-500 transition-all duration-300"></div>
-                <div style={{ width: `${gameScore.momentum}%` }} className="h-full bg-emerald-500 transition-all duration-300"></div>
+              <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden flex relative shadow-inner">
+                <div style={{ width: `${100 - gameScore.momentum}%` }} className="h-full bg-[#C60C30] transition-all duration-700 ease-out shadow-[0_0_10px_rgba(198,12,48,0.5)]"></div>
+                <div style={{ width: `${gameScore.momentum}%` }} className="h-full bg-[#69BE28] transition-all duration-700 ease-out shadow-[0_0_10px_rgba(105,190,40,0.5)]"></div>
               </div>
             </div>
-            <div className="text-center w-16">
-              <p className={`text-[8px] font-black uppercase mb-0.5 ${gameScore.s2 >= gameScore.s1 ? 'text-emerald-400' : 'text-slate-600'}`}>{gameScore.t2}</p>
-              <p className={`text-2xl font-orbitron font-black italic ${gameScore.s2 >= gameScore.s1 ? 'text-white' : 'text-slate-500'}`}>{gameScore.s2}</p>
+
+            <div className="text-center w-24">
+              <p className={`text-[10px] font-black uppercase mb-1 ${gameScore.s2 >= gameScore.s1 ? 'text-[#69BE28]' : 'text-slate-600'}`}>SEATTLE</p>
+              <p className={`text-3xl font-orbitron font-black italic ${gameScore.s2 >= gameScore.s1 ? 'text-white' : 'text-slate-500'}`}>{gameScore.s2}</p>
             </div>
           </div>
         </div>
 
-        <nav className="flex gap-1 mt-4">
+        <nav className="flex gap-2 mt-5">
           {[
-            { id: 'chat', label: 'COMBAT' },
-            { id: 'stakes', label: 'STAKES' },
-            { id: 'side', label: 'SIDE GAME' },
+            { id: 'chat', label: 'COMMS' },
+            { id: 'stakes', label: 'PREDICTIONS' },
+            { id: 'side', label: 'THE SHOW' },
             { id: 'ranks', label: 'RANKS' }
           ].map(tab => {
             const isTabActive = activeTab === tab.id;
@@ -321,10 +337,10 @@ export default function App() {
               <button 
                 key={tab.id} 
                 onClick={() => setActiveTab(tab.id as any)} 
-                className={`flex-1 py-2.5 rounded-lg text-[8px] font-black uppercase tracking-widest transition-all ${
+                className={`flex-1 py-3 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all transform active:scale-95 ${
                   isTabActive 
-                    ? `${tabTheme.main} text-white shadow-lg` 
-                    : 'bg-white/5 text-slate-500 hover:text-white'
+                    ? `${tabTheme.main} text-white shadow-xl scale-105 z-10 border border-white/20` 
+                    : 'bg-white/5 text-slate-500 hover:text-white hover:bg-white/10'
                 }`}
               >
                 {tab.label}
@@ -334,18 +350,18 @@ export default function App() {
         </nav>
       </header>
 
-      {/* FEED CONTENT */}
-      <main className="flex-1 overflow-y-auto custom-scrollbar p-4">
+      {/* MAIN THEATER */}
+      <main className="flex-1 overflow-y-auto custom-scrollbar p-5">
         {activeTab === 'chat' && (
-          <div className="space-y-4 pb-32">
+          <div className="space-y-5 pb-36">
             {messages.map((msg, i) => (
-              <div key={msg.id || i} className={`flex flex-col ${msg.senderId === user.id ? 'items-end' : 'items-start'} msg-animate`}>
-                <span className={`text-[7px] font-black uppercase mb-0.5 px-2 text-slate-500`}>
-                   {msg.senderName} {msg.senderId === 'sideline_bot_ai' && '• TAC_INTEL'}
+              <div key={msg.id || i} className={`flex flex-col ${msg.senderId === user.id ? 'items-end' : 'items-start'} animate-in slide-in-from-bottom-2`}>
+                <span className={`text-[8px] font-black uppercase mb-1 px-3 text-slate-500 tracking-widest`}>
+                   {msg.senderName} {msg.senderId === 'controller_ai' && '• TAC_INTEL'}
                 </span>
-                <div className={`max-w-[85%] px-4 py-2.5 rounded-2xl text-[13px] ${
-                  msg.senderId === user.id ? `${teamTheme.main} text-white rounded-tr-none shadow-lg` : 
-                  msg.senderId === 'sideline_bot_ai' ? 'bg-slate-900 border-l-2 border-blue-500 text-slate-200 italic rounded-tl-none' :
+                <div className={`max-w-[90%] px-5 py-3 rounded-2xl text-[14px] leading-relaxed ${
+                  msg.senderId === user.id ? `${teamTheme.main} text-white rounded-tr-none shadow-lg border border-white/10` : 
+                  msg.senderId === 'controller_ai' ? 'bg-slate-900 border-l-4 border-blue-500 text-slate-200 italic rounded-tl-none font-medium' :
                   'bg-slate-900 border border-white/5 text-slate-200 rounded-tl-none'
                 }`}>
                   {msg.text}
@@ -356,30 +372,70 @@ export default function App() {
           </div>
         )}
 
-        {activeTab === 'side' && (
-          <div className="space-y-6 pb-32">
-             <div className={`p-5 glass border rounded-[2rem] space-y-6 relative overflow-hidden ${themeStyles.amber.bgLight} border-amber-500/20`}>
+        {activeTab === 'stakes' && (
+          <div className="space-y-6 pb-24">
+             <div className="p-6 glass border border-white/10 rounded-[2.5rem] space-y-8">
                 <div className="text-center">
-                   <h2 className="font-orbitron font-black text-lg uppercase italic text-amber-500 mb-1">SIDE MISSION MANIFEST</h2>
-                   <p className="text-[7px] font-black text-slate-500 tracking-[0.3em] uppercase">COMMERCIAL_INTEL_V5.0</p>
+                   <h2 className="font-orbitron font-black text-xl uppercase italic mb-2 tracking-tight">SB LX STAKES</h2>
+                   <p className="text-[8px] font-black text-slate-500 tracking-[0.4em] uppercase">MISSION_OBJECTIVES_2026</p>
                 </div>
-                <div className="space-y-5">
-                  {SIDE_TASKS.map((task) => (
-                    <div key={task.id} className="space-y-2">
-                       <div className="flex justify-between items-center px-1">
-                          <label className="text-[7px] font-black text-amber-500/60 uppercase tracking-widest">{task.label}</label>
-                          <span className="text-[6px] font-black text-amber-400/40 bg-amber-400/10 px-1.5 py-0.5 rounded-full">+{task.points} XP</span>
+                <div className="space-y-6">
+                  {PREDICTION_TASKS.map((task) => (
+                    <div key={task.id} className="space-y-3">
+                       <div className="flex justify-between items-center px-2">
+                          <label className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">{task.label}</label>
+                          <span className="text-[7px] font-black text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded-full border border-emerald-500/20">+{task.points} XP</span>
                        </div>
-                       <div className="grid grid-cols-2 gap-2">
+                       <div className="grid grid-cols-2 gap-3">
+                          {task.options.map((opt) => (
+                            <button
+                              key={opt}
+                              disabled={hasSavedStakes}
+                              onClick={() => setPredictions(prev => ({ ...prev, [task.id]: opt }))}
+                              className={`py-3 rounded-2xl text-[10px] font-black uppercase transition-all border-2 ${
+                                predictions[task.id] === opt 
+                                  ? `${teamTheme.main} border-white/40 text-white shadow-2xl` 
+                                  : 'bg-black/40 border-white/5 text-slate-500 hover:border-white/20'
+                              } ${hasSavedStakes && predictions[task.id] !== opt ? 'opacity-30' : ''}`}
+                            >
+                              {opt}
+                            </button>
+                          ))}
+                       </div>
+                    </div>
+                  ))}
+                </div>
+                {!hasSavedStakes && (
+                  <button onClick={() => setHasSavedStakes(true)} className={`w-full py-5 rounded-2xl ${teamTheme.main} font-black uppercase tracking-[0.3em] mt-6 shadow-2xl border-t-2 border-white/20`}>SEAL PREDICTIONS</button>
+                )}
+             </div>
+          </div>
+        )}
+
+        {activeTab === 'side' && (
+          <div className="space-y-6 pb-24">
+             <div className="p-6 glass border border-amber-500/20 rounded-[2.5rem] space-y-8 bg-amber-500/5">
+                <div className="text-center">
+                   <h2 className="font-orbitron font-black text-xl uppercase italic text-amber-500 mb-2 tracking-tight">SUPER BOWL SHOW</h2>
+                   <p className="text-[8px] font-black text-amber-500/40 tracking-[0.4em] uppercase">ADS_&_HALFTIME_INTEL</p>
+                </div>
+                <div className="space-y-6">
+                  {SIDE_TASKS.map((task) => (
+                    <div key={task.id} className="space-y-3">
+                       <div className="flex justify-between items-center px-2">
+                          <label className="text-[9px] font-black text-amber-500/70 uppercase tracking-[0.2em]">{task.label}</label>
+                          <span className="text-[7px] font-black text-amber-400 bg-amber-400/10 px-2 py-1 rounded-full border border-amber-500/20">+{task.points} XP</span>
+                       </div>
+                       <div className="grid grid-cols-2 gap-3">
                           {task.options.map((opt) => (
                             <button
                               key={opt}
                               disabled={hasSavedSide}
                               onClick={() => setSidePredictions(prev => ({ ...prev, [task.id]: opt }))}
-                              className={`py-2 rounded-lg text-[8px] font-black uppercase transition-all border ${
+                              className={`py-3 rounded-2xl text-[10px] font-black uppercase transition-all border-2 ${
                                 sidePredictions[task.id] === opt 
-                                  ? `${themeStyles.amber.main} border-amber-500 text-white shadow-lg` 
-                                  : 'bg-black/40 border-white/5 text-slate-500'
+                                  ? 'bg-amber-600 border-white/40 text-white shadow-2xl' 
+                                  : 'bg-black/40 border-white/5 text-slate-600'
                               } ${hasSavedSide && sidePredictions[task.id] !== opt ? 'opacity-30' : ''}`}
                             >
                               {opt}
@@ -390,89 +446,49 @@ export default function App() {
                   ))}
                 </div>
                 {!hasSavedSide && (
-                  <button onClick={() => setHasSavedSide(true)} className="w-full py-4 rounded-xl bg-amber-600 font-black uppercase tracking-[0.2em] mt-4 hover:bg-amber-500 shadow-xl shadow-amber-500/20">SEAL SIDE OPS</button>
-                )}
-             </div>
-          </div>
-        )}
-
-        {activeTab === 'stakes' && (
-          <div className="space-y-6 py-4 pb-20">
-             <div className="p-5 glass border border-white/10 rounded-[2rem] space-y-6">
-                <div className="text-center">
-                   <h2 className="font-orbitron font-black text-lg uppercase italic mb-1">COMMAND MISSION</h2>
-                   <p className="text-[7px] font-black text-slate-500 tracking-[0.3em] uppercase">SBLIX_GRIDIRON_FORECAST</p>
-                </div>
-                <div className="space-y-5">
-                  {PREDICTION_TASKS.map((task) => (
-                    <div key={task.id} className="space-y-2">
-                       <div className="flex justify-between items-center px-1">
-                          <label className="text-[7px] font-black text-slate-500 uppercase tracking-widest">{task.label}</label>
-                          <span className="text-[6px] font-black text-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 rounded-full">+{task.points} XP</span>
-                       </div>
-                       <div className="grid grid-cols-2 gap-2">
-                          {task.options.map((opt) => (
-                            <button
-                              key={opt}
-                              disabled={hasSavedStakes}
-                              onClick={() => setPredictions(prev => ({ ...prev, [task.id]: opt }))}
-                              className={`py-2 rounded-lg text-[8px] font-black uppercase transition-all border ${
-                                predictions[task.id] === opt 
-                                  ? `${teamTheme.main} border-${teamColorKey}-500 text-white shadow-lg` 
-                                  : 'bg-black/40 border-white/5 text-slate-500'
-                              }`}
-                            >
-                              {opt}
-                            </button>
-                          ))}
-                       </div>
-                    </div>
-                  ))}
-                </div>
-                {!hasSavedStakes && (
-                  <button onClick={() => setHasSavedStakes(true)} className={`w-full py-4 rounded-xl ${teamTheme.main} font-black uppercase tracking-[0.2em] mt-4 shadow-lg`}>SEAL COMMAND VAULT</button>
+                  <button onClick={() => setHasSavedSide(true)} className="w-full py-5 rounded-2xl bg-amber-600 font-black uppercase tracking-[0.3em] mt-6 shadow-2xl border-t-2 border-white/20">SEAL SHOW OPS</button>
                 )}
              </div>
           </div>
         )}
 
         {activeTab === 'ranks' && (
-          <div className="space-y-3 pb-20">
-            <div className="text-center mb-6 py-4 border-y border-white/5">
-               <h3 className="font-orbitron text-[10px] font-black text-slate-500 uppercase tracking-[0.4em]">MISSION STATUS: RESET</h3>
-               <p className="text-[7px] font-black text-emerald-500 uppercase mt-1 animate-pulse">ALL OPERATIVES RETURNING TO BASELINE</p>
+          <div className="space-y-4 pb-24">
+            <div className="text-center mb-8 py-6 border-y border-white/10">
+               <h3 className="font-orbitron text-[12px] font-black text-slate-500 uppercase tracking-[0.5em]">LX MISSION STATUS</h3>
+               <p className="text-[9px] font-black text-[#69BE28] uppercase mt-2 animate-pulse">2026 OPERATIVES RETURNING TO ZERO BASELINE</p>
             </div>
-            {[{n: user.name, p: 0}].map((r, i) => (
-              <div key={i} className={`flex items-center gap-4 p-4 glass rounded-3xl border border-white/10 shadow-xl relative overflow-hidden`}>
-                 <div className="absolute top-0 left-0 w-1 h-full bg-emerald-500"></div>
-                 <div className="w-8 h-8 rounded-lg bg-black/60 flex items-center justify-center font-black text-emerald-500 text-xs border border-white/5">{i+1}</div>
+            {[{n: user.name, p: 0, r: 'RECRUIT'}].map((r, i) => (
+              <div key={i} className={`flex items-center gap-5 p-5 glass rounded-[2rem] border-l-4 border-l-[#69BE28] border border-white/10 shadow-2xl relative overflow-hidden bg-white/5`}>
+                 <div className="w-10 h-10 rounded-xl bg-black/60 flex items-center justify-center font-black text-[#69BE28] text-sm border border-white/10">{i+1}</div>
                  <div className="flex-1">
-                    <div className="font-black text-[12px] uppercase text-white">{r.n}</div>
-                    <div className="text-[6px] font-black text-slate-500 uppercase tracking-widest">RANK: RECRUIT</div>
+                    <div className="font-black text-sm uppercase text-white tracking-wide">{r.n}</div>
+                    <div className="text-[8px] font-black text-slate-500 uppercase tracking-widest mt-1">RANK: {r.r}</div>
                  </div>
                  <div className="text-right">
-                    <div className="font-orbitron font-black text-emerald-400 text-sm">{r.p}</div>
-                    <div className="text-[6px] font-black text-emerald-500/40 uppercase">XP_INTEL</div>
+                    <div className="font-orbitron font-black text-[#69BE28] text-lg">{r.p}</div>
+                    <div className="text-[7px] font-black text-[#69BE28]/40 uppercase tracking-tighter">XP INTEL</div>
                  </div>
               </div>
             ))}
-            <div className="mt-8 p-6 bg-white/5 rounded-3xl border border-dashed border-white/10 text-center">
-               <p className="text-[8px] font-black text-slate-600 uppercase tracking-widest">FURTHER OPERATIVES IN TRANSIT...</p>
+            <div className="mt-10 p-10 bg-white/2 rounded-[2rem] border border-dashed border-white/10 text-center">
+               <i className="fas fa-trophy text-4xl text-slate-700 mb-4 opacity-30"></i>
+               <p className="text-[10px] font-black text-slate-600 uppercase tracking-[0.4em]">WAITING FOR LX KICKOFF</p>
             </div>
           </div>
         )}
       </main>
 
-      {/* TACTICAL INPUT */}
+      {/* MISSION CONTROL INPUT */}
       {(activeTab === 'chat' || activeTab === 'side') && (
-        <div className="absolute bottom-6 inset-x-4 p-4 glass rounded-[2.5rem] border border-white/10 shadow-2xl z-[60]">
-           <div className="flex gap-2 mb-3">
-              <button onClick={() => { if(db) addDoc(collection(db, HYPE_COLLECTION), { team: user.team, userId: user.id, timestamp: serverTimestamp() }); }} className={`flex-1 py-3 ${activeTheme.bgLight} border ${activeTheme.border}/40 rounded-xl text-[9px] font-black uppercase hover:${activeTheme.main}/40 active:scale-95 transition-all flex items-center justify-center gap-2`}>
-                <i className="fas fa-fire-alt"></i>
-                HYPE {user.team === 'T1' ? 'RAMS' : 'SEAHAWKS'}
+        <div className="absolute bottom-8 inset-x-6 p-5 glass rounded-[3rem] border border-white/15 shadow-[0_20px_50px_rgba(0,0,0,0.5)] z-[60] backdrop-blur-3xl">
+           <div className="flex gap-3 mb-4">
+              <button onClick={() => { if(db) addDoc(collection(db, HYPE_COLLECTION), { team: user.team, userId: user.id, timestamp: serverTimestamp() }); }} className={`flex-1 py-4 ${activeTheme.bgLight} border border-white/10 rounded-2xl text-[10px] font-black uppercase hover:${activeTheme.main}/30 active:scale-95 transition-all flex items-center justify-center gap-3`}>
+                <i className="fas fa-fire-alt text-amber-500"></i>
+                HYPE {user.team === 'T1' ? 'NEW ENGLAND' : 'SEATTLE'}
               </button>
-              <button className="px-4 py-3 bg-white/5 border border-white/5 rounded-xl text-[9px] font-black uppercase active:scale-95 transition-all">
-                <i className="fas fa-volume-up"></i>
+              <button className="px-5 py-4 bg-white/5 border border-white/10 rounded-2xl text-[10px] font-black uppercase active:scale-95 transition-all hover:bg-white/10">
+                <i className="fas fa-bullhorn text-emerald-400"></i>
               </button>
            </div>
            <form onSubmit={(e) => {
@@ -481,25 +497,24 @@ export default function App() {
              if (!input.value.trim() || !db) return;
              const collectionName = activeTab === 'side' ? SIDE_MSG_COLLECTION : MSG_COLLECTION;
              addDoc(collection(db, collectionName), {
-               senderId: user.id,
-               senderName: user.name,
-               text: input.value,
-               timestamp: serverTimestamp()
+               senderId: user.id, senderName: user.name, text: input.value, timestamp: serverTimestamp()
              });
              input.value = '';
-           }} className="flex gap-2">
-             <input placeholder={`ENTER ${activeTab === 'side' ? 'SIDE OPS' : 'COMMAND'} INTEL...`} className="flex-1 bg-black/40 border border-white/5 rounded-2xl px-5 outline-none text-white text-[11px] font-medium focus:border-emerald-500" />
-             <button type="submit" className={`w-12 h-12 ${activeTheme.main} rounded-2xl flex items-center justify-center shadow-lg active:scale-90 transition-all`}><i className="fas fa-paper-plane"></i></button>
+           }} className="flex gap-3">
+             <input placeholder={`ENTER ${activeTab === 'side' ? 'SHOW' : 'COMMAND'} INTEL...`} className="flex-1 bg-black/50 border border-white/10 rounded-[1.5rem] px-6 py-4 outline-none text-white text-[13px] font-medium focus:border-emerald-500 placeholder:text-slate-600 transition-all" />
+             <button type="submit" className={`w-14 h-14 ${activeTheme.main} rounded-[1.5rem] flex items-center justify-center shadow-lg active:scale-90 transition-all border-t border-white/30`}><i className="fas fa-paper-plane"></i></button>
            </form>
         </div>
       )}
 
-      <div className="h-6 bg-black border-t border-white/10 flex items-center overflow-hidden z-[100]">
-         <div className="ticker-wrap w-full">
-            <div className="ticker font-orbitron font-black text-[8px] text-emerald-500 uppercase tracking-widest space-x-20">
+      {/* TACTICAL TICKER */}
+      <div className="h-8 bg-black border-t border-white/10 flex items-center overflow-hidden z-[100] relative">
+         <div className="ticker-wrap w-full flex items-center">
+            <div className="ticker font-orbitron font-black text-[9px] text-[#69BE28] uppercase tracking-[0.4em] space-x-24">
                <span>{gameScore.ticker}</span>
             </div>
          </div>
+         <div className="absolute right-0 top-0 h-full w-20 bg-gradient-to-l from-black to-transparent pointer-events-none"></div>
       </div>
     </div>
   );
@@ -509,22 +524,51 @@ function JoinScreen({ onJoin, onInvite }: { onJoin: (n: string, t: 'T1' | 'T2') 
   const [name, setName] = useState('');
   const [team, setTeam] = useState<'T1' | 'T2'>('T1');
   return (
-    <div className={`flex items-center justify-center min-h-screen p-6 ${team === 'T1' ? 'bg-blue-950' : 'bg-emerald-950'} relative overflow-hidden`}>
-      <div className="w-full max-w-md p-10 glass rounded-[3rem] text-center border-white/10 shadow-2xl relative z-10 space-y-10">
-        <div>
-          <h1 className="font-orbitron text-4xl font-black italic text-white mb-2 tracking-tighter">SBLIX LIX</h1>
-          <button onClick={onInvite} className="mt-2 text-[8px] font-black text-emerald-400 uppercase tracking-[0.3em] bg-emerald-500/10 border border-emerald-500/20 px-4 py-2 rounded-full hover:bg-emerald-500/20 active:scale-95 transition-all">
-            <i className="fas fa-user-plus mr-1.5"></i> INVITE SQUAD TO FEED
+    <div className={`flex items-center justify-center min-h-screen p-6 transition-colors duration-1000 ${team === 'T1' ? 'bg-[#002244]' : 'bg-[#002244]'} relative overflow-hidden`}>
+      <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')] opacity-10"></div>
+      <div className="w-full max-w-md p-12 glass rounded-[4rem] text-center border-white/10 shadow-[0_50px_100px_rgba(0,0,0,0.8)] relative z-10 space-y-12">
+        <div className="animate-in fade-in zoom-in duration-700">
+          <div className="w-20 h-20 mx-auto mb-6 rounded-3xl bg-white/5 border border-white/10 flex items-center justify-center rotate-3 shadow-2xl">
+            <i className="fas fa-football-ball text-4xl text-white"></i>
+          </div>
+          <h1 className="font-orbitron text-5xl font-black italic text-white mb-3 tracking-tighter drop-shadow-2xl">SUPER BOWL LX</h1>
+          <button onClick={onInvite} className="mt-4 text-[9px] font-black text-[#69BE28] uppercase tracking-[0.4em] bg-[#69BE28]/10 border border-[#69BE28]/30 px-6 py-2.5 rounded-full hover:bg-[#69BE28]/20 active:scale-95 transition-all shadow-lg">
+            <i className="fas fa-satellite-dish mr-2"></i> BROADCAST MISSION INVITE
           </button>
         </div>
-        <div className="space-y-6">
-          <input value={name} onChange={e => setName(e.target.value.toUpperCase())} placeholder="CALLSIGN" className="w-full bg-black/40 border border-white/10 rounded-2xl px-6 py-4 text-white font-black text-center uppercase outline-none focus:border-emerald-500 text-xl" />
-          <div className="grid grid-cols-2 gap-4">
-             <button onClick={() => setTeam('T1')} className={`py-4 rounded-xl border-2 ${team === 'T1' ? 'border-blue-500 bg-blue-500/20' : 'border-white/5 opacity-40'}`}>RAMS</button>
-             <button onClick={() => setTeam('T2')} className={`py-4 rounded-xl border-2 ${team === 'T2' ? 'border-emerald-500 bg-emerald-500/20' : 'border-white/5 opacity-40'}`}>SEAHAWKS</button>
+        
+        <div className="space-y-8">
+          <div className="space-y-2">
+            <label className="text-[10px] font-black text-white/40 uppercase tracking-[0.4em]">ASSIGN OPERATIVE NAME</label>
+            <input 
+              value={name} 
+              onChange={e => setName(e.target.value.toUpperCase())} 
+              placeholder="ENTER CALLSIGN" 
+              className="w-full bg-black/60 border-b-4 border-white/10 rounded-2xl px-8 py-5 text-white font-black text-center uppercase outline-none focus:border-[#69BE28] text-2xl transition-all shadow-inner" 
+            />
+          </div>
+          
+          <div className="space-y-4">
+            <label className="text-[10px] font-black text-white/40 uppercase tracking-[0.4em]">CHOOSE ALLEGIANCE</label>
+            <div className="grid grid-cols-2 gap-5">
+               <button onClick={() => setTeam('T1')} className={`py-6 rounded-3xl border-2 transition-all transform ${team === 'T1' ? 'border-[#C60C30] bg-[#C60C30] text-white shadow-[0_0_30px_rgba(198,12,48,0.4)] scale-105' : 'border-white/5 bg-black/40 text-slate-600 opacity-50'}`}>
+                 <span className="font-black text-lg tracking-tighter">PATRIOTS</span>
+                 <p className="text-[8px] font-black opacity-60">NEW ENGLAND</p>
+               </button>
+               <button onClick={() => setTeam('T2')} className={`py-6 rounded-3xl border-2 transition-all transform ${team === 'T2' ? 'border-[#69BE28] bg-[#69BE28] text-white shadow-[0_0_30px_rgba(105,190,40,0.4)] scale-105' : 'border-white/5 bg-black/40 text-slate-600 opacity-50'}`}>
+                 <span className="font-black text-lg tracking-tighter">SEAHAWKS</span>
+                 <p className="text-[8px] font-black opacity-60">SEATTLE</p>
+               </button>
+            </div>
           </div>
         </div>
-        <button onClick={() => name && onJoin(name, team)} className={`w-full ${team === 'T1' ? 'bg-blue-600' : 'bg-emerald-600'} text-white font-black py-5 rounded-2xl`}>CONNECT</button>
+        
+        <button 
+          onClick={() => name && onJoin(name, team)} 
+          className={`w-full py-6 rounded-[2.5rem] ${team === 'T1' ? 'bg-[#C60C30]' : 'bg-[#69BE28]'} text-white font-black text-xl tracking-[0.3em] shadow-[0_15px_40px_rgba(0,0,0,0.5)] border-t-2 border-white/20 active:translate-y-1 transition-all`}
+        >
+          DEPLOY TO HUB
+        </button>
       </div>
     </div>
   );
@@ -533,11 +577,21 @@ function JoinScreen({ onJoin, onInvite }: { onJoin: (n: string, t: 'T1' | 'T2') 
 function ConfigScreen() {
   const [config, setConfig] = useState('');
   return (
-    <div className="flex items-center justify-center min-h-screen p-6 bg-slate-950 text-white">
-      <div className="max-w-md w-full glass p-8 rounded-[2rem] space-y-6">
-        <h2 className="text-xl font-orbitron font-black italic uppercase">Config Required</h2>
-        <textarea rows={4} value={config} onChange={e => setConfig(e.target.value)} className="w-full bg-black/60 border border-white/10 rounded-xl p-3 text-[9px] font-mono outline-none" placeholder='{ "apiKey": "...", ... }'/>
-        <button onClick={() => saveManualConfig(config)} className="w-full bg-blue-600 py-3 rounded-xl font-black text-[10px]">INITIALIZE</button>
+    <div className="flex items-center justify-center min-h-screen p-6 bg-[#001122] text-white">
+      <div className="max-w-md w-full glass p-10 rounded-[3rem] space-y-8 border-white/10 shadow-2xl">
+        <div className="text-center">
+           <i className="fas fa-shield-alt text-4xl text-blue-500 mb-4"></i>
+           <h2 className="text-2xl font-orbitron font-black italic uppercase tracking-tight">System Initialization</h2>
+           <p className="text-[9px] font-black text-slate-500 uppercase mt-2 tracking-widest">Database Credentials Required</p>
+        </div>
+        <textarea 
+          rows={6} 
+          value={config} 
+          onChange={e => setConfig(e.target.value)} 
+          className="w-full bg-black/60 border border-white/10 rounded-[2rem] p-5 text-[10px] font-mono outline-none focus:border-blue-500 shadow-inner" 
+          placeholder='{ "apiKey": "...", ... }'
+        />
+        <button onClick={() => saveManualConfig(config)} className="w-full bg-blue-600 py-5 rounded-[2rem] font-black text-[12px] tracking-[0.2em] shadow-xl hover:bg-blue-500 transition-all">ESTABLISH SECURE LINK</button>
       </div>
     </div>
   );

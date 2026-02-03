@@ -15,22 +15,22 @@ export async function getCoachResponse(prompt: string) {
       model: "gemini-3-flash-preview",
       contents: prompt,
       config: {
-        systemInstruction: "You are the 'SBLIX COMBAT CONTROLLER'. Use military jargon. Keep it under 25 words.",
+        systemInstruction: "You are the 'SUPER BOWL LX COMMAND CONTROLLER'. Provide high-stakes tactical updates for the New England vs Seattle matchup in 2026. Use military/football jargon. Keep it under 25 words.",
         temperature: 0.9,
       }
     });
-    return response.text || "Eyes on the objective. 🏈";
-  } catch (err) { return "Signal interference. 📡"; }
+    return response.text || "Hold the line. 🏈";
+  } catch (err) { return "Interference detected. 📡"; }
 }
 
 export async function analyzeMomentum(scoreData: any) {
   const ai = getAI();
-  if (!ai) return { momentum: 50, isBigPlay: false, intel: "Interference.", sources: [], redzoneTeam: null };
+  if (!ai) return { momentum: 50, isBigPlay: false, intel: "Scanning...", sources: [], redzoneTeam: null };
   const now = new Date().toLocaleString();
   try {
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: `Tactical Assessment: SB LIX (${now}). Score (${scoreData.rams}-${scoreData.seahawks}). Determine Momentum (0-100), Big Play status, and Redzone Breach status. Format: MOMENTUM: [num], BIG_PLAY: [bool], REDZONE: [TeamName/None], INTEL: [text]`,
+      contents: `Tactical Analysis: SB LX (Patriots vs Seahawks) at Levi's Stadium. Current Score (${scoreData.t1}-${scoreData.t2}). Provide: Momentum (0-100), Big Play status (bool), Redzone status (Team/None), and 10-word Intel briefing. Format: MOMENTUM: [num], BIG_PLAY: [bool], REDZONE: [Team/None], INTEL: [text]`,
       config: { tools: [{ googleSearch: {} }] },
     });
     
@@ -39,12 +39,12 @@ export async function analyzeMomentum(scoreData: any) {
     const isBigPlay = /BIG_PLAY:?\s*true/i.test(text);
     const redzoneMatch = text.match(/REDZONE:?\s*([\w\s]+)/i);
     const redzoneTeam = (redzoneMatch?.[1]?.trim().toUpperCase() === 'NONE' || !redzoneMatch?.[1]) ? null : redzoneMatch[1].trim();
-    const intel = text.match(/INTEL:?\s*(.+)/i)?.[1] || "Scanning...";
+    const intel = text.match(/INTEL:?\s*(.+)/i)?.[1] || "Monitoring situation...";
     const sources = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
 
     return { momentum, isBigPlay, intel, sources, redzoneTeam };
   } catch (err) {
-    return { momentum: 50, isBigPlay: false, intel: "Status: Uncertain.", sources: [], redzoneTeam: null };
+    return { momentum: 50, isBigPlay: false, intel: "Analyzing feed...", sources: [], redzoneTeam: null };
   }
 }
 
@@ -55,27 +55,27 @@ export async function getLiveScoreFromSearch() {
   try {
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: `Intelligence Retrieval: SB LIX. Time: ${now}. Format: T1: [Name], S1: [Score], T2: [Name], S2: [Score], STATUS: [Live/Final]`,
+      contents: `Retrieval: LIVE SCORE Super Bowl LX (New England Patriots vs Seattle Seahawks). Time: ${now}. Format: T1: [New England], S1: [Score], T2: [Seattle], S2: [Score], STATUS: [Live/Pre/Final]`,
       config: { tools: [{ googleSearch: {} }] },
     });
     const text = response.text || "";
-    const t1 = text.match(/T1:?\s*([\w\s]+),/i)?.[1] || "RAMS";
+    const t1 = text.match(/T1:?\s*([\w\s]+)/i)?.[1] || "NEW ENGLAND";
     const s1 = parseInt(text.match(/S1:?\s*(\d+)/i)?.[1] || "0");
-    const t2 = text.match(/T2:?\s*([\w\s]+),/i)?.[1] || "SEAHAWKS";
+    const t2 = text.match(/T2:?\s*([\w\s]+)/i)?.[1] || "SEATTLE";
     const s2 = parseInt(text.match(/S2:?\s*(\d+)/i)?.[1] || "0");
-    const status = text.match(/STATUS:?\s*(\w+)/i)?.[1] || "LIVE";
+    const status = text.match(/STATUS:?\s*(\w+)/i)?.[1] || "PRE-GAME";
     return { team1: t1, score1: s1, team2: t2, score2: s2, status: status.toUpperCase(), sources: [] };
   } catch (err) { return null; }
 }
 
 export async function getSidelineFact() {
   const ai = getAI();
-  if (!ai) return "Objective: Victory.";
+  if (!ai) return "Mission: Glory.";
   try {
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: "Super Bowl historical tactical fact. 15 words max.",
+      contents: "Super Bowl LX historical fact or 2026 matchup tidbit (Patriots/Seahawks). 15 words max.",
     });
-    return response.text || "Every yard counts. 📊";
-  } catch (err) { return "Operational. 📊"; }
+    return response.text || "History is happening. 📊";
+  } catch (err) { return "Secure line. 📊"; }
 }
