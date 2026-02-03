@@ -84,7 +84,7 @@ export default function App() {
     } catch (e) { return null; }
   });
   
-  const [activeTab, setActiveTab] = useState<'chat' | 'stakes' | 'side' | 'ranks'>('chat');
+  const [activeTab, setActiveTab] = useState<'chat' | 'stats' | 'stakes' | 'side' | 'ranks'>('chat');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sideMessages, setSideMessages] = useState<ChatMessage[]>([]);
   const [gameScore, setGameScore] = useState({ 
@@ -304,7 +304,7 @@ export default function App() {
           <div className={`absolute -inset-1 bg-gradient-to-r ${user.team === 'T1' ? 'from-[#C60C30] to-[#002244]' : 'from-[#69BE28] to-[#002244]'} rounded-[2rem] blur opacity-20`}></div>
           <div className="relative flex justify-between items-center px-6 py-5 bg-black/80 rounded-[2rem] border border-white/10 backdrop-blur-xl">
             <div className="text-center w-24">
-              <p className={`text-[10px] font-black uppercase mb-1 ${gameScore.s1 >= gameScore.s2 ? 'text-[#C60C30]' : 'text-slate-600'}`}>NEW ENGLAND</p>
+              <p className={`text-[10px] font-black uppercase mb-1 ${gameScore.s1 >= gameScore.s2 ? 'text-[#C60C30]' : 'text-slate-600'}`}>PATRIOTS</p>
               <p className={`text-3xl font-orbitron font-black italic ${gameScore.s1 >= gameScore.s2 ? 'text-white' : 'text-slate-500'}`}>{gameScore.s1}</p>
             </div>
             
@@ -321,41 +321,18 @@ export default function App() {
             </div>
 
             <div className="text-center w-24">
-              <p className={`text-[10px] font-black uppercase mb-1 ${gameScore.s2 >= gameScore.s1 ? 'text-[#69BE28]' : 'text-slate-600'}`}>SEATTLE</p>
+              <p className={`text-[10px] font-black uppercase mb-1 ${gameScore.s2 >= gameScore.s1 ? 'text-[#69BE28]' : 'text-slate-600'}`}>SEAHAWKS</p>
               <p className={`text-3xl font-orbitron font-black italic ${gameScore.s2 >= gameScore.s1 ? 'text-white' : 'text-slate-500'}`}>{gameScore.s2}</p>
             </div>
           </div>
         </div>
 
-        {/* TACTICAL STAT HUD */}
-        {gameScore.detailedStats && (
-          <div className="mt-4 grid grid-cols-2 gap-2 bg-black/40 p-3 rounded-2xl border border-white/5 backdrop-blur-md animate-in fade-in slide-in-from-top-2 duration-500">
-            <div className="space-y-1">
-              <p className="text-[7px] font-black text-red-500/80 uppercase tracking-widest">PATRIOTS INTEL</p>
-              <div className="flex justify-between items-center text-[9px] font-bold">
-                 <span className="text-slate-500">YARDS:</span> <span>{gameScore.detailedStats.pYds}</span>
-              </div>
-              <p className="text-[8px] font-medium text-slate-300 truncate"><i className="fas fa-football text-[6px] mr-1 text-red-500"></i> {gameScore.detailedStats.pPass}</p>
-            </div>
-            <div className="space-y-1 border-l border-white/10 pl-3">
-              <p className="text-[7px] font-black text-[#69BE28]/80 uppercase tracking-widest">SEAHAWKS INTEL</p>
-              <div className="flex justify-between items-center text-[9px] font-bold">
-                 <span className="text-slate-500">YARDS:</span> <span>{gameScore.detailedStats.sYds}</span>
-              </div>
-              <p className="text-[8px] font-medium text-slate-300 truncate"><i className="fas fa-football text-[6px] mr-1 text-[#69BE28]"></i> {gameScore.detailedStats.sPass}</p>
-            </div>
-            <div className="col-span-2 mt-2 pt-2 border-t border-white/5 flex justify-between items-center">
-               <span className="text-[7px] font-black text-slate-500 uppercase tracking-tighter">AI_UNIT_SEARCH_GROUNDED</span>
-               <span className="text-[8px] font-black text-amber-500 uppercase tracking-widest">TURNOVERS: {gameScore.detailedStats.turnovers}</span>
-            </div>
-          </div>
-        )}
-
-        <nav className="flex gap-2 mt-5">
+        <nav className="flex gap-1.5 mt-5 overflow-x-auto no-scrollbar pb-1">
           {[
             { id: 'chat', label: 'COMMS' },
-            { id: 'stakes', label: 'PREDICTIONS' },
-            { id: 'side', label: 'THE SHOW' },
+            { id: 'stats', label: 'STATS' },
+            { id: 'stakes', label: 'STAKES' },
+            { id: 'side', label: 'SHOW' },
             { id: 'ranks', label: 'RANKS' }
           ].map(tab => {
             const isTabActive = activeTab === tab.id;
@@ -364,9 +341,9 @@ export default function App() {
               <button 
                 key={tab.id} 
                 onClick={() => setActiveTab(tab.id as any)} 
-                className={`flex-1 py-3 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all transform active:scale-95 ${
+                className={`flex-1 min-w-[70px] py-2.5 rounded-xl text-[8px] font-black uppercase tracking-widest transition-all transform active:scale-95 ${
                   isTabActive 
-                    ? `${tabTheme.main} text-white shadow-xl scale-105 z-10 border border-white/20` 
+                    ? `${tabTheme.main} text-white shadow-xl z-10 border border-white/20` 
                     : 'bg-white/5 text-slate-500 hover:text-white hover:bg-white/10'
                 }`}
               >
@@ -396,6 +373,105 @@ export default function App() {
               </div>
             ))}
             <div ref={messagesEndRef} />
+          </div>
+        )}
+
+        {activeTab === 'stats' && (
+          <div className="space-y-6 pb-24">
+             {!gameScore.detailedStats ? (
+               <div className="p-10 text-center glass rounded-[2.5rem] border-dashed border-white/10">
+                  <i className="fas fa-sync-alt fa-spin text-4xl text-emerald-500 mb-4"></i>
+                  <p className="font-orbitron font-black text-sm uppercase tracking-widest text-slate-500">Retrieving Live Intel...</p>
+               </div>
+             ) : (
+               <>
+                 <div className="p-6 glass rounded-[2.5rem] border border-white/10 space-y-6">
+                    <h2 className="font-orbitron font-black text-lg uppercase italic text-white mb-4 border-b border-white/10 pb-2">COMMAND HUD</h2>
+                    
+                    {/* TOTAL YARDS BATTLE */}
+                    <div className="space-y-3">
+                       <div className="flex justify-between text-[10px] font-black uppercase tracking-widest">
+                          <span className="text-red-500">NE {gameScore.detailedStats.pYds} YDS</span>
+                          <span className="text-emerald-500">SEA {gameScore.detailedStats.sYds} YDS</span>
+                       </div>
+                       <div className="w-full h-4 bg-slate-900 rounded-full overflow-hidden flex border border-white/5">
+                          <div style={{ width: `${(parseInt(gameScore.detailedStats.pYds) / (parseInt(gameScore.detailedStats.pYds) + parseInt(gameScore.detailedStats.sYds))) * 100}%` }} className="bg-red-600 transition-all duration-1000"></div>
+                          <div style={{ width: `${(parseInt(gameScore.detailedStats.sYds) / (parseInt(gameScore.detailedStats.pYds) + parseInt(gameScore.detailedStats.sYds))) * 100}%` }} className="bg-emerald-600 transition-all duration-1000"></div>
+                       </div>
+                       <p className="text-center text-[8px] font-black text-slate-500 uppercase tracking-[0.4em]">TOTAL OFFENSIVE PENETRATION</p>
+                    </div>
+
+                    {/* TOP HUD */}
+                    <div className="grid grid-cols-2 gap-4 pt-4 border-t border-white/5">
+                       <div className="text-center">
+                          <p className="text-[7px] font-black text-slate-500 uppercase tracking-widest">PATRIOTS TOP</p>
+                          <p className="text-xl font-orbitron font-black text-white">{gameScore.detailedStats.pTop}</p>
+                       </div>
+                       <div className="text-center border-l border-white/10">
+                          <p className="text-[7px] font-black text-slate-500 uppercase tracking-widest">SEAHAWKS TOP</p>
+                          <p className="text-xl font-orbitron font-black text-white">{gameScore.detailedStats.sTop}</p>
+                       </div>
+                    </div>
+                 </div>
+
+                 {/* LEADER CARDS */}
+                 <div className="grid grid-cols-2 gap-4">
+                    <div className="p-4 glass rounded-3xl border border-red-900/30 bg-red-900/5 space-y-3">
+                       <p className="text-[8px] font-black text-red-500 uppercase">NE LEADERS</p>
+                       <div className="space-y-2">
+                          <div>
+                             <p className="text-[7px] font-bold text-slate-600">PASS</p>
+                             <p className="text-[10px] font-black truncate">{gameScore.detailedStats.pPassLead}</p>
+                          </div>
+                          <div>
+                             <p className="text-[7px] font-bold text-slate-600">RUSH</p>
+                             <p className="text-[10px] font-black truncate">{gameScore.detailedStats.pRushLead}</p>
+                          </div>
+                          <div>
+                             <p className="text-[7px] font-bold text-slate-600">3RD CONV</p>
+                             <p className="text-[10px] font-black">{gameScore.detailedStats.p3rd}</p>
+                          </div>
+                       </div>
+                    </div>
+                    <div className="p-4 glass rounded-3xl border border-emerald-900/30 bg-emerald-900/5 space-y-3">
+                       <p className="text-[8px] font-black text-emerald-500 uppercase">SEA LEADERS</p>
+                       <div className="space-y-2">
+                          <div>
+                             <p className="text-[7px] font-bold text-slate-600">PASS</p>
+                             <p className="text-[10px] font-black truncate">{gameScore.detailedStats.sPassLead}</p>
+                          </div>
+                          <div>
+                             <p className="text-[7px] font-bold text-slate-600">RUSH</p>
+                             <p className="text-[10px] font-black truncate">{gameScore.detailedStats.sRushLead}</p>
+                          </div>
+                          <div>
+                             <p className="text-[7px] font-bold text-slate-600">3RD CONV</p>
+                             <p className="text-[10px] font-black">{gameScore.detailedStats.s3rd}</p>
+                          </div>
+                       </div>
+                    </div>
+                 </div>
+
+                 <div className="p-5 glass rounded-[2rem] border border-amber-500/20 flex justify-between items-center">
+                    <div className="text-center">
+                       <p className="text-[7px] font-black text-slate-500 uppercase">SACKS</p>
+                       <p className="text-2xl font-orbitron font-black text-amber-500">{gameScore.detailedStats.sacks}</p>
+                    </div>
+                    <div className="h-10 w-px bg-white/10"></div>
+                    <div className="text-center">
+                       <p className="text-[7px] font-black text-slate-500 uppercase">TURNOVERS</p>
+                       <p className="text-2xl font-orbitron font-black text-red-500">{gameScore.detailedStats.turnovers}</p>
+                    </div>
+                    <div className="h-10 w-px bg-white/10"></div>
+                    <div className="text-center">
+                       <p className="text-[7px] font-black text-slate-500 uppercase">BIG PLAYS</p>
+                       <p className="text-2xl font-orbitron font-black text-emerald-500">{gameScore.bigPlayTrigger > 0 ? 'ACTIVE' : '0'}</p>
+                    </div>
+                 </div>
+
+                 <p className="text-center text-[7px] font-black text-slate-600 uppercase tracking-[0.5em] mt-4">SEARCH GROUNDED INTEL • UPDATED REAL-TIME</p>
+               </>
+             )}
           </div>
         )}
 

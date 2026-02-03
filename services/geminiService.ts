@@ -55,23 +55,33 @@ export async function getDetailedStats() {
   try {
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: `Get real-time detailed box score stats for Super Bowl LX (New England vs Seattle). 
-      Format exactly: 
-      PATRIOTS_YDS: [num], SEAHAWKS_YDS: [num], 
-      PATRIOTS_PASS: [name num YDS], SEAHAWKS_PASS: [name num YDS],
-      PATRIOTS_RUSH: [name num YDS], SEAHAWKS_RUSH: [name num YDS],
-      TURNOVERS: [num]`,
+      contents: `Perform deep search for LIVE BOX SCORE of Super Bowl LX (NE vs SEA). 
+      Return JSON-style values for:
+      PAT_YDS: [num], SEA_YDS: [num],
+      PAT_TOP: [MM:SS], SEA_TOP: [MM:SS],
+      PAT_PASS_LEAD: [Name Yds], SEA_PASS_LEAD: [Name Yds],
+      PAT_RUSH_LEAD: [Name Yds], SEA_RUSH_LEAD: [Name Yds],
+      PAT_3RD: [X/Y], SEA_3RD: [X/Y],
+      TURNOVERS: [num], SACKS: [num]`,
       config: { tools: [{ googleSearch: {} }] },
     });
     const text = response.text || "";
+    
+    const extract = (key: string) => text.match(new RegExp(`${key}:?\\s*([^,\\n]+)`, 'i'))?.[1]?.trim() || "0";
+
     return {
-      pYds: text.match(/PATRIOTS_YDS:?\s*(\d+)/i)?.[1] || "0",
-      sYds: text.match(/SEAHAWKS_YDS:?\s*(\d+)/i)?.[1] || "0",
-      pPass: text.match(/PATRIOTS_PASS:?\s*(.+?)(?=,|$)/i)?.[1] || "N/A",
-      sPass: text.match(/SEAHAWKS_PASS:?\s*(.+?)(?=,|$)/i)?.[1] || "N/A",
-      pRush: text.match(/PATRIOTS_RUSH:?\s*(.+?)(?=,|$)/i)?.[1] || "N/A",
-      sRush: text.match(/SEAHAWKS_RUSH:?\s*(.+?)(?=,|$)/i)?.[1] || "N/A",
-      turnovers: text.match(/TURNOVERS:?\s*(\d+)/i)?.[1] || "0",
+      pYds: extract('PAT_YDS'),
+      sYds: extract('SEA_YDS'),
+      pTop: extract('PAT_TOP'),
+      sTop: extract('SEA_TOP'),
+      pPassLead: extract('PAT_PASS_LEAD'),
+      sPassLead: extract('SEA_PASS_LEAD'),
+      pRushLead: extract('PAT_RUSH_LEAD'),
+      sRushLead: extract('SEA_RUSH_LEAD'),
+      p3rd: extract('PAT_3RD'),
+      s3rd: extract('SEA_3RD'),
+      turnovers: extract('TURNOVERS'),
+      sacks: extract('SACKS'),
       raw: text
     };
   } catch (e) { return null; }
