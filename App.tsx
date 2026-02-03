@@ -14,7 +14,7 @@ import {
   getDoc,
   saveManualConfig
 } from './services/firebaseService';
-import { getCoachResponse, getSidelineFact, getLiveScoreFromSearch, analyzeMomentum } from './services/geminiService';
+import { getCoachResponse, getSidelineFact, getLiveScoreFromSearch, analyzeMomentum, getDetailedStats } from './services/geminiService';
 import { ChatMessage, User } from './types';
 
 const MSG_COLLECTION = 'hub_lx_messages';
@@ -90,7 +90,8 @@ export default function App() {
   const [gameScore, setGameScore] = useState({ 
     s1: 0, s2: 0, t1: "NEW ENGLAND", t2: "SEATTLE", status: "PRE-GAME", 
     momentum: 50, ticker: "PREPARING FOR SUPER BOWL LX KICKOFF...", 
-    bigPlayTrigger: 0, sources: [], redzoneTeam: null, redzoneId: null
+    bigPlayTrigger: 0, sources: [], redzoneTeam: null, redzoneId: null,
+    detailedStats: null as any
   });
   const [flashType, setFlashType] = useState<'red' | 'patriots' | 'seahawks' | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -117,6 +118,7 @@ export default function App() {
         if (now - (data.lastUpdate || 0) > 40000) {
           setIsSyncing(true);
           const score = await getLiveScoreFromSearch();
+          const stats = await getDetailedStats();
           if (score) {
             const intel = await analyzeMomentum({ t1: score.score1, t2: score.score2 });
             const tickerFact = await getSidelineFact();
@@ -132,14 +134,15 @@ export default function App() {
               lastUpdate: now,
               sources: [...(score.sources || []), ...(intel.sources || [])],
               redzoneTeam: intel.redzoneTeam || null,
-              redzoneId: newRedzoneId || (intel.redzoneTeam ? data.redzoneId : null)
+              redzoneId: newRedzoneId || (intel.redzoneTeam ? data.redzoneId : null),
+              detailedStats: stats || data.detailedStats || null
             }, { merge: true });
 
-            if (intel.isBigPlay) {
+            if (intel.isBigPlay || (stats && stats.turnovers !== data.detailedStats?.turnovers)) {
               await addDoc(collection(db, MSG_COLLECTION), {
                 senderId: 'controller_ai',
                 senderName: 'COMMAND CONTROLLER',
-                text: `CRITICAL PLAY: ${intel.intel}`,
+                text: intel.isBigPlay ? `CRITICAL PLAY: ${intel.intel}` : `STAT ALERT: TURNOVER DETECTED! NEW COUNT: ${stats?.turnovers}`,
                 timestamp: serverTimestamp()
               });
             }
@@ -323,6 +326,30 @@ export default function App() {
             </div>
           </div>
         </div>
+
+        {/* TACTICAL STAT HUD */}
+        {gameScore.detailedStats && (
+          <div className="mt-4 grid grid-cols-2 gap-2 bg-black/40 p-3 rounded-2xl border border-white/5 backdrop-blur-md animate-in fade-in slide-in-from-top-2 duration-500">
+            <div className="space-y-1">
+              <p className="text-[7px] font-black text-red-500/80 uppercase tracking-widest">PATRIOTS INTEL</p>
+              <div className="flex justify-between items-center text-[9px] font-bold">
+                 <span className="text-slate-500">YARDS:</span> <span>{gameScore.detailedStats.pYds}</span>
+              </div>
+              <p className="text-[8px] font-medium text-slate-300 truncate"><i className="fas fa-football text-[6px] mr-1 text-red-500"></i> {gameScore.detailedStats.pPass}</p>
+            </div>
+            <div className="space-y-1 border-l border-white/10 pl-3">
+              <p className="text-[7px] font-black text-[#69BE28]/80 uppercase tracking-widest">SEAHAWKS INTEL</p>
+              <div className="flex justify-between items-center text-[9px] font-bold">
+                 <span className="text-slate-500">YARDS:</span> <span>{gameScore.detailedStats.sYds}</span>
+              </div>
+              <p className="text-[8px] font-medium text-slate-300 truncate"><i className="fas fa-football text-[6px] mr-1 text-[#69BE28]"></i> {gameScore.detailedStats.sPass}</p>
+            </div>
+            <div className="col-span-2 mt-2 pt-2 border-t border-white/5 flex justify-between items-center">
+               <span className="text-[7px] font-black text-slate-500 uppercase tracking-tighter">AI_UNIT_SEARCH_GROUNDED</span>
+               <span className="text-[8px] font-black text-amber-500 uppercase tracking-widest">TURNOVERS: {gameScore.detailedStats.turnovers}</span>
+            </div>
+          </div>
+        )}
 
         <nav className="flex gap-2 mt-5">
           {[

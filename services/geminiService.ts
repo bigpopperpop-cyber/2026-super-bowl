@@ -48,6 +48,35 @@ export async function analyzeMomentum(scoreData: any) {
   }
 }
 
+export async function getDetailedStats() {
+  const ai = getAI();
+  if (!ai) return null;
+  const now = new Date().toLocaleString();
+  try {
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: `Get real-time detailed box score stats for Super Bowl LX (New England vs Seattle). 
+      Format exactly: 
+      PATRIOTS_YDS: [num], SEAHAWKS_YDS: [num], 
+      PATRIOTS_PASS: [name num YDS], SEAHAWKS_PASS: [name num YDS],
+      PATRIOTS_RUSH: [name num YDS], SEAHAWKS_RUSH: [name num YDS],
+      TURNOVERS: [num]`,
+      config: { tools: [{ googleSearch: {} }] },
+    });
+    const text = response.text || "";
+    return {
+      pYds: text.match(/PATRIOTS_YDS:?\s*(\d+)/i)?.[1] || "0",
+      sYds: text.match(/SEAHAWKS_YDS:?\s*(\d+)/i)?.[1] || "0",
+      pPass: text.match(/PATRIOTS_PASS:?\s*(.+?)(?=,|$)/i)?.[1] || "N/A",
+      sPass: text.match(/SEAHAWKS_PASS:?\s*(.+?)(?=,|$)/i)?.[1] || "N/A",
+      pRush: text.match(/PATRIOTS_RUSH:?\s*(.+?)(?=,|$)/i)?.[1] || "N/A",
+      sRush: text.match(/SEAHAWKS_RUSH:?\s*(.+?)(?=,|$)/i)?.[1] || "N/A",
+      turnovers: text.match(/TURNOVERS:?\s*(\d+)/i)?.[1] || "0",
+      raw: text
+    };
+  } catch (e) { return null; }
+}
+
 export async function getLiveScoreFromSearch() {
   const ai = getAI();
   if (!ai) return null;
