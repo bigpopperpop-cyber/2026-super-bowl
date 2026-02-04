@@ -101,6 +101,7 @@ export default function App() {
   const [hasSavedSide, setHasSavedSide] = useState(false);
   const [hasVotedRedzone, setHasVotedRedzone] = useState(false);
   const [shareToast, setShareToast] = useState(false);
+  const [showBriefing, setShowBriefing] = useState(false);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const sideMessagesEndRef = useRef<HTMLDivElement>(null);
@@ -257,6 +258,47 @@ export default function App() {
         </div>
       )}
 
+      {/* MISSION BRIEFING MODAL */}
+      {showBriefing && (
+        <div className="absolute inset-0 z-[2000] bg-[#001122]/98 backdrop-blur-3xl p-8 flex flex-col items-center justify-center animate-in fade-in zoom-in duration-300">
+           <div className="max-w-xs w-full space-y-8">
+              <div className="text-center">
+                 <div className="w-20 h-20 bg-emerald-500/10 border border-emerald-500 rounded-full flex items-center justify-center mx-auto mb-6 shadow-[0_0_30px_rgba(16,185,129,0.2)]">
+                    <i className="fas fa-satellite-dish text-4xl text-emerald-500"></i>
+                 </div>
+                 <h1 className="font-orbitron text-3xl font-black italic tracking-tighter text-white mb-2">MISSION BRIEFING</h1>
+                 <p className="text-emerald-500 font-black text-[9px] uppercase tracking-[0.4em]">OPERATIVE GUIDELINES v1.0</p>
+              </div>
+
+              <div className="space-y-4 text-[11px] font-medium text-slate-400">
+                 <div className="flex gap-4 p-4 glass rounded-2xl border border-white/10">
+                    <div className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center text-emerald-400"><i className="fas fa-comments"></i></div>
+                    <p><span className="text-white font-black uppercase">COMMS:</span> Real-time chat with tactical AI analysis from the Command Controller.</p>
+                 </div>
+                 <div className="flex gap-4 p-4 glass rounded-2xl border border-white/10">
+                    <div className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center text-blue-400"><i className="fas fa-chart-line"></i></div>
+                    <p><span className="text-white font-black uppercase">STATS:</span> Search-grounded box scores, team leaders, and offensive momentum tracking.</p>
+                 </div>
+                 <div className="flex gap-4 p-4 glass rounded-2xl border border-white/10">
+                    <div className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center text-amber-400"><i className="fas fa-crosshairs"></i></div>
+                    <p><span className="text-white font-black uppercase">STAKES/SHOW:</span> Lock in predictions for the game and halftime show to earn XP.</p>
+                 </div>
+                 <div className="flex gap-4 p-4 glass rounded-2xl border border-white/10">
+                    <div className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center text-red-400"><i className="fas fa-trophy"></i></div>
+                    <p><span className="text-white font-black uppercase">RANKS:</span> Compete for the Titan Trophy and unique achievement badges.</p>
+                 </div>
+              </div>
+
+              <button 
+                onClick={() => setShowBriefing(false)}
+                className="w-full py-5 bg-emerald-600 rounded-2xl text-white font-black uppercase tracking-[0.3em] shadow-2xl active:scale-95 transition-all border-t-2 border-white/20"
+              >
+                DISMISS INTEL
+              </button>
+           </div>
+        </div>
+      )}
+
       {/* NUCLEAR REDZONE ALERT */}
       {gameScore.redzoneTeam && !hasVotedRedzone && (
         <div className="absolute inset-0 z-[1000] bg-black/95 flex flex-col items-center justify-center p-8 animate-in fade-in zoom-in duration-300">
@@ -292,9 +334,12 @@ export default function App() {
             <div className={`w-2 h-2 rounded-full ${activeTheme.main} animate-ping`}></div>
             <span className="text-[9px] font-black text-slate-400 uppercase tracking-[0.3em]">LX COMMAND ACTIVE</span>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
+             <button onClick={() => setShowBriefing(true)} className="h-8 w-8 rounded-full bg-blue-500/10 border border-blue-500/30 flex items-center justify-center text-blue-400 text-[12px] font-black">
+                <i className="fas fa-question"></i>
+             </button>
              <button onClick={handleShare} className="h-8 px-4 rounded-full bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 text-[9px] font-black uppercase tracking-widest gap-2">
-                <i className="fas fa-satellite"></i> INVITE SQUAD
+                <i className="fas fa-satellite"></i> INVITE
              </button>
              <button onClick={handleResetSession} className="w-8 h-8 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-slate-500 text-[12px]"><i className="fas fa-power-off"></i></button>
           </div>
@@ -483,7 +528,7 @@ export default function App() {
                   {PREDICTION_TASKS.map((task) => (
                     <div key={task.id} className="space-y-3">
                        <div className="flex justify-between items-center px-2">
-                          <label className="text-[9px] font-black text-slate-400 uppercase tracking-2em">{task.label}</label>
+                          <label className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">{task.label}</label>
                           <span className="text-[7px] font-black text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded-full border border-emerald-500/20">+{task.points} XP</span>
                        </div>
                        <div className="grid grid-cols-2 gap-3">
@@ -523,7 +568,7 @@ export default function App() {
                   {SIDE_TASKS.map((task) => (
                     <div key={task.id} className="space-y-3">
                        <div className="flex justify-between items-center px-2">
-                          <label className="text-[9px] font-black text-amber-500/70 uppercase tracking-2em">{task.label}</label>
+                          <label className="text-[9px] font-black text-amber-500/70 uppercase tracking-[0.2em]">{task.label}</label>
                           <span className="text-[7px] font-black text-amber-400 bg-amber-400/10 px-2 py-1 rounded-full border border-amber-500/20">+{task.points} XP</span>
                        </div>
                        <div className="grid grid-cols-2 gap-3">
@@ -628,7 +673,7 @@ export default function App() {
               ))}
             </div>
 
-            <p className="text-center text-[8px] font-black text-slate-600 uppercase tracking-0.5em mt-8">MISSION PERSISTENCE ACTIVE • BADGES SYNCED TO HUB</p>
+            <p className="text-center text-[8px] font-black text-slate-600 uppercase tracking-[0.5em] mt-8">MISSION PERSISTENCE ACTIVE • BADGES SYNCED TO HUB</p>
           </div>
         )}
       </main>
@@ -664,7 +709,7 @@ export default function App() {
       {/* TACTICAL TICKER */}
       <div className="h-8 bg-black border-t border-white/10 flex items-center overflow-hidden z-[100] relative">
          <div className="ticker-wrap w-full flex items-center">
-            <div className="ticker font-orbitron font-black text-[9px] text-[#69BE28] uppercase tracking-0.4em space-x-24">
+            <div className="ticker font-orbitron font-black text-[9px] text-[#69BE28] uppercase tracking-[0.4em] space-x-24">
                <span>{gameScore.ticker}</span>
             </div>
          </div>
@@ -686,14 +731,14 @@ function JoinScreen({ onJoin, onInvite }: { onJoin: (n: string, t: 'T1' | 'T2') 
             <i className="fas fa-football-ball text-4xl text-white"></i>
           </div>
           <h1 className="font-orbitron text-5xl font-black italic text-white mb-3 tracking-tighter drop-shadow-2xl">SUPER BOWL LX</h1>
-          <button onClick={onInvite} className="mt-4 text-[9px] font-black text-[#69BE28] uppercase tracking-0.4em bg-[#69BE28]/10 border border-[#69BE28]/30 px-6 py-2.5 rounded-full hover:bg-[#69BE28]/20 active:scale-95 transition-all shadow-lg">
+          <button onClick={onInvite} className="mt-4 text-[9px] font-black text-[#69BE28] uppercase tracking-[0.4em] bg-[#69BE28]/10 border border-[#69BE28]/30 px-6 py-2.5 rounded-full hover:bg-[#69BE28]/20 active:scale-95 transition-all shadow-lg">
             <i className="fas fa-satellite-dish mr-2"></i> BROADCAST MISSION INVITE
           </button>
         </div>
         
         <div className="space-y-8">
           <div className="space-y-2">
-            <label className="text-[10px] font-black text-white/40 uppercase tracking-0.4em">ASSIGN OPERATIVE NAME</label>
+            <label className="text-[10px] font-black text-white/40 uppercase tracking-[0.4em]">ASSIGN OPERATIVE NAME</label>
             <input 
               value={name} 
               onChange={e => setName(e.target.value.toUpperCase())} 
@@ -703,7 +748,7 @@ function JoinScreen({ onJoin, onInvite }: { onJoin: (n: string, t: 'T1' | 'T2') 
           </div>
           
           <div className="space-y-4">
-            <label className="text-[10px] font-black text-white/40 uppercase tracking-0.4em">CHOOSE ALLEGIANCE</label>
+            <label className="text-[10px] font-black text-white/40 uppercase tracking-[0.4em]">CHOOSE ALLEGIANCE</label>
             <div className="grid grid-cols-2 gap-5">
                <button onClick={() => setTeam('T1')} className={`py-6 rounded-3xl border-2 transition-all transform ${team === 'T1' ? 'border-[#C60C30] bg-[#C60C30] text-white shadow-[0_0_30px_rgba(198,12,48,0.4)] scale-105' : 'border-white/5 bg-black/40 text-slate-600 opacity-50'}`}>
                  <span className="font-black text-lg tracking-tighter">PATRIOTS</span>
