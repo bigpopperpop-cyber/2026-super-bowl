@@ -483,7 +483,7 @@ export default function App() {
                   {PREDICTION_TASKS.map((task) => (
                     <div key={task.id} className="space-y-3">
                        <div className="flex justify-between items-center px-2">
-                          <label className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">{task.label}</label>
+                          <label className="text-[9px] font-black text-slate-400 uppercase tracking-2em">{task.label}</label>
                           <span className="text-[7px] font-black text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded-full border border-emerald-500/20">+{task.points} XP</span>
                        </div>
                        <div className="grid grid-cols-2 gap-3">
@@ -523,7 +523,7 @@ export default function App() {
                   {SIDE_TASKS.map((task) => (
                     <div key={task.id} className="space-y-3">
                        <div className="flex justify-between items-center px-2">
-                          <label className="text-[9px] font-black text-amber-500/70 uppercase tracking-[0.2em]">{task.label}</label>
+                          <label className="text-[9px] font-black text-amber-500/70 uppercase tracking-2em">{task.label}</label>
                           <span className="text-[7px] font-black text-amber-400 bg-amber-400/10 px-2 py-1 rounded-full border border-amber-500/20">+{task.points} XP</span>
                        </div>
                        <div className="grid grid-cols-2 gap-3">
@@ -582,7 +582,7 @@ export default function App() {
                 { n: 'VOX_UNIT', p: 1200, r: 'OPERATIVE', badges: ['ghost'] },
                 { n: 'NIGHT_OWL', p: 950, r: 'SCOUT', badges: ['hype'] }
               ].map((r, i) => (
-                <div key={i} className={`flex flex-col gap-3 p-5 glass rounded-[2.5rem] border border-white/10 shadow-2xl relative overflow-hidden transition-all hover:scale-[1.02] ${i === 0 ? 'border-amber-500/30' : ''}`}>
+                <div key={i} className={`flex flex-col gap-3 p-5 glass rounded-[2.5rem] border border-white/10 shadow-2xl relative overflow-hidden transition-all hover:scale-[1.02] ${i === 0 ? 'border-amber-500/30 bg-amber-500/5' : 'bg-white/5'}`}>
                    <div className="flex items-center gap-5">
                       <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-black text-sm border ${i === 0 ? 'bg-amber-500/20 border-amber-500 text-amber-400' : 'bg-black/60 border-white/10 text-slate-400'}`}>
                         {i + 1}
@@ -600,42 +600,35 @@ export default function App() {
                       </div>
                    </div>
 
-                   {/* BADGE DISPLAY */}
-                   <div className="flex flex-wrap gap-2 pt-3 border-t border-white/5">
-                      {r.badges.map(badge => (
-                        <div key={badge} className={`px-2.5 py-1 rounded-lg border flex items-center gap-2 transition-all cursor-help ${
-                          badge === 'titan' ? 'bg-amber-500/10 border-amber-500/40 text-amber-400' :
-                          badge === 'fastest' ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-400' :
-                          badge === 'chaos' ? 'bg-red-500/10 border-red-500/40 text-red-400 animate-pulse' :
-                          badge === 'hype' ? 'bg-blue-500/10 border-blue-500/40 text-blue-400' :
-                          'bg-purple-500/10 border-purple-500/40 text-purple-400'
-                        }`}>
-                           <i className={`fas text-[9px] ${
-                             badge === 'titan' ? 'fa-trophy' :
-                             badge === 'fastest' ? 'fa-bolt' :
-                             badge === 'chaos' ? 'fa-biohazard' :
-                             badge === 'hype' ? 'fa-fire' :
-                             'fa-ghost'
-                           }`}></i>
-                           <span className="text-[7px] font-black uppercase tracking-widest">
-                             {badge === 'titan' ? 'TITAN' :
-                              badge === 'fastest' ? 'FASTEST GUN' :
-                              badge === 'chaos' ? 'CHAOS THEORY' :
-                              badge === 'hype' ? 'SONIC BOOM' :
-                              'GHOST OPS'}
-                           </span>
-                        </div>
-                      ))}
-                      {/* TOOLTIP-STYLE DESC (CONCEPTUAL) */}
-                      {r.badges.includes('chaos') && (
-                        <p className="w-full text-[6px] font-black text-red-500/60 uppercase tracking-tighter mt-1 italic">ALERT: EXTREME RATE OF INCORRECT PREDICTIONS DETECTED</p>
-                      )}
+                   {/* BADGE DISPLAY WITH EXPLANATIONS */}
+                   <div className="flex flex-col gap-2 pt-3 border-t border-white/5">
+                      {r.badges.map(badgeId => {
+                        const badgeInfo: Record<string, {label: string, desc: string, icon: string, color: string}> = {
+                          titan: { label: 'LIX TITAN', desc: 'GLOBAL RANK #1', icon: 'fa-trophy', color: 'text-amber-400 bg-amber-500/10 border-amber-500/40' },
+                          fastest: { label: 'FASTEST GUN', desc: 'FIRST CORRECT PICK', icon: 'fa-bolt', color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/40' },
+                          chaos: { label: 'CHAOS THEORY', desc: 'MOST WRONG QUESTIONS', icon: 'fa-biohazard', color: 'text-red-400 bg-red-500/10 border-red-500/40' },
+                          hype: { label: 'SONIC BOOM', desc: 'MAXIMUM HYPE ENERGY', icon: 'fa-fire', color: 'text-blue-400 bg-blue-500/10 border-blue-500/40' },
+                          ghost: { label: 'GHOST OPS', desc: 'SILENT SPECTATOR', icon: 'fa-ghost', color: 'text-purple-400 bg-purple-500/10 border-purple-500/40' }
+                        };
+                        const b = badgeInfo[badgeId];
+                        return (
+                          <div key={badgeId} className={`flex items-center gap-3 p-2 rounded-xl border ${b.color} animate-in fade-in slide-in-from-left-2`}>
+                             <div className="w-6 h-6 rounded-lg bg-black/40 flex items-center justify-center text-[10px]">
+                                <i className={`fas ${b.icon} ${badgeId === 'chaos' ? 'animate-pulse' : ''}`}></i>
+                             </div>
+                             <div className="flex flex-col">
+                                <span className="text-[8px] font-black uppercase tracking-widest leading-none mb-0.5">{b.label}</span>
+                                <span className="text-[6px] font-black opacity-60 uppercase tracking-tighter">{b.desc}</span>
+                             </div>
+                          </div>
+                        );
+                      })}
                    </div>
                 </div>
               ))}
             </div>
 
-            <p className="text-center text-[8px] font-black text-slate-600 uppercase tracking-[0.5em] mt-8">MISSION PERSISTENCE ACTIVE • BADGES SYNCED TO HUB</p>
+            <p className="text-center text-[8px] font-black text-slate-600 uppercase tracking-0.5em mt-8">MISSION PERSISTENCE ACTIVE • BADGES SYNCED TO HUB</p>
           </div>
         )}
       </main>
@@ -671,7 +664,7 @@ export default function App() {
       {/* TACTICAL TICKER */}
       <div className="h-8 bg-black border-t border-white/10 flex items-center overflow-hidden z-[100] relative">
          <div className="ticker-wrap w-full flex items-center">
-            <div className="ticker font-orbitron font-black text-[9px] text-[#69BE28] uppercase tracking-[0.4em] space-x-24">
+            <div className="ticker font-orbitron font-black text-[9px] text-[#69BE28] uppercase tracking-0.4em space-x-24">
                <span>{gameScore.ticker}</span>
             </div>
          </div>
@@ -693,14 +686,14 @@ function JoinScreen({ onJoin, onInvite }: { onJoin: (n: string, t: 'T1' | 'T2') 
             <i className="fas fa-football-ball text-4xl text-white"></i>
           </div>
           <h1 className="font-orbitron text-5xl font-black italic text-white mb-3 tracking-tighter drop-shadow-2xl">SUPER BOWL LX</h1>
-          <button onClick={onInvite} className="mt-4 text-[9px] font-black text-[#69BE28] uppercase tracking-[0.4em] bg-[#69BE28]/10 border border-[#69BE28]/30 px-6 py-2.5 rounded-full hover:bg-[#69BE28]/20 active:scale-95 transition-all shadow-lg">
+          <button onClick={onInvite} className="mt-4 text-[9px] font-black text-[#69BE28] uppercase tracking-0.4em bg-[#69BE28]/10 border border-[#69BE28]/30 px-6 py-2.5 rounded-full hover:bg-[#69BE28]/20 active:scale-95 transition-all shadow-lg">
             <i className="fas fa-satellite-dish mr-2"></i> BROADCAST MISSION INVITE
           </button>
         </div>
         
         <div className="space-y-8">
           <div className="space-y-2">
-            <label className="text-[10px] font-black text-white/40 uppercase tracking-[0.4em]">ASSIGN OPERATIVE NAME</label>
+            <label className="text-[10px] font-black text-white/40 uppercase tracking-0.4em">ASSIGN OPERATIVE NAME</label>
             <input 
               value={name} 
               onChange={e => setName(e.target.value.toUpperCase())} 
@@ -710,7 +703,7 @@ function JoinScreen({ onJoin, onInvite }: { onJoin: (n: string, t: 'T1' | 'T2') 
           </div>
           
           <div className="space-y-4">
-            <label className="text-[10px] font-black text-white/40 uppercase tracking-[0.4em]">CHOOSE ALLEGIANCE</label>
+            <label className="text-[10px] font-black text-white/40 uppercase tracking-0.4em">CHOOSE ALLEGIANCE</label>
             <div className="grid grid-cols-2 gap-5">
                <button onClick={() => setTeam('T1')} className={`py-6 rounded-3xl border-2 transition-all transform ${team === 'T1' ? 'border-[#C60C30] bg-[#C60C30] text-white shadow-[0_0_30px_rgba(198,12,48,0.4)] scale-105' : 'border-white/5 bg-black/40 text-slate-600 opacity-50'}`}>
                  <span className="font-black text-lg tracking-tighter">PATRIOTS</span>
