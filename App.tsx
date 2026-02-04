@@ -388,7 +388,6 @@ export default function App() {
                  <div className="p-6 glass rounded-[2.5rem] border border-white/10 space-y-6">
                     <h2 className="font-orbitron font-black text-lg uppercase italic text-white mb-4 border-b border-white/10 pb-2">COMMAND HUD</h2>
                     
-                    {/* TOTAL YARDS BATTLE */}
                     <div className="space-y-3">
                        <div className="flex justify-between text-[10px] font-black uppercase tracking-widest">
                           <span className="text-red-500">NE {gameScore.detailedStats.pYds} YDS</span>
@@ -401,7 +400,6 @@ export default function App() {
                        <p className="text-center text-[8px] font-black text-slate-500 uppercase tracking-[0.4em]">TOTAL OFFENSIVE PENETRATION</p>
                     </div>
 
-                    {/* TOP HUD */}
                     <div className="grid grid-cols-2 gap-4 pt-4 border-t border-white/5">
                        <div className="text-center">
                           <p className="text-[7px] font-black text-slate-500 uppercase tracking-widest">PATRIOTS TOP</p>
@@ -414,7 +412,6 @@ export default function App() {
                     </div>
                  </div>
 
-                 {/* LEADER CARDS */}
                  <div className="grid grid-cols-2 gap-4">
                     <div className="p-4 glass rounded-3xl border border-red-900/30 bg-red-900/5 space-y-3">
                        <p className="text-[8px] font-black text-red-500 uppercase">NE LEADERS</p>
@@ -556,28 +553,89 @@ export default function App() {
         )}
 
         {activeTab === 'ranks' && (
-          <div className="space-y-4 pb-24">
-            <div className="text-center mb-8 py-6 border-y border-white/10">
-               <h3 className="font-orbitron text-[12px] font-black text-slate-500 uppercase tracking-[0.5em]">LX MISSION STATUS</h3>
-               <p className="text-[9px] font-black text-[#69BE28] uppercase mt-2 animate-pulse">2026 OPERATIVES RETURNING TO ZERO BASELINE</p>
+          <div className="space-y-6 pb-24">
+            {/* CHAMPIONSHIP PODIUM */}
+            <div className="relative p-10 glass rounded-[3rem] border border-amber-500/20 bg-amber-500/5 text-center overflow-hidden">
+               <div className="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-transparent via-amber-500 to-transparent"></div>
+               <div className="relative z-10">
+                  <div className="w-24 h-24 mx-auto mb-6 bg-gradient-to-b from-amber-300 to-amber-600 rounded-full flex items-center justify-center shadow-[0_0_50px_rgba(245,158,11,0.3)] animate-bounce border-4 border-amber-200">
+                    <i className="fas fa-trophy text-5xl text-amber-900"></i>
+                  </div>
+                  <h2 className="font-orbitron font-black text-2xl uppercase italic text-amber-500 tracking-tighter">LIX TITAN</h2>
+                  <p className="text-[9px] font-black text-amber-500/60 uppercase tracking-[0.5em] mb-4">CURRENT OPERATIVE #1</p>
+                  <div className="px-6 py-2 bg-black/40 rounded-full inline-block border border-amber-500/20">
+                     <span className="text-white font-black uppercase text-xs">{user.name}</span>
+                  </div>
+               </div>
             </div>
-            {[{n: user.name, p: 0, r: 'RECRUIT'}].map((r, i) => (
-              <div key={i} className={`flex items-center gap-5 p-5 glass rounded-[2rem] border-l-4 border-l-[#69BE28] border border-white/10 shadow-2xl relative overflow-hidden bg-white/5`}>
-                 <div className="w-10 h-10 rounded-xl bg-black/60 flex items-center justify-center font-black text-[#69BE28] text-sm border border-white/10">{i+1}</div>
-                 <div className="flex-1">
-                    <div className="font-black text-sm uppercase text-white tracking-wide">{r.n}</div>
-                    <div className="text-[8px] font-black text-slate-500 uppercase tracking-widest mt-1">RANK: {r.r}</div>
-                 </div>
-                 <div className="text-right">
-                    <div className="font-orbitron font-black text-[#69BE28] text-lg">{r.p}</div>
-                    <div className="text-[7px] font-black text-[#69BE28]/40 uppercase tracking-tighter">XP INTEL</div>
-                 </div>
+
+            {/* LEADERBOARD LIST */}
+            <div className="space-y-4">
+              <div className="flex justify-between items-center px-4">
+                 <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">ACTIVE OPERATIVES</h3>
+                 <span className="text-[8px] font-black text-emerald-500 bg-emerald-500/10 px-2 py-1 rounded-full border border-emerald-500/20">LIVE_UPDATE</span>
               </div>
-            ))}
-            <div className="mt-10 p-10 bg-white/2 rounded-[2rem] border border-dashed border-white/10 text-center">
-               <i className="fas fa-trophy text-4xl text-slate-700 mb-4 opacity-30"></i>
-               <p className="text-[10px] font-black text-slate-600 uppercase tracking-[0.4em]">WAITING FOR LX KICKOFF</p>
+              
+              {[
+                { n: user.name, p: 2450, r: 'COMMANDER', badges: ['titan', 'fastest', 'hype'] },
+                { n: 'STRIKER_42', p: 1800, r: 'SQUAD LEAD', badges: ['chaos'] },
+                { n: 'VOX_UNIT', p: 1200, r: 'OPERATIVE', badges: ['ghost'] },
+                { n: 'NIGHT_OWL', p: 950, r: 'SCOUT', badges: ['hype'] }
+              ].map((r, i) => (
+                <div key={i} className={`flex flex-col gap-3 p-5 glass rounded-[2.5rem] border border-white/10 shadow-2xl relative overflow-hidden transition-all hover:scale-[1.02] ${i === 0 ? 'border-amber-500/30' : ''}`}>
+                   <div className="flex items-center gap-5">
+                      <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-black text-sm border ${i === 0 ? 'bg-amber-500/20 border-amber-500 text-amber-400' : 'bg-black/60 border-white/10 text-slate-400'}`}>
+                        {i + 1}
+                      </div>
+                      <div className="flex-1">
+                         <div className="flex items-center gap-2">
+                            <div className="font-black text-sm uppercase text-white tracking-wide">{r.n}</div>
+                            {i === 0 && <i className="fas fa-crown text-[10px] text-amber-500 animate-pulse"></i>}
+                         </div>
+                         <div className="text-[8px] font-black text-slate-500 uppercase tracking-widest mt-1">CLASS: {r.r}</div>
+                      </div>
+                      <div className="text-right">
+                         <div className="font-orbitron font-black text-white text-lg">{r.p}</div>
+                         <div className="text-[7px] font-black text-slate-500 uppercase tracking-tighter">XP TOTAL</div>
+                      </div>
+                   </div>
+
+                   {/* BADGE DISPLAY */}
+                   <div className="flex flex-wrap gap-2 pt-3 border-t border-white/5">
+                      {r.badges.map(badge => (
+                        <div key={badge} className={`px-2.5 py-1 rounded-lg border flex items-center gap-2 transition-all cursor-help ${
+                          badge === 'titan' ? 'bg-amber-500/10 border-amber-500/40 text-amber-400' :
+                          badge === 'fastest' ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-400' :
+                          badge === 'chaos' ? 'bg-red-500/10 border-red-500/40 text-red-400 animate-pulse' :
+                          badge === 'hype' ? 'bg-blue-500/10 border-blue-500/40 text-blue-400' :
+                          'bg-purple-500/10 border-purple-500/40 text-purple-400'
+                        }`}>
+                           <i className={`fas text-[9px] ${
+                             badge === 'titan' ? 'fa-trophy' :
+                             badge === 'fastest' ? 'fa-bolt' :
+                             badge === 'chaos' ? 'fa-biohazard' :
+                             badge === 'hype' ? 'fa-fire' :
+                             'fa-ghost'
+                           }`}></i>
+                           <span className="text-[7px] font-black uppercase tracking-widest">
+                             {badge === 'titan' ? 'TITAN' :
+                              badge === 'fastest' ? 'FASTEST GUN' :
+                              badge === 'chaos' ? 'CHAOS THEORY' :
+                              badge === 'hype' ? 'SONIC BOOM' :
+                              'GHOST OPS'}
+                           </span>
+                        </div>
+                      ))}
+                      {/* TOOLTIP-STYLE DESC (CONCEPTUAL) */}
+                      {r.badges.includes('chaos') && (
+                        <p className="w-full text-[6px] font-black text-red-500/60 uppercase tracking-tighter mt-1 italic">ALERT: EXTREME RATE OF INCORRECT PREDICTIONS DETECTED</p>
+                      )}
+                   </div>
+                </div>
+              ))}
             </div>
+
+            <p className="text-center text-[8px] font-black text-slate-600 uppercase tracking-[0.5em] mt-8">MISSION PERSISTENCE ACTIVE • BADGES SYNCED TO HUB</p>
           </div>
         )}
       </main>
@@ -588,7 +646,7 @@ export default function App() {
            <div className="flex gap-3 mb-4">
               <button onClick={() => { if(db) addDoc(collection(db, HYPE_COLLECTION), { team: user.team, userId: user.id, timestamp: serverTimestamp() }); }} className={`flex-1 py-4 ${activeTheme.bgLight} border border-white/10 rounded-2xl text-[10px] font-black uppercase hover:${activeTheme.main}/30 active:scale-95 transition-all flex items-center justify-center gap-3`}>
                 <i className="fas fa-fire-alt text-amber-500"></i>
-                HYPE {user.team === 'T1' ? 'NEW ENGLAND' : 'SEATTLE'}
+                HYPE {user.team === 'T1' ? 'PATRIOTS' : 'SEAHAWKS'}
               </button>
               <button className="px-5 py-4 bg-white/5 border border-white/10 rounded-2xl text-[10px] font-black uppercase active:scale-95 transition-all hover:bg-white/10">
                 <i className="fas fa-bullhorn text-emerald-400"></i>
