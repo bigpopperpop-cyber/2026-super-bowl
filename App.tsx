@@ -400,9 +400,9 @@ export default function App() {
       </header>
 
       {/* MAIN THEATER */}
-      <main className="flex-1 overflow-y-auto custom-scrollbar p-5">
+      <main className="flex-1 overflow-y-auto custom-scrollbar p-5 pb-48">
         {activeTab === 'chat' && (
-          <div className="space-y-5 pb-36">
+          <div className="space-y-5">
             {messages.map((msg, i) => (
               <div key={msg.id || i} className={`flex flex-col ${msg.senderId === user.id ? 'items-end' : 'items-start'} animate-in slide-in-from-bottom-2`}>
                 <span className={`text-[8px] font-black uppercase mb-1 px-3 text-slate-500 tracking-widest`}>
@@ -422,7 +422,7 @@ export default function App() {
         )}
 
         {activeTab === 'stats' && (
-          <div className="space-y-6 pb-24">
+          <div className="space-y-6">
              {!gameScore.detailedStats ? (
                <div className="p-10 text-center glass rounded-[2.5rem] border-dashed border-white/10">
                   <i className="fas fa-sync-alt fa-spin text-4xl text-emerald-500 mb-4"></i>
@@ -518,7 +518,7 @@ export default function App() {
         )}
 
         {activeTab === 'stakes' && (
-          <div className="space-y-6 pb-24">
+          <div className="space-y-6">
              <div className="p-6 glass border border-white/10 rounded-[2.5rem] space-y-8">
                 <div className="text-center">
                    <h2 className="font-orbitron font-black text-xl uppercase italic mb-2 tracking-tight">SB LX STAKES</h2>
@@ -558,7 +558,7 @@ export default function App() {
         )}
 
         {activeTab === 'side' && (
-          <div className="space-y-6 pb-24">
+          <div className="space-y-6">
              <div className="p-6 glass border border-amber-500/20 rounded-[2.5rem] space-y-8 bg-amber-500/5">
                 <div className="text-center">
                    <h2 className="font-orbitron font-black text-xl uppercase italic text-amber-500 mb-2 tracking-tight">SUPER BOWL SHOW</h2>
@@ -598,7 +598,7 @@ export default function App() {
         )}
 
         {activeTab === 'ranks' && (
-          <div className="space-y-6 pb-24">
+          <div className="space-y-6">
             {/* CHAMPIONSHIP PODIUM */}
             <div className="relative p-10 glass rounded-[3rem] border border-amber-500/20 bg-amber-500/5 text-center overflow-hidden">
                <div className="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-transparent via-amber-500 to-transparent"></div>
@@ -678,15 +678,15 @@ export default function App() {
         )}
       </main>
 
-      {/* MISSION CONTROL INPUT */}
+      {/* MISSION CONTROL INPUT - OPTIMIZED FOR SMARTPHONES */}
       {(activeTab === 'chat' || activeTab === 'side') && (
-        <div className="absolute bottom-8 inset-x-6 p-5 glass rounded-[3rem] border border-white/15 shadow-[0_20px_50px_rgba(0,0,0,0.5)] z-[60] backdrop-blur-3xl">
-           <div className="flex gap-3 mb-4">
-              <button onClick={() => { if(db) addDoc(collection(db, HYPE_COLLECTION), { team: user.team, userId: user.id, timestamp: serverTimestamp() }); }} className={`flex-1 py-4 ${activeTheme.bgLight} border border-white/10 rounded-2xl text-[10px] font-black uppercase hover:${activeTheme.main}/30 active:scale-95 transition-all flex items-center justify-center gap-3`}>
-                <i className="fas fa-fire-alt text-amber-500"></i>
-                HYPE {user.team === 'T1' ? 'PATRIOTS' : 'SEAHAWKS'}
+        <div className="absolute bottom-0 inset-x-0 p-3 glass rounded-t-[2.5rem] border-t border-white/15 shadow-[0_-10px_40px_rgba(0,0,0,0.6)] z-[60] backdrop-blur-3xl pb-[calc(env(safe-area-inset-bottom)+1rem)]">
+           <div className="flex gap-2 mb-3 px-1">
+              <button onClick={() => { if(db) addDoc(collection(db, HYPE_COLLECTION), { team: user.team, userId: user.id, timestamp: serverTimestamp() }); }} className={`flex-1 py-3 ${activeTheme.bgLight} border border-white/10 rounded-xl text-[9px] font-black uppercase hover:${activeTheme.main}/30 active:scale-95 transition-all flex items-center justify-center gap-2`}>
+                <i className="fas fa-fire-alt text-amber-500 text-[11px]"></i>
+                HYPE {user.team === 'T1' ? 'PATS' : 'HAWKS'}
               </button>
-              <button className="px-5 py-4 bg-white/5 border border-white/10 rounded-2xl text-[10px] font-black uppercase active:scale-95 transition-all hover:bg-white/10">
+              <button className="px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-[10px] font-black uppercase active:scale-95 transition-all hover:bg-white/10">
                 <i className="fas fa-bullhorn text-emerald-400"></i>
               </button>
            </div>
@@ -699,15 +699,20 @@ export default function App() {
                senderId: user.id, senderName: user.name, text: input.value, timestamp: serverTimestamp()
              });
              input.value = '';
-           }} className="flex gap-3">
-             <input placeholder={`ENTER ${activeTab === 'side' ? 'SHOW' : 'COMMAND'} INTEL...`} className="flex-1 bg-black/50 border border-white/10 rounded-[1.5rem] px-6 py-4 outline-none text-white text-[13px] font-medium focus:border-emerald-500 placeholder:text-slate-600 transition-all" />
-             <button type="submit" className={`w-14 h-14 ${activeTheme.main} rounded-[1.5rem] flex items-center justify-center shadow-lg active:scale-90 transition-all border-t border-white/30`}><i className="fas fa-paper-plane"></i></button>
+           }} className="flex gap-2 px-1">
+             <input 
+               placeholder={`ENTER ${activeTab === 'side' ? 'SHOW' : 'COMMAND'} INTEL...`} 
+               className="flex-1 bg-black/60 border border-white/10 rounded-xl px-4 py-3 outline-none text-white text-[16px] font-medium focus:border-emerald-500 placeholder:text-slate-600 transition-all shadow-inner" 
+             />
+             <button type="submit" className={`w-12 h-12 ${activeTheme.main} rounded-xl flex items-center justify-center shadow-lg active:scale-90 transition-all border-t border-white/30`}>
+               <i className="fas fa-paper-plane text-sm"></i>
+             </button>
            </form>
         </div>
       )}
 
       {/* TACTICAL TICKER */}
-      <div className="h-8 bg-black border-t border-white/10 flex items-center overflow-hidden z-[100] relative">
+      <div className="h-8 bg-black border-t border-white/10 flex items-center overflow-hidden z-[100] relative shrink-0">
          <div className="ticker-wrap w-full flex items-center">
             <div className="ticker font-orbitron font-black text-[9px] text-[#69BE28] uppercase tracking-[0.4em] space-x-24">
                <span>{gameScore.ticker}</span>
